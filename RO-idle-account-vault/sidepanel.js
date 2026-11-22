@@ -274,7 +274,7 @@ const chromeApi = {
     const loginName = typeof snapshot.loginName === "string" ? snapshot.loginName.trim().slice(0, 64) : "";
     return {
       loggedIn,
-      account: AccountVault.pickAccount(snapshot.me) || loginName || (provider === "google" ? "Google 帳號" : null),
+      account: (AccountVault.isGoogleAccount({provider}) ? AccountVault.pickGoogleAccount(snapshot.me) : AccountVault.pickAccount(snapshot.me)) || loginName || (AccountVault.isGoogleAccount({provider}) ? "Google 帳號" : null),
       accountId,
       loginName,
       provider,
@@ -443,7 +443,7 @@ function characterCaption(character) {
 }
 
 function shownDetail(profile) {
-  if (AccountVault.isGoogleAccount(profile)) return "Google · 手動登入";
+  if (AccountVault.isGoogleAccount(profile)) return `Google · 手動登入 · ${profile.characters?.length ?? 0} 隻角色`;
   const list = Array.isArray(profile.characters) ? profile.characters : [];
   const running = list.filter((character) => character && character.running).length;
   return `${list.length} 隻角色 · ${running} 隻掛機中`;
@@ -929,6 +929,7 @@ async function rememberGoogleAccount(team, identifier, current = null) {
     ...existing, id: existing?.id ?? crypto.randomUUID(), name: account, account,
     provider: "google", accountId: current?.accountId ?? existing?.accountId,
     team: existing?.team ?? team, createdAt: existing?.createdAt ?? now, updatedAt: now,
+    characters: current?.charactersKnown ? current.characters : existing?.characters,
   });
   state.confirm = null;
   newAccountDraft.account = "";newAccountDraft.password = "";newAccountDraft.google = false;
@@ -1238,7 +1239,12 @@ async function rememberLiveCharacters() {
   const active = activeProfile();
   if (!active || !state.current || !state.current.loggedIn) return false;
   if (active.accountId != null && state.current.accountId != null && String(active.accountId) !== String(state.current.accountId)) return false;
-  if (AccountVault.isGoogleAccount(active)) return false;
+  if (AccountVault.isGoogleAccount(active)) {
+    const updated = AccountVault.updateGoogleCharacters(active, state.current);
+    if (updated === active) return false;
+    await persist({profiles: state.profiles.map(item => item.id === active.id ? updated : item)});
+    return true;
+  }
   const known = state.current.charactersKnown === true;
   const characters = known ? (state.current.characters || []) : (active.characters || []);
   const account = active.account || cleanLabel(state.current.account, 64) || "";

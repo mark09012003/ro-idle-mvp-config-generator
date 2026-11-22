@@ -114,7 +114,7 @@ async function refreshSavedLogin() {
   const accountId = AccountVault.pickAccountId(snapshot.me) ?? AccountVault.parseAccountId(snapshot.accountIdHint);
   const stored = await chrome.storage.local.get({ profiles: [] });
   const profiles = Array.isArray(stored.profiles) ? stored.profiles : [];
-  const account = AccountVault.pickAccount(snapshot.me) || loginName || (provider === "google" ? "Google 帳號" : "");
+  const account = (google ? AccountVault.pickGoogleAccount(snapshot.me) : AccountVault.pickAccount(snapshot.me)) || loginName || (google ? "Google 帳號" : "");
   const match = AccountVault.findLoginProfile(profiles, {
     fingerprint,
     accountId,
@@ -126,7 +126,13 @@ async function refreshSavedLogin() {
   const index = match ? profiles.indexOf(match) : -1;
   if (index < 0) return;
   const current = profiles[index];
-  if (AccountVault.isGoogleAccount(current)) return;
+  if (AccountVault.isGoogleAccount(current)) {
+    const updated = AccountVault.updateGoogleCharacters(current, {accountId, characters, charactersKnown});
+    if (updated === current || await AccountVault.switchLocked()) return;
+    profiles[index] = updated;
+    await chrome.storage.local.set({profiles});
+    return;
+  }
   if (current.accountId != null && accountId != null && String(current.accountId) !== String(accountId)) return;
   const nextCharacters = charactersKnown ? characters : (current.characters || []);
   const chosen = nextCharacters.find((character) => character && character.running) || nextCharacters[0];

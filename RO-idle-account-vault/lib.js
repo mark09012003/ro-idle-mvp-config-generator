@@ -114,6 +114,15 @@ function pickAccount(me) {
   return null;
 }
 
+function pickGoogleAccount(me) {
+  for (const bag of authBags(me)) {
+    for (const key of ["googleEmail", "email"]) {
+      if (typeof bag[key] === "string" && bag[key].trim()) return bag[key].trim().slice(0, 64);
+    }
+  }
+  return pickAccount(me);
+}
+
 function parseAccountId(value) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && /^[0-9]{1,24}$/.test(value.trim())) return value.trim();
@@ -260,7 +269,18 @@ function isGoogleAccount(profile) {
 function googleAccountOnly(profile) {
   if (!isGoogleAccount(profile)) return profile;
   const {id, name, account, accountId, label, team, pinned, createdAt, updatedAt} = profile;
-  return {id, name, account, accountId, label, team, pinned, createdAt, updatedAt, provider: "google"};
+  const characters = pickCharacters({characters: profile.characters});
+  return {id, name, account, accountId, label, team, pinned, createdAt, updatedAt, provider: "google", characters};
+}
+
+function updateGoogleCharacters(profile, {accountId, characters, charactersKnown}) {
+  if (!isGoogleAccount(profile) || !charactersKnown || idsDiffer(profile, {accountId})) return profile;
+  const next = googleAccountOnly({...profile, accountId: accountId ?? profile.accountId, characters});
+  if (sameAccountId(next.accountId, profile.accountId) === false && next.accountId != null ||
+      JSON.stringify(next.characters) !== JSON.stringify(profile.characters ?? [])) {
+    return {...next, updatedAt: Date.now()};
+  }
+  return profile;
 }
 
 function findLoginProfile(profiles, login) {
@@ -353,6 +373,8 @@ function describeCharacters(characters) {
     pickProvider,
     isGoogleAccount,
     googleAccountOnly,
+    updateGoogleCharacters,
+    pickGoogleAccount,
     jobName,
     combineCharacters,
     pickCharacters,
