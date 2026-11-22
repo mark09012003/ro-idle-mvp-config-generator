@@ -188,7 +188,7 @@
         : departure;
       const departureStep = {
         teleport: {do: "skill", skill: "AL_TELEPORT", lv: 2},
-        fly: {do: "fly"},
+        fly: {do: "item", itemId: 601},
         butterfly: {do: "butterfly"},
       }[departureAction];
       const moves = segment.flatMap((row, position) => {
@@ -212,7 +212,7 @@
       });
       const flies = extraFly ? [{
         name: `隊友少於${partyBelow}人_使用蒼蠅翅膀`, cooldownSec: cooldown,
-        cond: {maps: mapIds, partyBelow}, steps: [{do: "fly"}],
+        cond: {maps: mapIds, partyBelow}, steps: [{do: "item", itemId: 601}],
       }] : [];
       const waiting = wait ? [{
         name: `隊友少於${waitBelow}人_${buffBeforeMove ? "補 Buff 並等待" : "等待"}`,

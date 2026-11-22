@@ -364,8 +364,6 @@ function updateOptions() {
     byId(id).disabled = !casting;
   }
   const leader = value("mode") === "leader";
-  const flyOption = byId("departure").querySelector('option[value="fly"]');
-  flyOption.textContent = leader ? "蒼蠅翅膀（可能換圖失敗）" : "蒼蠅翅膀";
   byId("leader").hidden = !leader;
   byId("buff").required = leader && Boolean(value("buffJob"));
   const skill = buffJobs.find(job => job.id === value("buffJob"))?.buffs.find(([id]) => id === value("buff"));
@@ -427,7 +425,7 @@ function describeOperation(macro, mapNames, buffNames) {
   if (Object.keys(condition).some(key => !known.has(key))) clauses.push("另有自訂條件");
   const steps = macro.steps.map(step => {
     if (step.do === "wait") return `等待 ${step.sec} 秒`;
-    if (step.do === "fly") return "使用蒼蠅翅膀";
+    if (step.do === "fly" || (step.do === "item" && step.itemId === 601)) return "使用蒼蠅翅膀";
     if (step.do === "butterfly") return "使用蝴蝶翅膀";
     if (step.do === "profile") return `切換配置 ${step.name}`;
     if (step.do === "map") return `前往 ${mapNames.get(step.mapId) ?? step.mapId}`;
