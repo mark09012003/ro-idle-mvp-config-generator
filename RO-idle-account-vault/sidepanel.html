@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RO放置仙境帳號管理</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="caption">
+      <h1>RO放置仙境帳號管理</h1>
+      <span class="caption-site">ro-idle.app</span>
+    </header>
+
+    <main>
+      <section class="live-account" aria-label="目前遊戲狀態" aria-live="polite">
+        <div><span class="live-label">目前帳號</span><strong id="live-account-name">讀取中…</strong></div>
+        <div><span class="live-label">目前角色</span><strong id="live-character-name">讀取中…</strong></div>
+        <button class="btn tiny" id="remember-current-google" type="button" hidden>記住目前 Google 帳號</button>
+      </section>
+      <section class="list-wrap">
+        <div class="team-tabs" id="team-tabs" role="tablist"></div>
+        <div id="team-confirm" hidden></div>
+        <form class="team-add" id="team-rename" hidden>
+          <input id="team-rename-name" maxlength="16" autocomplete="off" placeholder="隊伍名稱" />
+          <button class="btn tiny" type="submit">改名</button>
+          <button class="btn tiny" id="cancel-rename" type="button">取消</button>
+        </form>
+        <form class="team-add" id="team-form" hidden>
+          <input id="team-name" maxlength="16" autocomplete="off" placeholder="新隊伍，例如：主隊" />
+          <button class="btn tiny" type="submit">建立</button>
+          <button class="btn tiny" id="cancel-team" type="button">取消</button>
+        </form>
+        <div class="list-head">
+          <h2>已保存的帳號</h2>
+          <span id="list-count" class="count"></span>
+        </div>
+        <div id="list"></div>
+        <div class="toolbar">
+          <button class="btn" id="open-game" type="button">打開遊戲</button>
+          <button class="btn" id="open-info" type="button">官方網站</button>
+          <button class="btn" id="open-config-generator" type="button">巡迴配置產生器</button>
+          <button class="btn" id="open-logs" type="button">戰鬥紀錄</button>
+          <label class="pointer-activity-toggle" hidden><input id="pointer-activity" type="checkbox" />背景持續接收</label>
+        </div>
+      </section>
+
+      <p class="toast" id="toast" role="status"></p>
+    </main>
+    <script src="lib.js"></script>
+    <script src="sidepanel.js"></script>
+  </body>
+</html>

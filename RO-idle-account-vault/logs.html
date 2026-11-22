@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>戰鬥紀錄</title><link rel="stylesheet" href="logs.css"></head>
+<body>
+<main class="battle-window">
+<header class="window-title"><h1><span aria-hidden="true">▣</span> 戰鬥訊息</h1><span class="version">紀錄庫 · 1.9.4</span></header>
+<div class="battle-toolbar">
+<div class="character-controls"><label>角色 <select id="log-character" aria-label="紀錄角色"></select></label><label><input id="record-character" type="checkbox">記錄此角色</label><button id="delete-character-logs" class="btn" type="button">刪除此角色紀錄</button><button class="btn" type="button" id="open-recording-manager">管理記錄角色</button></div>
+<div class="toolbar-actions">
+<label><input id="mvp-only" type="checkbox">只看 MVP</label>
+<label><input id="line-playback" type="checkbox" checked>逐筆播放</label>
+<label><input id="auto-scroll" type="checkbox" checked>自動捲動</label>
+<button id="reload-extension" class="btn" type="button" hidden>重新載入擴充</button>
+<button id="latest" class="btn" type="button">回到最新</button>
+<button id="refresh" class="btn" type="button">重新整理</button>
+<button id="settings-toggle" class="btn" type="button" aria-expanded="false" aria-controls="display-settings">顯示設定</button>
+</div>
+</div>
+<dialog id="recording-manager" aria-labelledby="recording-title">
+  <form method="dialog" class="recording-heading"><h2 id="recording-title">管理記錄角色</h2><button class="btn">關閉</button></form>
+  <p>開啟記錄後，收到第一筆戰鬥訊息時，角色才會出現在紀錄下拉選單。</p>
+  <div id="recording-role-list"></div>
+</dialog>
+<section id="display-settings" class="display-settings" hidden aria-label="顯示設定">
+<label>紀錄種類 <select id="kind"><option value="遊戲文字">戰鬥訊息</option><option value="事件 JSON">原始戰鬥事件 JSON</option><option value="">全部戰鬥紀錄</option></select></label>
+<label>字體 <select id="font-size"><option value="13">13px</option><option value="14" selected>14px</option><option value="16">16px</option><option value="18">18px</option></select></label>
+<label>播放速度 <select id="playback-speed"><option value="50" selected>快（預設）</option><option value="120">正常</option><option value="250">慢</option></select></label>
+<label>此角色的保存上限 <select id="record-limit" aria-label="此角色的保存上限"><option value="10000" selected>10,000 筆</option><option value="50000">50,000 筆</option><option value="100000">100,000 筆</option><option value="200000">200,000 筆</option></select></label>
+<label>此角色的王戰保存上限 <select id="mvp-record-limit" aria-label="此角色的王戰保存上限"><option value="10">10 場</option><option value="20" selected>20 場</option><option value="50">50 場</option><option value="100">100 場</option></select></label>
+<button id="export" class="btn" type="button">匯出全部 JSONL</button>
+</section>
+<div class="combat-log-panes">
+<aside class="combat-mvp-pane" aria-label="MVP 狀態與歷史戰鬥">
+<details class="mvp-archive" id="live-mvp" open>
+<summary>MVP 重生狀態</summary>
+<p id="live-mvp-map">開啟目前角色的遊戲分頁後，可查看地圖與重生狀態。</p>
+<p id="live-mvp-target" hidden></p>
+<ul id="live-mvp-list"></ul>
+</details>
+<details id="mvp-archive" class="mvp-archive" open><summary id="mvp-archive-summary">已保存 MVP 戰鬥</summary><div id="mvp-archive-list"></div></details>
+</aside>
+<section class="live-log-pane" aria-labelledby="live-log-heading">
+<h2 id="live-log-heading">最新戰鬥訊息</h2>
+<div id="categories" class="category-tabs" role="toolbar" aria-label="戰鬥紀錄分類"></div>
+<div id="log-scroll" class="log-scroll" role="region" aria-label="已保存戰鬥訊息" tabindex="0">
+<div class="history-action"><button id="more" class="btn" type="button">載入更早紀錄</button></div>
+<div id="rows"></div>
+</div>
+<form id="search-form" class="search-bar"><span aria-hidden="true">›</span><input id="search" type="search" placeholder="搜尋文字、帳號或角色…" aria-label="搜尋紀錄"><button class="btn" type="submit">搜尋</button></form>
+</section>
+</div>
+<footer class="archive-status"><span id="capture-status" role="status">正在確認保存狀態…</span><span id="storage-usage" title="瀏覽器估算，包含擴充元件的各角色紀錄、舊資料庫及其他本機資料。">本機占用容量查詢中…</span><span id="status" role="status">讀取中…</span></footer>
+</main>
+<script src="logs-model.js"></script><script src="logs-db.js"></script><script src="logs.js"></script>
+</body></html>
