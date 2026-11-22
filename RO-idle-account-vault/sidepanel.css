@@ -751,3 +751,5 @@ input[type="search"],
 
 .google-account-toggle { display:inline-flex; align-items:center; gap:5px; margin:3px 0; }
 #remember-current-google[hidden], .new-account-form .field[hidden] { display:none; }
+
+.row-actions .google-account-icon { grid-column: 4; justify-self: center; display: block; }

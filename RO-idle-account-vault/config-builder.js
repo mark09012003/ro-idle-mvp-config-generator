@@ -200,7 +200,8 @@
         if (departureStep) steps.push(departureStep);
         if (last && groups.length > 1) steps.push({do: "profile", name: label(next)});
         steps.push({do: "map", mapId: destination.map.id});
-        const cond = {maps: [row.map.id], engaged: false};
+        const cond = {maps: [row.map.id]};
+        if (options.mode === "leader") cond.engaged = false;
         if (buffBeforeMove) {
           cond.doing = ["searching", "idle"];
           cond.spAbove = 10;
@@ -211,7 +212,7 @@
       });
       const flies = extraFly ? [{
         name: `隊友少於${partyBelow}人_使用蒼蠅翅膀`, cooldownSec: cooldown,
-        cond: {maps: mapIds, engaged: false, partyBelow}, steps: [{do: "fly"}],
+        cond: {maps: mapIds, partyBelow}, steps: [{do: "fly"}],
       }] : [];
       const waiting = wait ? [{
         name: `隊友少於${waitBelow}人_${buffBeforeMove ? "補 Buff 並等待" : "等待"}`,

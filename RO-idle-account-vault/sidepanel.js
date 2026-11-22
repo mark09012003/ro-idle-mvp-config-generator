@@ -443,7 +443,6 @@ function characterCaption(character) {
 }
 
 function shownDetail(profile) {
-  if (AccountVault.isGoogleAccount(profile)) return `Google · 手動登入 · ${profile.characters?.length ?? 0} 隻角色`;
   const list = Array.isArray(profile.characters) ? profile.characters : [];
   const running = list.filter((character) => character && character.running).length;
   return `${list.length} 隻角色 · ${running} 隻掛機中`;
@@ -755,12 +754,23 @@ function renderProfileRow(profile) {
   head.append(el("div", { class: "row-main" }, [title]));
   head.append(el("span", { class: "row-count" }, [shownDetail(profile)]));
   const actions = el("div", { class: "row-actions" });
-  if (!AccountVault.isGoogleAccount(profile)) actions.append(el("button", {
-    class: "btn tiny switch",
-    type: "button",
-    title: "清除遊戲 Cookie，回到登入頁並填入已保存帳密",
-    onClick: () => requestSwitch(profile),
-  }, ["切換"]));
+  if (AccountVault.isGoogleAccount(profile)) {
+    actions.append(el("img", {
+      class: "google-account-icon",
+      src: "icons/google-account.png",
+      alt: "Google 帳號",
+      title: "Google 帳號（手動登入）",
+      width: "18",
+      height: "18",
+    }));
+  } else {
+    actions.append(el("button", {
+      class: "btn tiny switch",
+      type: "button",
+      title: "清除遊戲 Cookie，回到登入頁並填入已保存帳密",
+      onClick: () => requestSwitch(profile),
+    }, ["切換"]));
+  }
 actions.append(el("button", {
     class: "icon-btn",
     type: "button",
