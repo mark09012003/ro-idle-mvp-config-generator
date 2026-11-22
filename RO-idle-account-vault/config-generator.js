@@ -364,6 +364,8 @@ function updateOptions() {
     byId(id).disabled = !casting;
   }
   const leader = value("mode") === "leader";
+  const flyOption = byId("departure").querySelector('option[value="fly"]');
+  flyOption.textContent = leader ? "蒼蠅翅膀（可能換圖失敗）" : "蒼蠅翅膀";
   byId("leader").hidden = !leader;
   byId("buff").required = leader && Boolean(value("buffJob"));
   const skill = buffJobs.find(job => job.id === value("buffJob"))?.buffs.find(([id]) => id === value("buff"));
