@@ -1543,7 +1543,8 @@ function updateMapSelection() {
 }
 
 function matchesMonsterFilter(monster, filter) {
-  if (!filter || filter === "all-mvp") return monster.kind === "mvp";
+  if (!filter) return monster.kind === "mvp" || monster.kind === "boss";
+  if (filter === "all-mvp") return monster.kind === "mvp";
   if (filter === "all-boss") return monster.kind === "boss";
   return monster.kind !== "normal" && String(monster.id) === filter;
 }
@@ -1595,7 +1596,7 @@ function mapOption(map, inRoute, filter) {
     const kind = monster.kind === "boss" ? "（Boss）" : "";
     content.append(element("span", `${monster.name}${kind} · 重生 ${respawnLabel(monster)}`));
   }
-  if (!targets.length) content.append(element("small", "無 MVP"));
+  if (!targets.length) content.append(element("small", filter === "all-mvp" ? "無 MVP" : "無 MVP／Boss"));
   label.append(input, content);
   return label;
 }
