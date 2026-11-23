@@ -1157,7 +1157,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </div>
 <div id="follower" hidden>
 <label class="number-field">隊友少於幾人時換圖（選填）<input id="partyBelow" type="number" min="1" max="11" aria-describedby="partyBelow-help"><span id="partyBelow-help" class="count-help">隊友人數＝隊伍總人數 − 1（扣除自己）。6 人隊伍填 5。</span></label>
-<label class="check"><input id="fly" type="checkbox">隊友不足時使用蒼蠅翅膀（巡迴時須選「沿用角色設定」）</label>
+<label class="check"><input id="fly" type="checkbox">隊友不足時在原圖用蒼蠅翅膀（單圖用；巡迴僅在「沿用角色設定」時採用）</label>
 </div>
 <label class="check"><input id="waitForParty" type="checkbox">等待隊友</label>
 <div id="wait-options" hidden>
@@ -2456,6 +2456,8 @@ byId("route-preset").onchange = event => {
     byId("minLv").value = "2";
     byId("maxLv").value = support ? "2" : "0";
     byId("departure").value = "fly";
+    byId("partyBelow").value = leader ? "" : "11";
+    byId("fly").checked = false;
     byId("routeWait").value = "0";
     byId("waitForParty").checked = leader;
     byId("waitBelow").value = "11";
