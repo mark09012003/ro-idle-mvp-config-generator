@@ -1063,6 +1063,16 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </section>
 <section id="monster-section" class="section-monsters">
 <h2>怪物控制與選怪</h2>
+<fieldset class="targets">
+<legend>快速範本</legend>
+<div class="map-actions">
+<button type="button" data-route-preset="leader">標的</button>
+<button type="button" data-route-preset="support">非標的（輔助不找怪）</button>
+<button type="button" data-route-preset="hunter">非標的（找怪）</button>
+</div>
+<label class="check"><input id="supportOnly" type="checkbox">輔助模式：不主動找怪，保留自衛和隊友輔助</label>
+<p id="route-preset-status" class="section-help" role="status"></p>
+</fieldset>
 <p class="section-help">分別設定勾選的 MVP／Boss 和其他怪物的預設動作與逃生方式。</p>
 <fieldset class="targets">
 <legend>攻擊與逃生</legend>
@@ -1356,7 +1366,7 @@ SOFTWARE.
         const defaultAction = selected
           ? (options.targetAction || (options.mode === "leader" ? "priority" : "defend"))
           : (options.otherAction || "defend");
-        const action = override?.action ?? defaultAction;
+        const action = options.supportOnly ? "defend" : (override?.action ?? defaultAction);
         return [monster.id, {monsterId: monster.id, action, ...(escape ? {escape} : {})}, selected];
       });
       const conflicts = rowRules.some(([id, rule, selected]) => {
@@ -1387,9 +1397,13 @@ SOFTWARE.
       profile.name = label(index);
       profile.exportedAt = Date.now();
       if (Array.isArray(profile.sections)) {
-        profile.sections = [...new Set([...profile.sections, "map", "macros"])];
+        profile.sections = [...new Set([...profile.sections, "map", "macros", ...(options.supportOnly ? ["party"] : [])])];
       }
       const config = profile.config;
+      if (options.supportOnly) {
+        config.partyAssist = false;
+        config.partySupport = true;
+      }
       config.lockMap = segment[0].map.id;
       const mapIds = segment.map(row => row.map.id);
       const targets = new Set(segment.flatMap(row => row.targets));
@@ -2416,6 +2430,21 @@ byId("generator").addEventListener("input", event => {
   clearPreview();
 });
 
+for (const button of document.querySelectorAll("[data-route-preset]")) {
+  button.onclick = () => {
+    const preset = button.dataset.routePreset;
+    const support = preset === "support";
+    byId("mode").value = preset === "leader" ? "leader" : "follower";
+    byId("supportOnly").checked = support;
+    byId("targetAction").value = support ? "defend" : "priority";
+    byId("otherAction").value = "defend";
+    byId("onlyMvp").checked = !support;
+    byId("route-preset-status").textContent = `已套用「${button.textContent}」。`;
+    updateOptions();
+    clearPreview();
+  };
+}
+
 byId("generator").onsubmit = event => {
   event.preventDefault();
   clearPreview();
@@ -2437,6 +2466,7 @@ byId("generator").onsubmit = event => {
     }
     const options = {
       macros,
+      supportOnly: checked("supportOnly"),
       routeCondition: routeConditionEditor.cond,
       routeWait: value("routeWait"),
       buffBeforeMove: !byId("route-buff-options").hidden && checked("buffBeforeMove"),
@@ -2452,6 +2482,7 @@ byId("generator").onsubmit = event => {
       options[id] = value(id);
     }
     for (const id of ["fly", "onlyMvp", "avoidAggressive"]) options[id] = checked(id);
+    if (options.supportOnly) options.onlyMvp = false;
     results = RoConfigBuilder.generate(base, route, options);
     renderPreview();
     byId("download").disabled = false;
