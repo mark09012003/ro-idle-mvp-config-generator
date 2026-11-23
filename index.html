@@ -1071,16 +1071,6 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <p id="source-status" role="status">目前直接產生部分設定。</p>
 </details>
 </section>
-<section id="custom-macro-section">
-<h2>自訂巨集（選填）</h2>
-<p class="section-help">可加入製作聖水、製作箭矢或自動施放技能等遊戲支援的巨集。請貼上遊戲匯出的巨集陣列；這些巨集會加入每一份配置。</p>
-<label for="macros">巨集陣列（JSON）</label>
-<textarea id="macros" rows="8" spellcheck="false" placeholder='[{"name":"自訂巨集","cooldownSec":5,"cond":{},"steps":[{"do":"skill","skill":"技能 ID","lv":1}]}]'>[]</textarea>
-<p id="macro-count" class="section-help" role="status">自訂巨集 0 條；每份配置最多 10 條。</p>
-<details><summary>格式說明</summary>
-<p>每條巨集需包含名稱、觸發條件 <code>cond</code> 及 1～10 個 <code>steps</code>。建議先在遊戲內建立並匯出，再複製需要的巨集。含換圖 <code>map</code> 或切換配置 <code>profile</code> 步驟的巨集會由巡迴產生器重建，不會重複加入。</p>
-</details>
-</section>
 <section id="switch-section" class="section-switch">
 <h2>換圖與配置切換</h2>
 <p class="section-help">標的角色可用 Buff 決定何時換圖，非標的角色可用隊友人數判斷。路線跨多份配置時會自動接續。</p>
@@ -1145,6 +1135,16 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
     <label id="custom-job-field" hidden>職業 ID<input id="customJob" placeholder="例如 monk" spellcheck="false"></label>
   </div>
 </div>
+</section>
+<section id="custom-macro-section">
+<h2>自訂巨集（選填）</h2>
+<p class="section-help">可加入製作聖水、製作箭矢或自動施放技能等遊戲支援的巨集。請貼上遊戲匯出的巨集陣列；這些巨集會加入每一份配置。</p>
+<label for="macros">巨集陣列（JSON）</label>
+<textarea id="macros" rows="8" spellcheck="false" placeholder='[{"name":"自訂巨集","cooldownSec":5,"cond":{},"steps":[{"do":"skill","skill":"技能 ID","lv":1}]}]'>[]</textarea>
+<p id="macro-count" class="section-help" role="status">自訂巨集 0 條；每份配置最多 10 條。</p>
+<details><summary>格式說明</summary>
+<p>每條巨集需包含名稱、觸發條件 <code>cond</code> 及 1～10 個 <code>steps</code>。建議先在遊戲內建立並匯出，再複製需要的巨集。含換圖 <code>map</code> 或切換配置 <code>profile</code> 步驟的巨集會由巡迴產生器重建，不會重複加入。</p>
+</details>
 </section>
 <section id="preview-section">
 <h2>操作預覽與下載</h2>
