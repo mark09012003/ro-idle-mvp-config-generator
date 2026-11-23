@@ -1154,14 +1154,14 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
   <div class="fields">
     <label>隊友少於幾人時等待<input id="waitBelow" type="number" min="1" max="11" value="11" aria-describedby="waitBelow-help"><span id="waitBelow-help" class="count-help">隊友人數＝隊伍總人數 − 1（扣除自己）。6 人隊伍填 5。</span></label>
     <label>等待秒數<input id="waitSeconds" type="number" min="1" max="60" value="5"></label>
-    <label>死亡後的行為<select id="waitPosition">
+    <label id="wait-position-field">死亡後的行為<select id="waitPosition">
       <option value="top">死亡後回原圖繼續打</option>
       <option value="bottom" selected>死亡後換到下一張圖</option>
     </select></label>
     <label>等待巨集冷卻（秒）<input id="waitCooldown" type="number" min="5" max="86400" value="5"></label>
     <label id="target-job-field">標的角色職業
       <select id="targetJob">
-        <option value="">不限職業</option>
+        <option value="">請選擇標的角色職業</option>
         <option value="monk">武僧（含武術宗師）</option>
         <option value="priest">祭司（含神官）</option>
         <option value="knight">騎士（含騎士領主）</option>
@@ -1331,6 +1331,9 @@ SOFTWARE.
                  !Number.isInteger(waitCooldown) || waitCooldown < 5 || waitCooldown > 86400)) {
       throw new Error("等待條件請填隊友 1～11 人、等待 1～60 秒、冷卻 5～86400 秒。");
     }
+    if (wait && options.mode === "follower" && !targetJob) {
+      throw new Error("非標的角色開啟等待隊友時，請指定標的角色職業。");
+    }
     if (wait && targetJob && !/^[a-z_]{1,32}$/.test(targetJob)) {
       throw new Error("標的角色職業 ID 格式有誤。");
     }
@@ -1470,11 +1473,13 @@ SOFTWARE.
         steps: [...(buffBeforeMove ? [{do: "skill", skill: buff, lv: routeBuffLevel}] : []), {do: "wait", sec: waitSeconds}],
       }] : [];
       const waitLast = options.waitPosition === "bottom";
+      const followerWait = options.mode === "follower";
       config.macros = [
+        ...(followerWait ? waiting : []),
         ...structuredClone(firstMacros),
-        ...(!waitLast ? waiting : []),
+        ...(!followerWait && !waitLast ? waiting : []),
         ...moves,
-        ...(waitLast ? waiting : []),
+        ...(!followerWait && waitLast ? waiting : []),
         ...structuredClone(lastMacros),
       ].map(normalizeMacroActions);
       if (config.macros.length > 10) {
@@ -2278,6 +2283,10 @@ function updateOptions() {
   const wait = checked("waitForParty");
   byId("wait-options").hidden = !wait;
   byId("target-job-field").hidden = leader;
+  byId("wait-position-field").hidden = !leader;
+  byId("waitPosition").disabled = !wait || !leader;
+  byId("targetJob").required = wait && !leader;
+  byId("targetJob").disabled = !wait || leader;
   const customJob = wait && !leader && value("targetJob") === "custom";
   byId("custom-job-field").hidden = !customJob;
   byId("customJob").required = customJob;
