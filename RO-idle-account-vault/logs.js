@@ -18,6 +18,7 @@ let lastCatalogRefresh = 0;
 function characterOptionText(character) {
   return (character.character || "舊紀錄（角色無法辨識）") +
     (character.account ? " · " + character.account : "") +
+    (!character.hasLogs ? " · 尚無紀錄" : "") +
     (character.mvpArchive?.backfilled ? " · 補存 " + character.mvpArchive.backfilled + " 場" : "");
 }
 
@@ -31,7 +32,7 @@ async function refreshCharacterCatalog(register = true) {
     await VaultLogs.registerCharacters(characters);
   }
   characterCatalog = await VaultLogs.charactersWithLogStatus();
-  const available = characterCatalog.filter(character => character.hasLogs);
+  const available = characterCatalog.filter(character => character.key !== "unknown" || character.hasLogs);
   const revision = JSON.stringify(available.map(character => [character.key, characterOptionText(character)]));
   if (revision !== catalogRevision) {
     catalogRevision = revision;
@@ -57,7 +58,7 @@ async function selectCurrentLogCharacter(reloadView) {
     const current = response.character;
     if (!characterCatalog.some(character => character.key === current.key)) await refreshCharacterCatalog();
     const selected = characterCatalog.find(character => character.key === current.key);
-    if (!selected?.hasLogs || selectedCharacterKey === selected.key) return;
+    if (!selected || selectedCharacterKey === selected.key) return;
     selectedCharacterKey = selected.key;
     characterEl.value = selected.key;
     recordingEl.checked = selected.enabled;
