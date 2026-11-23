@@ -1797,7 +1797,7 @@ byId("buff").addEventListener("change", applyRouteBuffDefaults);
 byId("buffWhen").addEventListener("change", applyRouteBuffDefaults);
 
 let customMacros = [];
-const macroStepLabels = {skill: "放技能", item: "用道具", wait: "等待", fly: "用蒼蠅翅膀", butterfly: "用蝴蝶翅膀", town: "回城補給後回來", arrow: "製作箭矢", produce: "製作物品", quiver: "做成箭矢筒", log: "在紀錄顯示", stop: "停止掛機"};
+const macroStepLabels = {skill: "放技能", item: "用道具", equip: "換上裝備", unequip: "卸下裝備", wait: "等待", fly: "用蒼蠅翅膀", butterfly: "用蝴蝶翅膀", town: "回城補給後回來", macro: "接著執行巨集", homunFeed: "餵生命體", arrow: "製作箭矢", produce: "製作物品", quiver: "做成箭矢筒", log: "在紀錄顯示", stop: "停止掛機"};
 
 function macroInput(value, type = "text", min, max) {
   const input = document.createElement("input");
@@ -1817,7 +1817,10 @@ function macroSelect(options, value) {
 function defaultMacroStep(type) {
   return type === "skill" ? {do: "skill", skill: "", lv: 1} :
     type === "item" ? {do: "item", itemId: 501} :
+    type === "equip" ? {do: "equip", itemId: 1201} :
+    type === "unequip" ? {do: "unequip", slot: "ammo"} :
     type === "wait" ? {do: "wait", sec: 3} :
+    type === "macro" ? {do: "macro", name: ""} :
     type === "arrow" ? {do: "arrow", source: 0, times: 1} :
     type === "produce" ? {do: "produce", itemId: 0, qty: 1} :
     type === "quiver" ? {do: "quiver", arrowId: 1750, qty: 1} :
@@ -1846,11 +1849,15 @@ function renderMacroStep(step, macroIndex, stepIndex) {
     const target = macroSelect([["", "預設對象"], ["self", "自己"], ["ally", "隊友"]], step.target ?? "");
     target.onchange = () => { target.value ? step.target = target.value : delete step.target; saveCustomMacros(); }; field.append(target);
   } else if (step.do === "item") { field.append("道具 ID "); bind(macroInput(step.itemId, "number", 1), "itemId", true); }
+  else if (step.do === "equip") { field.append("裝備 ID "); bind(macroInput(step.itemId, "number", 1), "itemId", true); }
+  else if (step.do === "unequip") { const slot = macroSelect([["weapon", "武器"], ["offhand", "副手"], ["armor", "鎧甲"], ["garment", "披肩"], ["shoes", "鞋子"], ["head", "頭飾"], ["accessory", "飾品"], ["ammo", "箭矢"]], step.slot); slot.onchange = () => { step.slot = slot.value; saveCustomMacros(); }; field.append(slot); }
   else if (step.do === "wait") { bind(macroInput(step.sec, "number", 1, 60), "sec", true); field.append(" 秒"); }
+  else if (step.do === "macro") { field.append("巨集名稱 "); bind(macroInput(step.name), "name"); }
   else if (step.do === "arrow") { field.append("材料 ID "); bind(macroInput(step.source, "number", 1), "source", true); field.append(" 次數 "); bind(macroInput(step.times, "number", 1, 100), "times", true); }
   else if (step.do === "produce") { field.append("成品 ID "); bind(macroInput(step.itemId, "number", 1), "itemId", true); field.append(" 數量 "); bind(macroInput(step.qty, "number", 1, 100), "qty", true); }
   else if (step.do === "quiver") { field.append("箭矢 ID "); bind(macroInput(step.arrowId, "number", 1), "arrowId", true); field.append(" 筒數 "); bind(macroInput(step.qty, "number", 1, 100), "qty", true); }
   else if (step.do === "log") bind(macroInput(step.text), "text");
+  else if (step.do === "town") { const storage = macroInput("", "checkbox"); storage.checked = Boolean(step.storage); storage.onchange = () => { storage.checked ? step.storage = true : delete step.storage; saveCustomMacros(); }; field.append(storage, "順便開倉"); }
   else field.textContent = "不需額外設定";
   row.append(field);
   const up = element("button", "▲"); up.type = "button"; up.disabled = stepIndex === 0;
@@ -1860,49 +1867,53 @@ function renderMacroStep(step, macroIndex, stepIndex) {
   row.append(up, remove); return row;
 }
 
-const macroConditionLabels = {
-  none: "無條件（冷卻到就執行）", hpBelow: "HP 低於 %", spBelow: "SP 低於 %",
-  inParty: "在隊伍裡", notInParty: "不在隊伍裡", partyBelow: "同圖隊友少於",
-  selfLacks: "自己缺少狀態", selfHas: "自己有狀態", engaged: "是否交戰中", advanced: "進階／複合條件",
-};
-
-function macroConditionType(macro) {
-  const cond = macro.cond;
-  if (macro._generatorConditionAdvanced) return "advanced";
-  if (!cond || !Object.keys(cond).length) return "none";
-  const keys = Object.keys(cond);
-  if (keys.length !== 1) return "advanced";
-  const key = keys[0];
-  if (key === "inParty") return cond.inParty ? "inParty" : "notInParty";
-  return key in macroConditionLabels ? key : "advanced";
-}
+const macroConditionDefs = [
+  ["自己", "hpAbove", "自己 HP 高於", "percent", 50], ["自己", "hpBelow", "自己 HP 低於", "percent", 50],
+  ["自己", "spAbove", "自己 SP 高於", "percent", 30], ["自己", "spBelow", "自己 SP 低於", "percent", 50],
+  ["自己", "selfHas", "自己有這些狀態", "list", ""], ["自己", "selfLacks", "自己缺少這些狀態", "list", ""],
+  ["自己", "engaged", "交戰狀態", "boolean", true], ["自己", "minIntervalSec", "兩次至少間隔", "number", 5, 0, 3600],
+  ["自己", "weightAbove", "負重至少", "percent", 50], ["自己", "weightBelow", "負重低於", "percent", 50],
+  ["自己", "zenyAbove", "Zeny 至少", "number", 1000, 0, 1000000000], ["自己", "zenyBelow", "Zeny 低於", "number", 10000, 1, 1000000000],
+  ["自己", "baseLvAbove", "Base Lv 至少", "number", 50, 1, 99], ["自己", "baseLvBelow", "Base Lv 低於", "number", 50, 1, 99],
+  ["自己", "jobLvAbove", "Job Lv 至少", "number", 40, 1, 100], ["自己", "jobLvBelow", "Job Lv 低於", "number", 40, 1, 100],
+  ["自己", "itemMin", "背包裡道具至少", "item", null], ["自己", "itemBelow", "背包裡道具少於", "item", null],
+  ["自己", "maps", "只在這些地圖", "list", ""], ["自己", "doing", "目前正在", "doing", "searching"],
+  ["隊友", "inParty", "在不在隊伍裡", "boolean", true], ["隊友", "partyAtLeast", "同圖隊友至少", "number", 1, 1, 11],
+  ["隊友", "partyBelow", "同圖隊友少於", "number", 1, 1, 11], ["隊友", "allyHpBelow", "有隊友 HP 低於", "percent", 50],
+  ["隊友", "allyDead", "隊友死亡", "boolean", true], ["隊友", "allyHas", "有隊友具有狀態", "list", ""],
+  ["隊友", "allyLacks", "有隊友缺少狀態", "list", ""], ["隊友", "allyJobs", "有這些職業的隊友", "list", ""],
+  ["目標", "targetHpAbove", "目標 HP 高於", "percent", 50], ["目標", "targetHpBelow", "目標 HP 低於", "percent", 30],
+  ["目標", "targetHas", "目標有這些狀態", "list", ""], ["目標", "targetLacks", "目標沒有這些狀態", "list", ""],
+  ["目標", "boss", "Boss", "boolean", true], ["目標", "targetAggro", "目標是否在打我", "boolean", true],
+  ["周圍", "minEnemies", "身邊敵人至少", "number", 2, 1, 20], ["周圍", "maxEnemies", "身邊敵人最多", "number", 1, 0, 20],
+  ["周圍", "nearMonsters", "身邊有這些怪物", "list", ""], ["周圍", "notNearMonsters", "身邊沒有這些怪物", "list", ""],
+];
+const macroConditionByKey = new Map(macroConditionDefs.map(def => [def[1], def]));
 
 function renderMacroCondition(macro) {
   const wrap = element("div", ""); wrap.className = "macro-condition-ui";
-  const type = macroConditionType(macro);
-  const select = macroSelect(Object.entries(macroConditionLabels), type);
-  select.onchange = () => {
-    if (select.value === "advanced") macro._generatorConditionAdvanced = true;
-    else delete macro._generatorConditionAdvanced;
-    macro.cond = select.value === "hpBelow" ? {hpBelow: 30} : select.value === "spBelow" ? {spBelow: 30} :
-      select.value === "inParty" ? {inParty: true} : select.value === "notInParty" ? {inParty: false} :
-      select.value === "partyBelow" ? {partyBelow: 1} : select.value === "selfLacks" ? {selfLacks: [""]} :
-      select.value === "selfHas" ? {selfHas: [""]} : select.value === "engaged" ? {engaged: true} :
-      select.value === "advanced" ? (macro.cond ?? {}) : undefined;
-    saveCustomMacros(); renderMacroEditor();
-  };
-  wrap.append("觸發條件", select);
-  const bindCondition = (input, read) => { input.oninput = () => { macro.cond = read(input); saveCustomMacros(); }; wrap.append(input); };
-  if (type === "hpBelow") bindCondition(macroInput(macro.cond.hpBelow, "number", 1, 100), input => ({hpBelow: Number(input.value)}));
-  else if (type === "spBelow") bindCondition(macroInput(macro.cond.spBelow, "number", 1, 100), input => ({spBelow: Number(input.value)}));
-  else if (type === "partyBelow") bindCondition(macroInput(macro.cond.partyBelow, "number", 1, 11), input => ({partyBelow: Number(input.value)}));
-  else if (type === "selfLacks" || type === "selfHas") {
-    const input = macroInput(macro.cond[type]?.[0] ?? ""); input.placeholder = "狀態／技能 ID，例如 AL_BLESSING";
-    bindCondition(input, input => ({[type]: [input.value.trim().toUpperCase()]}));
-  } else if (type === "engaged") {
-    const engaged = macroSelect([["true", "交戰中"], ["false", "未交戰"]], String(macro.cond.engaged));
-    engaged.onchange = () => { macro.cond = {engaged: engaged.value === "true"}; saveCustomMacros(); }; wrap.append(engaged);
+  wrap.append(element("strong", "觸發條件（同一組全部成立才執行）"));
+  const cond = macro.cond ?? {};
+  for (const [key, current] of Object.entries(cond).filter(([key]) => key !== "or")) {
+    const def = macroConditionByKey.get(key); if (!def) continue;
+    const [, , label, type, , min, max] = def;
+    const row = element("div", ""); row.className = "macro-step"; row.append(element("b", label));
+    const update = value => { macro.cond = {...(macro.cond ?? {}), [key]: value}; saveCustomMacros(); };
+    if (type === "boolean") { const input = macroSelect([["true", "是"], ["false", "否"]], String(current)); input.onchange = () => update(input.value === "true"); row.append(input); }
+    else if (type === "list") { const input = macroInput(Array.isArray(current) ? current.join(", ") : ""); input.placeholder = "輸入 ID，多個用逗號分隔"; input.oninput = () => update(input.value.split(",").map(value => value.trim()).filter(Boolean)); row.append(input); }
+    else if (type === "item") {
+      const itemId = macroInput(current?.itemId ?? "", "number", 1); itemId.placeholder = "道具 ID";
+      const qty = macroInput(current?.qty ?? "", "number", 1, 30000); qty.placeholder = "數量";
+      const apply = () => update({itemId: Number(itemId.value), qty: Number(qty.value)}); itemId.oninput = apply; qty.oninput = apply; row.append(itemId, qty, "個");
+    } else if (type === "doing") { const input = macroSelect([["idle", "待機"], ["searching", "找怪"], ["attacking", "攻擊"], ["casting", "詠唱"], ["sitting", "坐著"], ["looting", "撿東西"]], current?.[0] ?? "searching"); input.onchange = () => update([input.value]); row.append(input); }
+    else { const input = macroInput(current, "number", type === "percent" ? 0 : min, type === "percent" ? 100 : max); input.oninput = () => update(Number(input.value)); row.append(input, type === "percent" ? "%" : ""); }
+    const remove = element("button", "✕"); remove.type = "button"; remove.onclick = () => { const next = {...macro.cond}; delete next[key]; macro.cond = Object.keys(next).length ? next : undefined; saveCustomMacros(); renderMacroEditor(); }; row.append(remove); wrap.append(row);
   }
+  const add = document.createElement("select"); add.append(new Option("＋ 新增條件…", ""));
+  for (const group of ["自己", "隊友", "目標", "周圍"]) { const options = macroConditionDefs.filter(def => def[0] === group && !(def[1] in cond)); if (!options.length) continue; const optgroup = document.createElement("optgroup"); optgroup.label = group; optgroup.append(...options.map(def => new Option(def[2], def[1]))); add.append(optgroup); }
+  add.onchange = () => { if (!add.value) return; const def = macroConditionByKey.get(add.value); const value = def[3] === "list" || def[3] === "doing" ? [def[4]] : def[3] === "item" ? {itemId: 0, qty: 1} : def[4]; macro.cond = {...cond, [add.value]: value}; saveCustomMacros(); renderMacroEditor(); };
+  wrap.append(add);
+  if (!Object.keys(cond).length) wrap.append(element("span", "沒有條件：冷卻時間到就會執行。"));
   return wrap;
 }
 
