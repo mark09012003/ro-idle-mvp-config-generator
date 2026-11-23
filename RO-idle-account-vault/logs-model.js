@@ -75,6 +75,7 @@ globalThis.CombatLogs = {
   },
   dedupeRenderedEvents(rows) {
     const rendered = new Map();
+    const renderedBySequence = new Map();
     const matchKey = row => {
       const seq = row.seq ?? row.data?.seq;
       if (seq == null) return "";
@@ -84,16 +85,34 @@ globalThis.CombatLogs = {
       if (row.kind !== "遊戲文字") continue;
       const key = matchKey(row);
       if (key) rendered.set(key, (rendered.get(key) ?? 0) + 1);
+      const seq = row.seq ?? row.data?.seq;
+      if (seq != null) renderedBySequence.set(String(seq), (renderedBySequence.get(String(seq)) ?? 0) + 1);
     }
-    return rows.filter(row => {
-      if (row.kind === "遊戲文字") return true;
+    const hidden = new Set();
+    for (const row of rows) {
+      if (row.kind === "遊戲文字") continue;
       const key = matchKey(row);
       const remaining = key ? rendered.get(key) ?? 0 : 0;
-      if (!remaining) return true;
+      if (!remaining) continue;
+      hidden.add(row);
       if (remaining === 1) rendered.delete(key);
       else rendered.set(key, remaining - 1);
-      return false;
-    });
+      const seq = row.seq ?? row.data?.seq;
+      const sequenceRemaining = renderedBySequence.get(String(seq)) ?? 0;
+      if (sequenceRemaining <= 1) renderedBySequence.delete(String(seq));
+      else renderedBySequence.set(String(seq), sequenceRemaining - 1);
+    }
+    for (const row of rows) {
+      if (row.kind === "遊戲文字" || hidden.has(row)) continue;
+      const seq = row.seq ?? row.data?.seq;
+      if (seq == null) continue;
+      const remaining = renderedBySequence.get(String(seq)) ?? 0;
+      if (!remaining) continue;
+      hidden.add(row);
+      if (remaining === 1) renderedBySequence.delete(String(seq));
+      else renderedBySequence.set(String(seq), remaining - 1);
+    }
+    return rows.filter(row => !hidden.has(row));
   },
   mvpText(row) {
     const text = (row.text || "").replace(/^\[\d{1,2}:\d{2}:\d{2}\]\s*/, "")

@@ -795,7 +795,7 @@ globalThis.VaultLogs = {
           request.onsuccess = () => result(request.result);
         });
       }
-      const filtered = archived.filter(row => !relatedOnly || CombatLogs.directlyRelatedToMvp(row, battle));
+      const filtered = archived.filter(row => !relatedOnly || row.kind === "遊戲文字" || CombatLogs.directlyRelatedToMvp(row, battle));
       const rows = CombatLogs.dedupeRenderedEvents(filtered);
       return {rows: fromEnd ? rows.slice(-limit) : rows.slice(0, limit), more: rows.length > limit, total: rows.length};
     },

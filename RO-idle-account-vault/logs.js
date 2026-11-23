@@ -301,7 +301,7 @@ function createMvpDetail(battle, characterKey, title) {
   toolbar.className = "mvp-detail-toolbar";
   const mode = document.createElement("select");
   mode.setAttribute("aria-label", "MVP 紀錄顯示範圍");
-  mode.append(new Option("只看這隻 MVP", "related"), new Option("同時間全部紀錄", "all"));
+  mode.append(new Option("收到的戰鬥訊息（含隊友）", "related"), new Option("同時間全部資料", "all"));
   const state = document.createElement("p");
   state.className = "mvp-detail-status";
   state.setAttribute("role", "status");

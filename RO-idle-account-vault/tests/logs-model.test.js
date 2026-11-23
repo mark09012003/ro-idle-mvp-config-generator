@@ -79,4 +79,14 @@ assert.equal(CombatLogs.translateSkillCodes("使用 NPC_UNKNOWN_ATTACK"), "使�
   assert.deepEqual(result.map(row => row.id), ["text-MVP！打倒了阿特羅斯", "drop"], "MVP 結算只抵消結算事件，不應吃掉落事件");
 }
 
+{
+  const rows = [
+    text(500, "system", "隊友替我承受了傷害"),
+    event("devotion", 500, "devotionHit"),
+  ];
+  const result = CombatLogs.dedupeRenderedEvents(rows);
+  assert.deepEqual(result.map(row => row.id), ["text-隊友替我承受了傷害"],
+    "同一則已收到的遊戲文字應優先於分類不同的事件重建文字");
+}
+
 console.log("logs-model dedupe tests passed");
