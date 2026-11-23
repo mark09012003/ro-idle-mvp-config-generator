@@ -1811,7 +1811,7 @@ if (!preview && globalThis.chrome && chrome.tabs) {
   });
   setInterval(() => {
     refresh().catch(() => {});
-  }, 60000);
+  }, 300000);
 }
 
 

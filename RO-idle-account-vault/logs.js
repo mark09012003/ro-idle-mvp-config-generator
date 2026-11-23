@@ -506,7 +506,7 @@ function renderLiveMvp() {
 
 async function refreshLiveMvp(force = false) {
   const key = selectedCharacterKey;
-  if (!key || (!force && Date.now() - lastMvpStatusCheck < 20000)) return;
+  if (!key || (!force && Date.now() - lastMvpStatusCheck < 60000)) return;
   lastMvpStatusCheck = Date.now();
   const request = ++liveMvpRequest;
   try {

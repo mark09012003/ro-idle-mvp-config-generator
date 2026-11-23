@@ -525,15 +525,22 @@ globalThis.VaultLogs = {
     });
   }
 
+  const logPresenceCache = new Map();
   function setLogPresence(key, present, onlyIfUnknown = false) {
-    return transaction(legacy, ["settings"], "readwrite", tx => {
+    if (logPresenceCache.has(key) && (onlyIfUnknown || logPresenceCache.get(key) === present)) return Promise.resolve();
+    return transaction(legacy, ["settings"], "readwrite", (tx, result) => {
       const settings = tx.objectStore("settings");
       const id = "logs-present:" + key;
       const request = settings.get(id);
       request.onsuccess = () => {
-        if ((!onlyIfUnknown || request.result === undefined) && request.result !== present) settings.put(present, id);
+        let value = request.result;
+        if ((!onlyIfUnknown || value === undefined) && value !== present) {
+          settings.put(present, id);
+          value = present;
+        }
+        result(value);
       };
-    });
+    }).then(value => {logPresenceCache.set(key, value);});
   }
 
   async function checkLogPresence(character, databases) {
@@ -551,6 +558,7 @@ globalThis.VaultLogs = {
   }
 
   const archiveWork = new Map();
+  const archiveTimers = new Map();
   const defaultMvpLimit = 20;
   let catalogNames;
 
@@ -564,7 +572,10 @@ globalThis.VaultLogs = {
     return catalogNames;
   }
 
+  const archiveCutoverCache = new Map();
   function archiveCutover(storage) {
+    const cacheKey = storage.databaseName ?? "ro-vault-logs";
+    if (archiveCutoverCache.has(cacheKey)) return Promise.resolve(archiveCutoverCache.get(cacheKey));
     return transaction(storage, ["settings"], "readwrite", (tx, result) => {
       const settings = tx.objectStore("settings");
       const request = settings.get("mvpArchiveCutover");
@@ -573,6 +584,9 @@ globalThis.VaultLogs = {
         if (request.result === undefined) settings.put(since, "mvpArchiveCutover");
         result(since);
       };
+    }).then(since => {
+      archiveCutoverCache.set(cacheKey, since);
+      return since;
     });
   }
 
@@ -695,18 +709,18 @@ globalThis.VaultLogs = {
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(row);
       }
-      await remember([...groups].map(([key, records]) => [key, records.at(-1)]));
       const counts = await Promise.all([...groups].map(([key, records]) => locked(key, async () => {
         const recording = await setting(legacy, "recording:" + key);
         if (!recording?.enabled) return 0;
         const accepted = records.filter(row => row.receivedAt >= recording.since);
         if (!accepted.length) return 0;
+        await remember([[key, accepted.at(-1)]]);
         await archiveCutover(shard(key));
         const count = await shard(key).save(accepted, undefined, true);
         if (count) await setLogPresence(key, true);
         return count;
       }).then(count => {
-        if (count && records.some(row => CombatLogs.mvpIndexRelevant(row))) this.refreshMvpIndex(key).catch(() => {});
+        if (count) this.scheduleMvpIndex(key);
         return count;
       })));
       return counts.reduce((total, count) => total + count, 0);
@@ -735,6 +749,8 @@ globalThis.VaultLogs = {
     },
     async refreshMvpIndex(key) {
       if (!key) return;
+      clearTimeout(archiveTimers.get(key));
+      archiveTimers.delete(key);
       if (!archiveWork.has(key)) {
         archiveWork.set(key, (async () => {
           await finishMigration(key);
@@ -747,6 +763,13 @@ globalThis.VaultLogs = {
         })().finally(() => archiveWork.delete(key)));
       }
       return archiveWork.get(key);
+    },
+    scheduleMvpIndex(key) {
+      if (!key || archiveTimers.has(key)) return;
+      archiveTimers.set(key, setTimeout(() => {
+        archiveTimers.delete(key);
+        this.refreshMvpIndex(key).catch(() => {});
+      }, 5000));
     },
     mvpArchiveStatus(key) {
       return key ? setting(legacy, "mvp-archive-meta:" + key) : Promise.resolve(undefined);

@@ -3,15 +3,15 @@ importScripts("lib.js");
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
-  chrome.alarms.create("refresh-live", { periodInMinutes: 1 });
+  chrome.alarms.create("refresh-live", { periodInMinutes: 5 });
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  chrome.alarms.create("refresh-live", { periodInMinutes: 1 });
+  chrome.alarms.create("refresh-live", { periodInMinutes: 5 });
 });
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
-chrome.alarms.create("refresh-live", { periodInMinutes: 1 });
+chrome.alarms.create("refresh-live", { periodInMinutes: 5 });
 
 function readPageSnapshot() {
   const localStorageData = {};
@@ -172,11 +172,26 @@ async function refreshSavedLogin() {
   await chrome.storage.local.set({ profiles });
 }
 
+const liveRefreshIntervalMs = 5 * 60 * 1000;
+const liveRefreshStampKey = "last-live-refresh-at";
+let liveRefreshWork;
+async function refreshSavedLoginIfDue() {
+  if (liveRefreshWork) return liveRefreshWork;
+  liveRefreshWork = (async () => {
+    const stored = await chrome.storage.session.get({[liveRefreshStampKey]: 0});
+    const now = Date.now();
+    if (now - stored[liveRefreshStampKey] < liveRefreshIntervalMs) return;
+    await chrome.storage.session.set({[liveRefreshStampKey]: now});
+    await refreshSavedLogin();
+  })().finally(() => {liveRefreshWork = null;});
+  return liveRefreshWork;
+}
+
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "refresh-live") refreshSavedLogin().catch(() => {});
+  if (alarm.name === "refresh-live") refreshSavedLoginIfDue().catch(() => {});
 });
 
-refreshSavedLogin().catch(() => {});
+refreshSavedLoginIfDue().catch(() => {});
 
 const logViewerPorts = new Map();
 let logViewerPreparedUntil = 0;
