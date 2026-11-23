@@ -43,6 +43,20 @@ assert.equal(CombatLogs.translateSkillCodes("使用 NPC_UNKNOWN_ATTACK"), "使�
   assert.equal(describe({type: "buffStart", skill: "PR_LEXAETERNA"}), "天使之怒 效果開始。");
   assert.equal(describe({type: "statusEnd", status: "stun", monsterId: 1477}), "stun 狀態結束 · 古埃及王。");
   assert.equal(describe({type: "system", message: "切換戰鬥狀態"}), "系統：切換戰鬥狀態");
+  assert.equal(describe({type: "devotionHit", ally: "十字軍", target: "祭司", damage: 1234}), "十字軍 代替 祭司承受 1,234 點傷害。");
+  assert.equal(describe({type: "monsterLeave", monsterId: 1477}), "古埃及王 離開戰鬥。");
+}
+
+{
+  const battle = {id: "battle", monsterId: 1477, monsterName: "古埃及王", startedAt: 1000, endedAt: 2000, sequences: new Set([10])};
+  assert.equal(CombatLogs.directlyRelatedToMvp({eventAt: 1500, data: {body: {type: "support"}}}, battle), true,
+    "王戰期間的隊友輔助應納入明細");
+  assert.equal(CombatLogs.directlyRelatedToMvp({eventAt: 1500, data: {body: {type: "devotionHit", damage: 100}}}, battle), true,
+    "王戰期間的隊友代扛傷害應納入明細");
+  assert.equal(CombatLogs.directlyRelatedToMvp({eventAt: 1500, data: {body: {type: "partyGuard"}}}, battle), true,
+    "未來新增的隊伍防護事件也應納入明細");
+  assert.equal(CombatLogs.directlyRelatedToMvp({eventAt: 1500, data: {body: {type: "drop", monsterId: 999}}}, battle), false,
+    "其他怪物的掉落仍應排除");
 }
 
 {

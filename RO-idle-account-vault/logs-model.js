@@ -21,6 +21,10 @@ globalThis.CombatLogs = {
     "found", "ambush", "targetSwitch", "playerAttack", "monsterAttack", "skillHit", "monsterSkill", "mobSkill",
     "devoted", "devotionHit", "kill", "mvp", "worldMvp", "death", "stop", "mapChange", "teleport", "arrive",
   ]),
+  mvpContextTypes: new Set([
+    "support", "devoted", "devotionHit", "heal", "buffStart", "buffEnd", "statusStart", "statusEnd",
+    "monsterJoin", "monsterLeave",
+  ]),
   eventTime(row) {
     const time = row.eventAt ?? row.data?.wallMs ?? row.wallMs ?? row.receivedAt;
     return Number.isFinite(time) ? time : row.receivedAt;
@@ -199,6 +203,9 @@ globalThis.CombatLogs = {
     const outcome = body.result === "miss" ? "Miss" : damage ? damage + " 點傷害" : "命中";
     const message = body.message || body.text || body.detail || body.reason || "";
     const target = body.targetName || body.target || "";
+    const actor = [body.ally, body.sourceName, body.masterName, body.source,
+      typeof body.master === "string" && body.master !== "master" ? body.master : ""].find(value => typeof value === "string" && value);
+    const summoner = body.masterName || (typeof body.master === "string" && body.master !== "master" ? body.master : "");
     switch (body.type) {
       case "found": return "發現 " + monster + "。";
       case "ambush": return monster + " 主動衝過來！";
@@ -213,9 +220,13 @@ globalThis.CombatLogs = {
       case "buffEnd": return `${effect} 效果結束${target ? "（" + target + "）" : ""}。`;
       case "statusStart": return `${effect} 狀態開始${body.monsterId == null ? "" : " · " + monster}。`;
       case "statusEnd": return `${effect} 狀態結束${body.monsterId == null ? "" : " · " + monster}。`;
-      case "support": return `${body.ally || body.sourceName || "隊友"} 使用 ${skill} 支援${target ? " " + target : ""}。`;
-      case "heal": return `${body.ally || body.sourceName || "角色"} 恢復 ${number(body.amount ?? body.heal) || "未知"} HP。`;
+      case "support": return `${actor || "隊友"} 使用 ${skill} 支援${target ? " " + target : ""}。`;
+      case "devoted": return `${actor || "隊友"} 保護${target ? " " + target : "隊友"}，準備代為承受傷害。`;
+      case "devotionHit": return `${actor || "隊友"} 代替${target ? " " + target : "隊友"}承受 ${damage || number(body.amount) || "未知"} 點傷害。`;
+      case "heal": return `${actor || "角色"} 恢復 ${number(body.amount ?? body.heal) || "未知"} HP。`;
       case "system": return message ? "系統：" + message : `系統事件${body.monsterId == null ? "" : " · " + monster}。`;
+      case "monsterJoin": return `${monster} 加入戰鬥${summoner ? "（召喚者：" + summoner + "）" : ""}。`;
+      case "monsterLeave": return `${monster} 離開戰鬥${summoner ? "（召喚者：" + summoner + "）" : ""}。`;
       case "kill": return "成功擊敗 " + monster + "！";
       case "mvp": return `MVP！打倒了 ${monster}${Number.isFinite(body.exp) ? " · MVP 經驗 " + number(body.exp) : ""}。`;
       case "worldMvp": return `${monster} · ${body.won ? "隊伍獲勝" : "其他隊伍獲勝"}。`;
@@ -246,6 +257,10 @@ globalThis.CombatLogs = {
   directlyRelatedToMvp(row, battle) {
     if (battle.id === "notice:" + row.id) return true;
     const body = row.data?.body;
+    const time = this.eventTime(row);
+    const duringBattle = Number.isFinite(time) && time >= battle.startedAt && time <= (battle.endedAt ?? battle.startedAt);
+    const contextType = body?.type || "";
+    if (duringBattle && (this.mvpContextTypes.has(contextType) || /support|devot|buff|status|heal|guard|protect|absorb|cover|party|ally/i.test(contextType))) return true;
     if (body?.monsterId != null && battle.monsterId != null) {
       return Number(body.monsterId) === Number(battle.monsterId);
     }
