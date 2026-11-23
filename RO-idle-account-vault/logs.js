@@ -443,8 +443,17 @@ mvpOnlyEl.onchange = () => load(true);
 const logCatalogReady = fetch("ro-catalog.json")
   .then(response => response.ok ? response.json() : [])
   .catch(() => []);
+const monsterLabelsReady = fetch("monster-labels.json")
+  .then(response => response.ok ? response.json() : {})
+  .catch(() => ({}));
 const monsterNamesReady = logCatalogReady
-  .then(maps => new Map(maps.flatMap(map => map.monsters.map(monster => [Number(monster.id), monster.name]))));
+  .then(async maps => {
+    const labels = await monsterLabelsReady;
+    return new Map([
+      ...Object.entries(labels).map(([id, name]) => [Number(id), name]),
+      ...maps.flatMap(map => map.monsters.map(monster => [Number(monster.id), monster.name])),
+    ]);
+  });
 
 let liveMvpContext = null;
 let liveMvpRequest = 0;

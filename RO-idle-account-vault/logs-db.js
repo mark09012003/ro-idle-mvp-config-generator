@@ -564,9 +564,14 @@ globalThis.VaultLogs = {
 
   function archiveNames() {
     if (!catalogNames) {
-      catalogNames = Promise.resolve().then(() => fetch("ro-catalog.json"))
-        .then(response => response.ok ? response.json() : [])
-        .then(maps => new Map(maps.flatMap(map => map.monsters.map(monster => [Number(monster.id), monster.name]))))
+      catalogNames = Promise.all([
+        fetch("ro-catalog.json").then(response => response.ok ? response.json() : []),
+        fetch("monster-labels.json").then(response => response.ok ? response.json() : {}),
+      ])
+        .then(([maps, labels]) => new Map([
+          ...Object.entries(labels).map(([id, name]) => [Number(id), name]),
+          ...maps.flatMap(map => map.monsters.map(monster => [Number(monster.id), monster.name])),
+        ]))
         .catch(() => new Map());
     }
     return catalogNames;

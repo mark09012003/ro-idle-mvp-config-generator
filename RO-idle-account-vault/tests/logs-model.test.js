@@ -1,6 +1,10 @@
 const assert = require("node:assert/strict");
 
 require("../logs-model.js");
+const monsterLabels = require("../monster-labels.json");
+
+assert.ok(Object.keys(monsterLabels).length >= 500, "完整怪物名稱表不應只包含少數手動別名");
+assert.equal(monsterLabels[1605], "迷幻之王");
 
 const text = (seq, category, value = "畫面文字") => ({
   id: "text-" + value,
