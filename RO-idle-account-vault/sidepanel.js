@@ -188,19 +188,19 @@ const previewScenes = {
   alpha: {
     loggedIn: true,
     account: null,
-    accountId: 11554,
+    accountId: 900001,
     characters: [
-      { id: 1, name: "睡不飽實", baseLv: 60, jobLv: 50, job: "lord_knight", jobLabel: "lord_knight", running: true },
+      { id: 1, name: "範例騎士", baseLv: 60, jobLv: 50, job: "lord_knight", jobLabel: "騎士領主", running: true },
     ],
     cookies: [{ name: "session", value: "alpha-session", domain: "ro-idle.app", hostOnly: true, path: "/", secure: true, httpOnly: true, sameSite: "lax" }],
     localStorageData: { "ro-idle:display": "{\"fontSize\":14}" },
-    activeCharacterName: "睡不飽實",
+    activeCharacterName: "範例騎士",
   },
   beta: {
     loggedIn: true,
     account: null,
-    accountId: 11555,
-    characters: [{ id: 3, name: "鐵匠波伊", baseLv: 61, job: "blacksmith", jobLabel: "鐵匠", running: false }],
+    accountId: 900002,
+    characters: [{ id: 3, name: "範例鐵匠", baseLv: 61, job: "blacksmith", jobLabel: "鐵匠", running: false }],
     cookies: [{ name: "session", value: "beta-session", domain: "ro-idle.app", hostOnly: true, path: "/", secure: true, httpOnly: true, sameSite: "lax" }],
     localStorageData: { "ro-idle:display": "{\"fontSize\":16}" },
   },
@@ -298,28 +298,28 @@ const chromeApi = {
 async function buildPreviewProfiles() {
   const alphaPrint = await AccountVault.fingerprintCookies(previewScenes.alpha.cookies);
   const cast = [
-    ["睡不飽實", "lord_knight", "lord_knight"],
-    ["吃不飽實", "rogue", "流氓"],
-    ["賺不飽實", "rogue", "流氓"],
-    ["喝不飽實", "rogue", "流氓"],
-    ["ㄚㄚㄚㄚㄚ武僧", "acolyte", "服事"],
+    ["範例騎士", "lord_knight", "騎士領主"],
+    ["範例流氓", "rogue", "流氓"],
+    ["範例盜賊", "rogue", "流氓"],
+    ["範例獵人", "hunter", "獵人"],
+    ["範例武僧", "monk", "武僧"],
   ];
   const squads = ["主隊", "練功隊", "倉庫隊"];
   return Array.from({ length: 24 }, (_, index) => {
     const number = String(index + 1).padStart(2, "0");
     const [name, job, jobLabel] = cast[index % cast.length];
-    const accountId = index === 0 ? 11554 : index === 1 ? 11555 : 12000 + index;
+    const accountId = 900001 + index;
     return {
       id: `preview-${number}`,
-      name: `Lizzard${number}`,
-      account: `Lizzard${number}`,
+      name: `範例帳號 ${number}`,
+      account: `demo_user_${number}`,
       accountId,
       characters: index === 4 ? [] : index === 2 ? [
         { id: 201, name, baseLv: 42, jobLv: 18, job, jobLabel, running: true },
-        { id: 202, name: "賺不飽貳", baseLv: 30, jobLv: 24, job: "thief", jobLabel: "盜賊", running: true },
-        { id: 203, name: "賺不飽參", baseLv: 12, jobLv: 8, job: "novice", jobLabel: "初學者", running: false },
-        { id: 204, name: "賺不飽肆", baseLv: 55, jobLv: 40, job: "assassin", jobLabel: "刺客", running: false },
-        { id: 205, name: "賺不飽伍", baseLv: 7, jobLv: 3, job: "novice", jobLabel: "初學者", running: false },
+        { id: 202, name: "測試盜賊 A", baseLv: 30, jobLv: 24, job: "thief", jobLabel: "盜賊", running: true },
+        { id: 203, name: "測試初心者 B", baseLv: 12, jobLv: 8, job: "novice", jobLabel: "初學者", running: false },
+        { id: 204, name: "測試刺客 C", baseLv: 55, jobLv: 40, job: "assassin", jobLabel: "刺客", running: false },
+        { id: 205, name: "測試初心者 D", baseLv: 7, jobLv: 3, job: "novice", jobLabel: "初學者", running: false },
       ] : [{ id: index + 1, name, baseLv: 40 + (index % 21), jobLv: 10 + (index % 40), job, jobLabel, running: index % 5 === 0 }],
       cookies: index === 0
         ? previewScenes.alpha.cookies
