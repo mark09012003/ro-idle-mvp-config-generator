@@ -1131,6 +1131,8 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <p id="buff-status" role="status" hidden></p>
 <label>Buff 條件<select id="buffWhen"><option value="selfLacks">缺少 Buff 時換圖</option><option value="selfHas">有 Buff 時換圖</option></select></label>
 </div>
+<label>換圖前等待秒數（0 為不等待，會在補 Buff 前執行）<input id="routeWait" type="number" min="0" max="60" step="1" value="0" required></label>
+<details><summary>進階：換圖 OR 條件</summary><p class="section-help">上方設定是第一組。每個 OR 組請填完整；產生時每組都會包含來源地圖與換圖所需的安全條件。</p><div id="route-or"></div></details>
 <div id="route-buff-options" hidden>
   <label class="check"><input id="buffBeforeMove" type="checkbox">換圖前先補 Buff</label>
   <label id="route-buff-level-label" class="number-field" hidden>補放等級<input id="routeBuffLevel" type="number" min="1" max="10" value="1"></label>
@@ -1277,6 +1279,9 @@ SOFTWARE.
   function generate(base, route, options) {
     if (base) validateBase(base);
     if (!route.length) throw new Error("請先加入至少一張地圖。");
+    const routeWait = Number(options.routeWait ?? 0);
+    if (!Number.isInteger(routeWait) || routeWait < 0 || routeWait > 60) throw new Error("換圖前等待須為 0～60 秒的整數。");
+    validateOrGroups(options.routeCondition);
     const template = base ?? {
       format: "ro-idle-autoconfig",
       version: 1,
@@ -1291,6 +1296,7 @@ SOFTWARE.
     const retainedMacros = options.macros.filter(macro =>
       !macro.steps.some(step => ["map", "profile"].includes(step.do)));
     const cleanMacro = macro => {
+      validateOrGroups(macro.cond);
       const {_generatorPosition, _generatorConditionAdvanced, ...clean} = macro;
       return clean;
     };
@@ -1423,6 +1429,7 @@ SOFTWARE.
         const destination = last ? groups[next].segment[0] : segment[position + 1];
         if (destination.map.id === row.map.id) return [];
         const steps = [];
+        if (routeWait) steps.push({do: "wait", sec: routeWait});
         if (buffBeforeMove) steps.push({do: "skill", skill: buff, lv: routeBuffLevel});
         if (departureStep) steps.push(departureStep);
         if (last && groups.length > 1) steps.push({do: "profile", name: label(next)});
@@ -1435,6 +1442,10 @@ SOFTWARE.
         }
         if (options.mode === "follower" && partyBelow !== null) cond.partyBelow = partyBelow;
         if (options.mode === "leader" && buff) cond[options.buffWhen] = [buff];
+        if (options.routeCondition?.or?.length) {
+          const {selfHas, selfLacks, partyBelow, ...required} = cond;
+          cond.or = options.routeCondition.or.map(group => ({...group, ...required}));
+        }
         return [{name: routeName(position, row, destination), cooldownSec: cooldown, cond, steps}];
       });
       const flies = extraFly ? [{
@@ -1931,16 +1942,34 @@ const macroConditionDefs = [
 ];
 const macroConditionByKey = new Map(macroConditionDefs.map(def => [def[1], def]));
 
-function renderMacroCondition(macro) {
+function validateOrGroups(cond) {
+  if (cond?.or === undefined) return;
+  if (!Array.isArray(cond.or) || cond.or.length > 5 || cond.or.some(group =>
+    !group || typeof group !== "object" || Array.isArray(group) || "or" in group ||
+    !Object.keys(group).length || Object.values(group).some(value =>
+      value == null || value === "" || (Array.isArray(value) && !value.length) ||
+      (typeof value === "object" && "itemId" in value && !(value.itemId > 0 && value.qty > 0))))) {
+    throw new Error("每個 OR 條件組都須填完整，最多 5 組，組內不可再加 OR。");
+  }
+}
+
+function renderMacroCondition(macro, groupIndex = null, refresh = renderMacroEditor, save = saveCustomMacros) {
   const wrap = element("div", ""); wrap.className = "macro-condition-ui";
-  wrap.append(element("strong", "觸發條件（同一組全部成立才執行）"));
-  const cond = macro.cond ?? {};
+  wrap.append(element("strong", groupIndex === null ? "觸發條件（同一組全部成立才執行）" : `或者（OR）第 ${groupIndex + 1} 組`));
+  const cond = groupIndex === null ? macro.cond ?? {} : macro.cond.or[groupIndex];
+  const change = (key, value, remove = false) => {
+    macro.cond ??= {};
+    const target = groupIndex === null ? macro.cond : macro.cond.or[groupIndex];
+    if (remove) delete target[key];
+    else target[key] = value;
+    save();
+  };
   for (const [key, current] of Object.entries(cond).filter(([key]) => key !== "or")) {
     const def = macroConditionByKey.get(key); if (!def) continue;
     const [, , label, type, , min, max] = def;
     const row = element("div", ""); row.className = "macro-condition-row"; row.append(element("b", label));
     const values = element("span", ""); values.className = "condition-values";
-    const update = value => { macro.cond = {...(macro.cond ?? {}), [key]: value}; saveCustomMacros(); };
+    const update = value => change(key, value);
     if (type === "boolean") { const input = macroSelect([["true", "是"], ["false", "否"]], String(current)); input.onchange = () => update(input.value === "true"); values.append(input); }
     else if (type === "list") { const input = macroInput(Array.isArray(current) ? current.join(", ") : ""); input.placeholder = "輸入 ID，多個用逗號分隔"; input.oninput = () => update(input.value.split(",").map(value => value.trim()).filter(Boolean)); values.append(input); }
     else if (type === "item") {
@@ -1949,16 +1978,52 @@ function renderMacroCondition(macro) {
       const apply = () => update({itemId: Number(itemId.value), qty: Number(qty.value)}); itemId.oninput = apply; qty.oninput = apply; values.append(itemId, qty, "個");
     } else if (type === "doing") { const input = macroSelect([["idle", "待機"], ["searching", "找怪"], ["attacking", "攻擊"], ["casting", "詠唱"], ["sitting", "坐著"], ["looting", "撿東西"]], current?.[0] ?? "searching"); input.onchange = () => update([input.value]); values.append(input); }
     else { const input = macroInput(current, "number", type === "percent" ? 0 : min, type === "percent" ? 100 : max); input.oninput = () => update(Number(input.value)); values.append(input, type === "percent" ? "%" : ""); }
-    const remove = element("button", "✕"); remove.type = "button"; remove.classList.add("macro-delete"); remove.onclick = () => { const next = {...macro.cond}; delete next[key]; macro.cond = Object.keys(next).length ? next : undefined; saveCustomMacros(); renderMacroEditor(); }; row.append(values, remove); wrap.append(row);
+    const remove = element("button", "✕"); remove.type = "button"; remove.classList.add("macro-delete"); remove.onclick = () => { change(key, undefined, true); refresh(); }; row.append(values, remove); wrap.append(row);
   }
   const add = document.createElement("select"); add.append(new Option("＋ 新增條件…", ""));
   for (const group of ["自己", "隊友", "目標", "周圍"]) { const options = macroConditionDefs.filter(def => def[0] === group && !(def[1] in cond)); if (!options.length) continue; const optgroup = document.createElement("optgroup"); optgroup.label = group; optgroup.append(...options.map(def => new Option(def[2], def[1]))); add.append(optgroup); }
-  add.onchange = () => { if (!add.value) return; const def = macroConditionByKey.get(add.value); const value = def[3] === "list" || def[3] === "doing" ? [def[4]] : def[3] === "item" ? {itemId: 0, qty: 1} : def[4]; macro.cond = {...cond, [add.value]: value}; saveCustomMacros(); renderMacroEditor(); };
+  add.onchange = () => { if (!add.value) return; const def = macroConditionByKey.get(add.value); const value = def[3] === "list" || def[3] === "doing" ? [def[4]].filter(Boolean) : def[3] === "item" ? {itemId: 0, qty: 1} : def[4]; change(add.value, value); refresh(); };
   add.className = "macro-add-condition";
   wrap.append(add);
-  if (!Object.keys(cond).length) wrap.append(element("span", "沒有條件：冷卻時間到就會執行。"));
+  if (groupIndex === null) wrap.append(renderOrGroups(macro, refresh, save));
   return wrap;
 }
+
+function renderOrGroups(macro, refresh, save) {
+  const wrap = element("div", "");
+  const groups = Array.isArray(macro.cond?.or) ? macro.cond.or : [];
+  groups.forEach((group, index) => {
+    if (!group || typeof group !== "object" || Array.isArray(group)) return;
+    const editor = renderMacroCondition(macro, index, refresh, save);
+    const remove = element("button", "移除這組");
+    remove.type = "button";
+    remove.onclick = () => {
+      groups.splice(index, 1);
+      if (!groups.length) delete macro.cond.or;
+      save();
+      refresh();
+    };
+    editor.append(remove);
+    wrap.append(editor);
+  });
+  const add = element("button", "＋ 新增 OR 條件組");
+  add.type = "button";
+  add.disabled = groups.length >= 5;
+  add.onclick = () => {
+    macro.cond ??= {};
+    macro.cond.or = [...groups, {}];
+    save();
+    refresh();
+  };
+  wrap.append(add);
+  return wrap;
+}
+
+const routeConditionEditor = {cond: {}};
+function renderRouteOr() {
+  byId("route-or").replaceChildren(renderOrGroups(routeConditionEditor, renderRouteOr, clearPreview));
+}
+renderRouteOr();
 
 function renderMacroEditor() {
   const list = byId("macro-list"); list.replaceChildren();
@@ -2096,7 +2161,8 @@ function describeOperation(macro, mapNames, buffNames) {
   }
   if (condition.spAbove != null) clauses.push(`SP 大於 ${condition.spAbove}`);
   const known = new Set(["doing", "spAbove", "allyLacks", "maps", "engaged", "inParty", "partyBelow", "selfHas", "selfLacks", "allyJobs"]);
-  if (Object.keys(condition).some(key => !known.has(key))) clauses.push("另有自訂條件");
+  if (Object.keys(condition).some(key => key !== "or" && !known.has(key))) clauses.push("另有自訂條件");
+  if (condition.or?.length) clauses.push(`或另外 ${condition.or.length} 組完整條件任一成立`);
   const steps = macro.steps.map(step => {
     if (step.do === "wait") return `等待 ${step.sec} 秒`;
     if (step.do === "fly" || (step.do === "item" && step.itemId === 601)) return "使用蒼蠅翅膀";
@@ -2184,6 +2250,8 @@ byId("generator").onsubmit = event => {
     }
     const options = {
       macros,
+      routeCondition: routeConditionEditor.cond,
+      routeWait: value("routeWait"),
       buffBeforeMove: !byId("route-buff-options").hidden && checked("buffBeforeMove"),
       routeBuffLevel: value("routeBuffLevel"),
       waitForParty: checked("waitForParty"),
