@@ -1151,14 +1151,13 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </div>
 <label class="check"><input id="waitForParty" type="checkbox">等待隊友</label>
 <div id="wait-options" hidden>
-<p class="section-help">角色死亡後若已自動回到原圖，會依巨集順序執行先符合條件的那條。等待期間會暫停攻擊。</p>
+<p class="section-help">角色死亡並自動回到原圖後，會執行優先且符合條件的巨集。等待期間會暫停攻擊。</p>
   <div class="fields">
     <label>隊友少於幾人時等待<input id="waitBelow" type="number" min="1" max="11" value="6" aria-describedby="waitBelow-help"><span id="waitBelow-help" class="count-help">隊友人數＝隊伍總人數 − 1（扣除自己）。6 人隊伍填 5。</span></label>
     <label>等待秒數<input id="waitSeconds" type="number" min="1" max="60" value="5"></label>
-    <label>等待巨集順序<select id="waitPosition">
-      <option value="auto">依目前巡迴方式</option>
-      <option value="top">置頂：回原圖後優先等待</option>
-      <option value="bottom">置底：回原圖後優先換圖</option>
+    <label>死亡後的行為<select id="waitPosition">
+      <option value="top">死亡後回原圖繼續打</option>
+      <option value="bottom">死亡後換到下一張圖</option>
     </select></label>
     <label>等待巨集冷卻（秒）<input id="waitCooldown" type="number" min="5" max="86400" value="5"></label>
     <label id="target-job-field">標的角色職業
@@ -1476,14 +1475,12 @@ SOFTWARE.
         },
         steps: [...(buffBeforeMove ? [{do: "skill", skill: buff, lv: routeBuffLevel}] : []), {do: "wait", sec: waitSeconds}],
       }] : [];
-      const waitFirst = options.waitPosition === "top";
-      const waitLast = options.waitPosition === "bottom" || buffBeforeMove;
+      const waitLast = options.waitPosition === "bottom";
       config.macros = [
         ...structuredClone(firstMacros),
-        ...(waitFirst ? waiting : []),
-        ...(!waitFirst && !waitLast ? waiting : []),
+        ...(!waitLast ? waiting : []),
         ...moves, ...(moves.length ? [] : flies),
-        ...(!waitFirst && waitLast ? waiting : []),
+        ...(waitLast ? waiting : []),
         ...structuredClone(lastMacros),
       ].map(normalizeMacroActions);
       if (config.macros.length > 10) {
