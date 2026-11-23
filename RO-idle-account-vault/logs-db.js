@@ -773,14 +773,7 @@ globalThis.VaultLogs = {
         });
       }
       const filtered = archived.filter(row => !relatedOnly || CombatLogs.directlyRelatedToMvp(row, battle));
-      const rendered = new Set(filtered.filter(row => row.kind === "遊戲文字" && row.seq != null).map(row => row.seq));
-      const renderedResults = new Set(filtered.filter(row => row.kind === "遊戲文字" && row.seq != null &&
-        CombatLogs.marker(row)).map(row => row.seq));
-      const rows = filtered.filter(row => {
-        if (row.kind === "遊戲文字") return true;
-        const seq = row.seq ?? row.data?.seq;
-        return CombatLogs.marker(row) ? !renderedResults.has(seq) : !rendered.has(seq);
-      });
+      const rows = CombatLogs.dedupeRenderedEvents(filtered);
       return {rows: fromEnd ? rows.slice(-limit) : rows.slice(0, limit), more: rows.length > limit, total: rows.length};
     },
     async indexedMvpBattles(key, monsterNames = new Map()) {

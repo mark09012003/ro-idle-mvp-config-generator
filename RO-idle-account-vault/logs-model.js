@@ -33,6 +33,28 @@ globalThis.CombatLogs = {
       /^★?\s*【MVP】你的隊伍在.+搶到了/.test(text) ||
       /^【MVP】.+被別的隊伍搶走了/.test(text);
   },
+  dedupeRenderedEvents(rows) {
+    const rendered = new Map();
+    const matchKey = row => {
+      const seq = row.seq ?? row.data?.seq;
+      if (seq == null) return "";
+      return seq + ":" + (this.marker(row) ? "mvp-result" : this.category(row));
+    };
+    for (const row of rows) {
+      if (row.kind !== "遊戲文字") continue;
+      const key = matchKey(row);
+      if (key) rendered.set(key, (rendered.get(key) ?? 0) + 1);
+    }
+    return rows.filter(row => {
+      if (row.kind === "遊戲文字") return true;
+      const key = matchKey(row);
+      const remaining = key ? rendered.get(key) ?? 0 : 0;
+      if (!remaining) return true;
+      if (remaining === 1) rendered.delete(key);
+      else rendered.set(key, remaining - 1);
+      return false;
+    });
+  },
   mvpText(row) {
     const text = (row.text || "").replace(/^\[\d{1,2}:\d{2}:\d{2}\]\s*/, "")
       .replace(/^\[HP[^\]]*\]\s*/i, "").trim();
