@@ -2148,7 +2148,22 @@ function renderMacroCondition(macro, groupIndex = null, refresh = renderMacroEdi
       const itemId = macroInput(current?.itemId ?? "", "number", 1); itemId.placeholder = "道具 ID";
       const qty = macroInput(current?.qty ?? "", "number", 1, 30000); qty.placeholder = "數量";
       const apply = () => update({itemId: Number(itemId.value), qty: Number(qty.value)}); itemId.oninput = apply; qty.oninput = apply; values.append(itemId, qty, "個");
-    } else if (type === "doing") { const input = macroSelect([["idle", "待機"], ["searching", "找怪"], ["attacking", "攻擊"], ["casting", "詠唱"], ["sitting", "坐著"], ["looting", "撿東西"]], current?.[0] ?? "searching"); input.onchange = () => update([input.value]); values.append(input); }
+    } else if (type === "doing") {
+      const selected = new Set(current ?? []);
+      for (const [id, name] of [["idle", "待機"], ["searching", "找怪"], ["attacking", "攻擊"], ["casting", "詠唱"], ["sitting", "坐著"], ["looting", "撿東西"]]) {
+        const choice = element("label", "");
+        choice.className = "check";
+        const input = macroInput("", "checkbox");
+        input.checked = selected.has(id);
+        input.onchange = () => {
+          if (input.checked) selected.add(id);
+          else selected.delete(id);
+          update([...selected]);
+        };
+        choice.append(input, name);
+        values.append(choice);
+      }
+    }
     else { const input = macroInput(current, "number", type === "percent" ? 0 : min, type === "percent" ? 100 : max); input.oninput = () => update(Number(input.value)); values.append(input, type === "percent" ? "%" : ""); }
     const remove = element("button", "✕"); remove.type = "button"; remove.classList.add("macro-delete"); remove.onclick = () => { change(key, undefined, true); refresh(); }; row.append(values, remove); wrap.append(row);
   }
