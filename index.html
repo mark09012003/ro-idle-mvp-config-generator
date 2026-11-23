@@ -1069,10 +1069,16 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <label for="source">選擇遊戲匯出的 JSON（選填）</label>
 <input id="source" type="file" accept=".json,application/json">
 <p id="source-status" role="status">目前直接產生部分設定。</p>
-<details><summary>編輯既有巨集（JSON）</summary>
-<p>產生巡迴時會重建含換圖或切換配置的巨集，並移除原有的自動配置切換規則。</p>
-<label for="macros">巨集陣列</label><textarea id="macros" rows="8" spellcheck="false">[]</textarea>
 </details>
+</section>
+<section id="custom-macro-section">
+<h2>自訂巨集（選填）</h2>
+<p class="section-help">可加入製作聖水、製作箭矢或自動施放技能等遊戲支援的巨集。請貼上遊戲匯出的巨集陣列；這些巨集會加入每一份配置。</p>
+<label for="macros">巨集陣列（JSON）</label>
+<textarea id="macros" rows="8" spellcheck="false" placeholder='[{"name":"自訂巨集","cooldownSec":5,"cond":{},"steps":[{"do":"skill","skill":"技能 ID","lv":1}]}]'>[]</textarea>
+<p id="macro-count" class="section-help" role="status">自訂巨集 0 條；每份配置最多 10 條。</p>
+<details><summary>格式說明</summary>
+<p>每條巨集需包含名稱、觸發條件 <code>cond</code> 及 1～10 個 <code>steps</code>。建議先在遊戲內建立並匯出，再複製需要的巨集。含換圖 <code>map</code> 或切換配置 <code>profile</code> 步驟的巨集會由巡迴產生器重建，不會重複加入。</p>
 </details>
 </section>
 <section id="switch-section" class="section-switch">
@@ -1277,7 +1283,7 @@ SOFTWARE.
     }
     const capacity = Math.min(Number(options.groupSize), 10 - baseMacros.length - Number(Boolean(wait)));
     if (!Number.isInteger(capacity) || capacity < 1) {
-      throw new Error("原有巨集已用完 10 個名額，請先移除幾條巨集。");
+      throw new Error("自訂與等待巨集已占滿 10 個名額，請先移除幾條巨集，保留巡迴巨集空間。");
     }
 
     const groups = [];
@@ -1405,6 +1411,9 @@ SOFTWARE.
         ...structuredClone(baseMacros), ...moves, ...(moves.length ? [] : flies),
         ...(!waitFirst && waitLast ? waiting : []),
       ];
+      if (config.macros.length > 10) {
+        throw new Error(`配置 ${label(index)} 共有 ${config.macros.length} 條巨集，超過每份配置 10 條的上限。`);
+      }
       if (config.profileSwitch?.length) delete config.profileSwitch;
       return {
         file: `${label(index)}.ro-idle.json`,
@@ -1702,6 +1711,7 @@ byId("source").onchange = async event => {
   clearPreview();
   byId("source-status").textContent = "目前直接產生部分設定。";
   byId("macros").value = "[]";
+  updateMacroCount();
   byId("priority").value = "arrival";
   if (!file) return;
   try {
@@ -1710,6 +1720,7 @@ byId("source").onchange = async event => {
     RoConfigBuilder.validateBase(candidate);
     base = candidate;
     byId("macros").value = JSON.stringify(base.config.macros ?? [], null, 2);
+    updateMacroCount();
     byId("priority").value = base.config.targets?.priority ?? "arrival";
     byId("source-status").textContent = [base.name, base.job].filter(Boolean).join(" · ") || file.name;
   } catch (error) {
@@ -1756,7 +1767,23 @@ function applyRouteBuffDefaults() {
 byId("buff").addEventListener("change", applyRouteBuffDefaults);
 byId("buffWhen").addEventListener("change", applyRouteBuffDefaults);
 
+function updateMacroCount() {
+  const count = byId("macro-count");
+  try {
+    const macros = JSON.parse(value("macros"));
+    if (!Array.isArray(macros)) throw new Error();
+    const custom = macros.filter(macro => Array.isArray(macro?.steps) &&
+      !macro.steps.some(step => ["map", "profile"].includes(step?.do))).length;
+    const rebuilt = macros.length - custom;
+    count.textContent = `自訂巨集 ${custom} 條；每份配置最多 10 條，巡迴與等待巨集也會計入。` +
+      (rebuilt ? ` 另有 ${rebuilt} 條換圖／配置切換巨集將由產生器重建。` : "");
+  } catch {
+    count.textContent = "巨集 JSON 格式尚未完成。";
+  }
+}
+
 function updateOptions() {
+  updateMacroCount();
   const leader = value("mode") === "leader";
   byId("leader").hidden = !leader;
   byId("buff").required = leader && Boolean(value("buffJob"));
