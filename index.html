@@ -1014,6 +1014,8 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 }
 .route-presets button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .route-presets small { color: var(--dim); }
+.route-preset-group + .route-preset-group { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.route-preset-group h3 { margin: 0 0 7px; font-size: 13px; }
 #route-preset-status:empty { display: none; }
 .map-actions span, #empty-route { color: var(--dim); font-size: 12px; }
 .map-actions .btn:disabled { border-color: var(--line); background: var(--head); color: var(--dim); }
@@ -1078,15 +1080,22 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <h2>怪物控制與選怪</h2>
 <fieldset class="targets">
 <legend>快速範本</legend>
+<div class="route-preset-group">
+<h3>標的角色</h3>
 <div class="route-presets">
-<button type="button" data-route-preset="leader" data-job="hunter" data-buff="AC_CONCENTRATION" aria-pressed="false"><strong>標的 · 神射手</strong><small>心神凝聚</small></button>
-<button type="button" data-route-preset="leader" data-job="monk" data-buff="AL_INCAGI" aria-pressed="false"><strong>標的 · 武術宗師</strong><small>加速術</small></button>
-<button type="button" data-route-preset="leader" data-job="alchemist" data-buff="MC_LOUD" aria-pressed="false"><strong>標的 · 創造者</strong><small>大聲吶喊</small></button>
-<button type="button" data-route-preset="leader" data-job="blacksmith" data-buff="MC_LOUD" aria-pressed="false"><strong>標的 · 神工匠</strong><small>大聲吶喊</small></button>
-<button type="button" data-route-preset="support" aria-pressed="false"><strong>非標的</strong><small>純輔助，看到怪就飛</small></button>
-<button type="button" data-route-preset="hunter" aria-pressed="false"><strong>非標的</strong><small>找怪並幫忙打</small></button>
+<button type="button" data-route-preset="leader" data-job="hunter" data-buff="AC_CONCENTRATION" aria-pressed="false"><strong>神射手</strong><small>心神凝聚</small></button>
+<button type="button" data-route-preset="leader" data-job="monk" data-buff="AL_INCAGI" aria-pressed="false"><strong>武術宗師</strong><small>加速術</small></button>
+<button type="button" data-route-preset="leader" data-job="alchemist" data-buff="MC_LOUD" aria-pressed="false"><strong>創造者</strong><small>大聲吶喊</small></button>
+<button type="button" data-route-preset="leader" data-job="blacksmith" data-buff="MC_LOUD" aria-pressed="false"><strong>神工匠</strong><small>大聲吶喊</small></button>
+ </div>
 </div>
-<label class="check"><input id="supportOnly" type="checkbox">輔助模式：不主動找怪，保留自衛和隊友輔助</label>
+<div class="route-preset-group">
+<h3>非標的角色</h3>
+<div class="route-presets">
+<button type="button" data-route-preset="support" aria-pressed="false"><strong>純輔助</strong><small>看到怪就飛</small></button>
+<button type="button" data-route-preset="hunter" aria-pressed="false"><strong>找怪並幫忙打</strong><small>打完目標再逃</small></button>
+</div>
+</div>
 <p id="route-preset-status" class="section-help" role="status"></p>
 </fieldset>
 <p class="section-help">分別設定勾選的 MVP／Boss 和其他怪物的預設動作與逃生方式。</p>
@@ -2457,7 +2466,6 @@ for (const button of routePresetButtons) {
     const leader = preset === "leader";
     activeRoutePreset = preset;
     byId("mode").value = leader ? "leader" : "follower";
-    byId("supportOnly").checked = support;
     byId("targetAction").value = support ? "defend" : "priority";
     byId("otherAction").value = "defend";
     byId("targetEscape").value = support ? "sight" : "";
@@ -2507,7 +2515,7 @@ byId("generator").onsubmit = event => {
     }
     const options = {
       macros,
-      supportOnly: checked("supportOnly"),
+      supportOnly: activeRoutePreset === "support" && value("mode") === "follower",
       assistAttack: activeRoutePreset === "hunter" && value("mode") === "follower",
       routeCondition: routeConditionEditor.cond,
       routeWait: value("routeWait"),
