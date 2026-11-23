@@ -268,9 +268,9 @@ function isGoogleAccount(profile) {
 
 function googleAccountOnly(profile) {
   if (!isGoogleAccount(profile)) return profile;
-  const {id, name, account, accountId, label, team, pinned, createdAt, updatedAt} = profile;
+  const {id, name, account, accountId, label, team, pinned, sortOrder, createdAt, updatedAt} = profile;
   const characters = pickCharacters({characters: profile.characters});
-  return {id, name, account, accountId, label, team, pinned, createdAt, updatedAt, provider: "google", characters};
+  return {id, name, account, accountId, label, team, pinned, ...(Number.isFinite(sortOrder) ? {sortOrder} : {}), createdAt, updatedAt, provider: "google", characters};
 }
 
 function updateGoogleCharacters(profile, {accountId, characters, charactersKnown}) {

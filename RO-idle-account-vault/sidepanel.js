@@ -474,9 +474,20 @@ function profileHaystack(profile) {
 
 function compareProfiles(a, b) {
   if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
+  const leftOrder = Number.isFinite(a.sortOrder) ? a.sortOrder : null;
+  const rightOrder = Number.isFinite(b.sortOrder) ? b.sortOrder : null;
+  if (leftOrder !== null || rightOrder !== null) {
+    const fallback = Number.MAX_SAFE_INTEGER;
+    if ((leftOrder ?? fallback) !== (rightOrder ?? fallback)) return (leftOrder ?? fallback) - (rightOrder ?? fallback);
+  }
   const left = shownLabel(a) || String(a.account || "");
   const right = shownLabel(b) || String(b.account || "");
   return left.localeCompare(right, "zh-Hant", { numeric: true, sensitivity: "base" });
+}
+
+function withoutSortOrder(profile) {
+  const {sortOrder, ...rest} = profile;
+  return rest;
 }
 
 function visibleProfiles() {
@@ -843,6 +854,24 @@ actions.append(el("button", {
         }))}, ["保存"]),
       ]));
       }
+      const move = profileMoveState(profile);
+      menu.append(el("div", { class: "card-actions sort-actions" }, [
+        el("span", { class: "sort-label" }, ["排序位置"]),
+        el("button", {
+          class: "btn tiny",
+          type: "button",
+          title: "在目前隊伍中上移",
+          ...(move.up ? {} : { disabled: "" }),
+          onClick: guard(() => moveProfile(profile, -1)),
+        }, ["上移"]),
+        el("button", {
+          class: "btn tiny",
+          type: "button",
+          title: "在目前隊伍中下移",
+          ...(move.down ? {} : { disabled: "" }),
+          onClick: guard(() => moveProfile(profile, 1)),
+        }, ["下移"]),
+      ]));
       menu.append(el("div", { class: "card-actions" }, [
         el("button", { class: "btn tiny danger", type: "button", onClick: () => askDelete(profile) }, ["刪除"]),
       ]));
@@ -1379,8 +1408,34 @@ function toggleMenu(profile) {
 }
 
 async function togglePin(profile) {
-  const profiles = state.profiles.map((item) => (item.id === profile.id ? { ...item, pinned: !item.pinned } : item));
+  const profiles = state.profiles.map((item) => (item.id === profile.id ? { ...withoutSortOrder(item), pinned: !item.pinned } : item));
   await persist({ profiles }, profile.pinned ? `已取消釘選「${profile.name}」。` : `已把「${profile.name}」釘在最上面。`);
+}
+
+function sortablePeers(profile) {
+  const team = cleanLabel(profile.team, 16);
+  return state.profiles
+    .filter((item) => cleanLabel(item.team, 16) === team && Boolean(item.pinned) === Boolean(profile.pinned))
+    .sort(compareProfiles);
+}
+
+function profileMoveState(profile) {
+  const peers = sortablePeers(profile);
+  const index = peers.findIndex((item) => item.id === profile.id);
+  return { up: index > 0, down: index >= 0 && index < peers.length - 1 };
+}
+
+async function moveProfile(profile, offset) {
+  const peers = sortablePeers(profile);
+  const index = peers.findIndex((item) => item.id === profile.id);
+  const target = index + offset;
+  if (index < 0 || target < 0 || target >= peers.length) return;
+  [peers[index], peers[target]] = [peers[target], peers[index]];
+  const orderById = new Map(peers.map((item, position) => [item.id, position]));
+  const profiles = state.profiles.map((item) => orderById.has(item.id)
+    ? { ...item, sortOrder: orderById.get(item.id) }
+    : item);
+  await persist({ profiles }, `已移動「${mentionName(profile)}」的排序位置。`);
 }
 
 function askDelete(profile) {
@@ -1648,8 +1703,10 @@ async function saveProfileEdits(profile, fields) {
   if (AccountVault.isGoogleAccount(profile)) {
     if (!account) throw new Error("請填 Google 帳號或備註名稱。");
     const profiles = state.profiles.map(item => item.id === profile.id ? AccountVault.googleAccountOnly({
-      ...item, account, name: account, label: cleanLabel(fields.label, 24),
-      team: cleanLabel(fields.team, 16), updatedAt: Date.now(),
+      ...(cleanLabel(fields.team, 16) === cleanLabel(item.team, 16) ? item : withoutSortOrder(item)),
+      account, name: account, label: cleanLabel(fields.label, 24),
+      team: cleanLabel(fields.team, 16),
+      updatedAt: Date.now(),
     }) : item);
     state.menuId = null;
     await persist({profiles}, "已更新 Google 帳號資訊。");
@@ -1663,7 +1720,7 @@ async function saveProfileEdits(profile, fields) {
   const label = cleanLabel(fields.label, 24);
   const team = cleanLabel(fields.team, 16);
   const profiles = state.profiles.map((item) => (item.id === profile.id ? {
-    ...item,
+    ...(team === cleanLabel(item.team, 16) ? item : withoutSortOrder(item)),
     label,
     team,
     account,
@@ -1686,7 +1743,7 @@ async function setLabel(profile, value) {
 
 async function assignTeam(profile, team) {
   const name = cleanLabel(team, 16);
-  const profiles = state.profiles.map((item) => (item.id === profile.id ? { ...item, team: name } : item));
+  const profiles = state.profiles.map((item) => (item.id === profile.id ? { ...withoutSortOrder(item), team: name } : item));
   await persist({ profiles }, name ? `已把「${mentionName(profile)}」分到「${name}」。` : `已把「${mentionName(profile)}」移出隊伍。`);
 }
 

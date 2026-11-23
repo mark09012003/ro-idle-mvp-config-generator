@@ -666,6 +666,8 @@ input[type="search"],
 }
 
 .card-actions, .confirm { margin-top: 4px; }
+.sort-actions { display: flex; align-items: center; gap: 5px; padding-top: 5px; border-top: 1px solid var(--line); }
+.sort-label { margin-right: auto; color: var(--dim); font-size: 13px; }
 
 .confirm {
   padding: 6px;
