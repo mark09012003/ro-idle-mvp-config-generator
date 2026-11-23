@@ -1,6 +1,6 @@
 (() => {
   const previous = globalThis.__roVaultLogCaptureController;
-  if (previous?.version === "1.9.4" && previous.valid()) return;
+  if (previous?.version === "1.9.5" && previous.valid()) return;
   previous?.stop();
   const runtime = chrome.runtime;
   const queue = [];
@@ -9,6 +9,8 @@
   let retryTimer;
   let lastSavedAt = 0;
   let lastError = "";
+  let livePushScheduled = false;
+  const liveRows = [];
   const intervals = [];
 
   function valid() {
@@ -20,8 +22,26 @@
     const match = caption.match(/^RO放置仙境 - \[([^\]]+)\]/);
     return {account: sessionStorage.getItem("ro-ext:loginName") || "", character: match ? match[1] : ""};
   }
+  function characterKey(row) {
+    if (row.characterId != null && String(row.characterId)) return "id:" + row.characterId;
+    if (row.character) return "name:" + encodeURIComponent(row.account || "") + ":" + encodeURIComponent(row.character);
+    return "unknown";
+  }
+  function pushLive(row) {
+    liveRows.push(row);
+    if (livePushScheduled) return;
+    livePushScheduled = true;
+    queueMicrotask(() => {
+      livePushScheduled = false;
+      const rows = liveRows.splice(0);
+      runtime.sendMessage({type: "ro-vault:logs-received", rows}).catch(() => {});
+    });
+  }
   function enqueue(row) {
-    queue.push({...identity(), receivedAt: Date.now(), ...row});
+    const entry = {...identity(), receivedAt: Date.now(), ...row};
+    entry.characterKey = characterKey(entry);
+    queue.push(entry);
+    pushLive(entry);
     if (queue.length >= 100) flush();
   }
   async function flush() {
@@ -35,7 +55,7 @@
       if (result.saved > 0) lastSavedAt = Date.now();
       lastError = "";
       if (lastSavedAt) document.documentElement?.setAttribute("data-ro-log-saved-at", String(lastSavedAt));
-      document.documentElement?.setAttribute("data-ro-log-recorder", "1.9.4");
+      document.documentElement?.setAttribute("data-ro-log-recorder", "1.9.5");
       document.documentElement?.removeAttribute("data-ro-log-error");
     } catch (error) {
       lastError = error.message;
@@ -78,10 +98,10 @@
   }
   function statusListener(message, sender, reply) {
     if (message?.type !== "ro-vault:capture-status") return;
-    reply({pending: queue.length, lastSavedAt, error: lastError, recorderVersion: "1.9.4"});
+    reply({pending: queue.length, lastSavedAt, error: lastError, recorderVersion: "1.9.5"});
   }
   const controller = {
-    version: "1.9.4", valid,
+    version: "1.9.5", valid,
     stop() {
       stopped = true;
       intervals.forEach(clearInterval);clearTimeout(retryTimer);

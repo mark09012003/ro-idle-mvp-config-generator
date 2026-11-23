@@ -276,12 +276,12 @@ async function battleLogStatus() {
     try {
       let status;
       try {status = await chrome.tabs.sendMessage(tab.id, {type: "ro-vault:capture-status"});} catch {}
-      if (status?.recorderVersion !== "1.9.4") await activateBattleLogCapture(tab.id);
+      if (status?.recorderVersion !== "1.9.5") await activateBattleLogCapture(tab.id);
       const result = await chrome.tabs.sendMessage(tab.id, {type: "ro-vault:capture-status"});
       return {tabId: tab.id, ...result};
     } catch (error) {return {tabId: tab.id, error: error.message};}
   }));
-  return {captures, recorderVersion: "1.9.4"};
+  return {captures, recorderVersion: "1.9.5"};
 }
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {

@@ -1,7 +1,7 @@
 
 globalThis.CombatLogs = {
   mvpIndexTypes: new Set([
-    "found", "ambush", "targetSwitch", "playerAttack", "monsterAttack", "skillHit", "monsterSkill",
+    "found", "ambush", "targetSwitch", "playerAttack", "monsterAttack", "skillHit", "monsterSkill", "mobSkill",
     "devoted", "devotionHit", "kill", "mvp", "worldMvp", "death", "stop", "mapChange", "teleport", "arrive",
   ]),
   eventTime(row) {
@@ -115,7 +115,7 @@ globalThis.CombatLogs = {
   },
   buildMvpIndex(records, pending = new Map()) {
     const battles = [];
-    const combatTypes = new Set(["found", "ambush", "targetSwitch", "playerAttack", "monsterAttack", "skillHit", "monsterSkill", "devoted", "devotionHit", "kill"]);
+    const combatTypes = new Set(["found", "ambush", "targetSwitch", "playerAttack", "monsterAttack", "skillHit", "monsterSkill", "mobSkill", "devoted", "devotionHit", "kill"]);
     records.sort((a, b) => String(a.characterId).localeCompare(String(b.characterId)) || (a.eventAt || 0) - (b.eventAt || 0) || a.seq - b.seq);
     for (const record of records) {
       if (["death", "stop", "mapChange", "teleport", "arrive"].includes(record.type)) {
@@ -158,13 +158,19 @@ globalThis.CombatLogs = {
   describeArchivedEvent(row, names, labels, battle) {
     const body = row.data?.body;
     if (!body || typeof body !== "object") return row.text || "";
-    const monster = body.monsterName || names.get(Number(body.monsterId)) ||
+    const battleMonster = body.monsterId != null && battle.monsterId != null &&
+      Number(body.monsterId) === Number(battle.monsterId) ? battle.monsterName : "";
+    const monster = body.monsterName || names.get(Number(body.monsterId)) || battleMonster ||
       (body.monsterId == null ? "" : "怪物 #" + body.monsterId) || battle.monsterName || "目標";
     const skill = (labels.skills?.[body.skill] || body.skill || "技能") + (body.lv ? " Lv." + body.lv : "");
+    const effectKey = body.status ?? body.effect ?? body.buff ?? body.skill;
+    const effect = body.statusName || body.effectName || labels.skills?.[effectKey] || effectKey || "狀態效果";
     const item = labels.items?.[body.itemId] || (body.itemId == null ? "道具" : "道具 #" + body.itemId);
     const number = value => Number.isFinite(value) ? value.toLocaleString("zh-TW") : "";
     const damage = number(body.damage);
     const outcome = body.result === "miss" ? "Miss" : damage ? damage + " 點傷害" : "命中";
+    const message = body.message || body.text || body.detail || body.reason || "";
+    const target = body.targetName || body.target || "";
     switch (body.type) {
       case "found": return "發現 " + monster + "。";
       case "ambush": return monster + " 主動衝過來！";
@@ -173,14 +179,29 @@ globalThis.CombatLogs = {
       case "skillHit": return `${skill} → ${monster} · ${outcome}${body.hits > 1 ? "（" + body.hits + " 次）" : ""}。`;
       case "playerAttack": return `攻擊 ${monster} · ${outcome}。`;
       case "monsterAttack": return `${monster} 的攻擊 · ${outcome}。`;
+      case "mobSkill":
       case "monsterSkill": return `${monster} 使用 ${skill}${damage ? " · " + outcome : ""}。`;
+      case "buffStart": return `${effect} 效果開始${target ? "（" + target + "）" : ""}。`;
+      case "buffEnd": return `${effect} 效果結束${target ? "（" + target + "）" : ""}。`;
+      case "statusStart": return `${effect} 狀態開始${body.monsterId == null ? "" : " · " + monster}。`;
+      case "statusEnd": return `${effect} 狀態結束${body.monsterId == null ? "" : " · " + monster}。`;
+      case "support": return `${body.ally || body.sourceName || "隊友"} 使用 ${skill} 支援${target ? " " + target : ""}。`;
+      case "heal": return `${body.ally || body.sourceName || "角色"} 恢復 ${number(body.amount ?? body.heal) || "未知"} HP。`;
+      case "system": return message ? "系統：" + message : `系統事件${body.monsterId == null ? "" : " · " + monster}。`;
       case "kill": return "成功擊敗 " + monster + "！";
       case "mvp": return `MVP！打倒了 ${monster}${Number.isFinite(body.exp) ? " · MVP 經驗 " + number(body.exp) : ""}。`;
       case "worldMvp": return `${monster} · ${body.won ? "隊伍獲勝" : "其他隊伍獲勝"}。`;
       case "drop": return `${monster} 掉落 ${item} × ${body.qty ?? 1}。`;
       case "pickup": return `撿到 ${item} × ${body.qty ?? 1}。`;
+      case "exp": return `獲得 Base EXP ${number(body.baseExp ?? body.exp) || 0} / Job EXP ${number(body.jobExp) || 0}。`;
+      case "baseLevelUp": return `Base Level 提升至 ${body.level ?? body.lv ?? "未知"}。`;
+      case "jobLevelUp": return `Job Level 提升至 ${body.level ?? body.lv ?? "未知"}。`;
       case "death": return "角色死亡。";
-      default: return `戰鬥事件（${body.type || "未知類型"}）${body.monsterId == null ? "" : " · " + monster}`;
+      default: {
+        const facts = [message, body.skill ? "技能 " + skill : "", effectKey && !body.skill ? "效果 " + effect : "",
+          body.monsterId == null ? "" : monster, target ? "目標 " + target : ""].filter(Boolean);
+        return `戰鬥事件（${body.type || "未知類型"}）${facts.length ? " · " + [...new Set(facts)].join(" · ") : ""}。`;
+      }
     }
   },
   mvpRespawn(respawn, lastKill, now, {encountered = false, unavailable = false, noCooldown = false} = {}) {

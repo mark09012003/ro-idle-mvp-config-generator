@@ -29,7 +29,19 @@ const event = (id, seq, type) => ({
 }
 
 assert.equal(CombatLogs.mvpIndexRelevant(event("attack", 400, "playerAttack")), true);
+assert.equal(CombatLogs.mvpIndexRelevant(event("mob-skill", 400, "mobSkill")), true);
 assert.equal(CombatLogs.mvpIndexRelevant(event("buff", 400, "buffStart")), false);
+
+{
+  const labels = {skills: {PR_LEXAETERNA: "天使之怒"}};
+  const battle = {monsterId: 1477, monsterName: "古埃及王"};
+  const describe = body => CombatLogs.describeArchivedEvent({data: {body}}, new Map(), labels, battle);
+  assert.equal(describe({type: "monsterAttack", monsterId: 1477, damage: 0}), "古埃及王 的攻擊 · 0 點傷害。");
+  assert.equal(describe({type: "mobSkill", monsterId: 1477, skill: "NPC_STONESKIN"}), "古埃及王 使用 NPC_STONESKIN。");
+  assert.equal(describe({type: "buffStart", skill: "PR_LEXAETERNA"}), "天使之怒 效果開始。");
+  assert.equal(describe({type: "statusEnd", status: "stun", monsterId: 1477}), "stun 狀態結束 · 古埃及王。");
+  assert.equal(describe({type: "system", message: "切換戰鬥狀態"}), "系統：切換戰鬥狀態");
+}
 
 {
   const rows = [

@@ -295,7 +295,7 @@ function createMvpDetail(battle, characterKey, title) {
 
   let loaded = false;
   let revision = 0;
-  let limit = 150;
+  let limit = 500;
   let fromEnd = false;
   async function loadDetails(reveal = false) {
     const request = ++revision;
@@ -353,11 +353,11 @@ function createMvpDetail(battle, characterKey, title) {
     if (loaded) fitMvpDetail(detail, true);
     else loadDetails(true);
   };
-  mode.onchange = () => {limit = 150;loadDetails();};
-  more.onclick = () => {limit += 150;loadDetails();};
+  mode.onchange = () => {limit = 500;loadDetails();};
+  more.onclick = () => {limit += 500;loadDetails();};
   jump.onclick = () => {
     fromEnd = !fromEnd;
-    limit = 150;
+    limit = 500;
     jump.textContent = fromEnd ? "回到開頭" : "跳到結算";
     rows.scrollTop = 0;
     loadDetails();
@@ -541,6 +541,7 @@ let loading = false;
 let pendingReset = false;
 let pendingAnimateNew = true;
 let latestSavedAt = 0;
+const pendingMvpRefreshKeys = new Set();
 function matches(row) {
   const query = searchEl.value.trim().toLocaleLowerCase();
   return row.characterKey === selectedCharacterKey && (!selectedMvpBattleId || CombatLogs.battle(row, mvpBattles)?.id === selectedMvpBattleId) &&
@@ -693,6 +694,42 @@ function canAppendLiveRows() {
   return autoScrollEl.checked && offset <= 200 && !selectedMvpBattleId && !mvpOnlyEl.checked && !searchEl.value.trim();
 }
 
+function appendReceivedRows(incoming) {
+  const selected = characterCatalog.find(character => character.key === selectedCharacterKey);
+  const current = incoming.flatMap(row => {
+    if (row.characterKey === selectedCharacterKey) return [row];
+    if (selected?.character && row.character === selected.character) return [{...row, characterKey: selectedCharacterKey}];
+    return [];
+  });
+  if (!current.length) return false;
+  if (!lastSavedCharacterKey) lastSavedCharacterKey = selectedCharacterKey;
+  latestSavedAt = Math.max(latestSavedAt, ...current.map(row => row.receivedAt || 0));
+  if (current.some(row => CombatLogs.mvpIndexRelevant(row))) pendingMvpRefreshKeys.add(selectedCharacterKey);
+  if (!canAppendLiveRows()) {
+    document.querySelector("#latest").textContent = "回到最新（有新訊息）";
+    return true;
+  }
+  const known = new Set(displayedRows.map(row => row.id));
+  const added = current.filter(row => !known.has(row.id) && matches(row));
+  if (added.length) {
+    const addedIds = new Set(added.map(row => row.id));
+    displayedRows = [...added, ...displayedRows].slice(0, 200);
+    offset = displayedRows.length;
+    for (const row of displayedRows) if (!addedIds.has(row.id)) revealedLogIds.add(row.id);
+    renderLogRows(displayedRows);
+    statusEl.textContent = "目前顯示 " + offset + " 筆";
+    scrollEl.scrollTop = scrollEl.scrollHeight;
+    startLinePlayback();
+  }
+  document.querySelector("#latest").textContent = "回到最新";
+  return true;
+}
+
+function refreshPendingMvpArchive(key) {
+  if (!pendingMvpRefreshKeys.delete(key)) return;
+  refreshMvpArchive(key);
+}
+
 async function appendLiveRows(since) {
   await characterSettingsReady;
   if (loading || !selectedCharacterKey || !canAppendLiveRows()) return false;
@@ -717,19 +754,9 @@ async function appendLiveRows(since) {
     });
     db.close();
     if (key !== selectedCharacterKey || !canAppendLiveRows()) return false;
-    const known = new Set(displayedRows.map(row => row.id));
-    const added = incoming.filter(row => !known.has(row.id) && matches(row));
-    if (added.length) {
-      displayedRows = [...added, ...displayedRows].slice(0, 200);
-      offset = displayedRows.length;
-      for (const row of displayedRows.slice(added.length)) revealedLogIds.add(row.id);
-      renderLogRows(displayedRows);
-      statusEl.textContent = "目前顯示 " + offset + " 筆";
-      scrollEl.scrollTop = scrollEl.scrollHeight;
-      startLinePlayback();
-    }
-    if (incoming.some(row => CombatLogs.mvpIndexRelevant(row))) refreshMvpArchive(key);
-    document.querySelector("#latest").textContent = "回到最新";
+    appendReceivedRows(incoming);
+    if (incoming.some(row => CombatLogs.mvpIndexRelevant(row))) pendingMvpRefreshKeys.add(key);
+    refreshPendingMvpArchive(key);
     return true;
   } catch (error) {
     statusEl.textContent = "增量讀取失敗：" + error.message;
@@ -739,6 +766,10 @@ async function appendLiveRows(since) {
     moreEl.disabled = false;
   }
 }
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message?.type !== "ro-vault:logs-received" || sender.id !== chrome.runtime.id || !Array.isArray(message.rows)) return;
+  appendReceivedRows(message.rows);
+});
 document.querySelector("#refresh").onclick = () => load(true);
 document.querySelector("#latest").onclick = () => {
   selectedMvpBattleId = "";selectedCategory = "all";
@@ -821,12 +852,12 @@ async function refreshCaptureStatus() {
       if (!status?.ok) throw new Error(status?.error || "無法連接紀錄服務");
     } catch (error) {
       reloadExtensionEl.hidden = false;
-      element.textContent = "本機已保存 " + local.count + " 筆。背景紀錄服務未回應：" + error.message + "。請確認已重新載入 1.9.4 版擴充。";
+      element.textContent = "本機已保存 " + local.count + " 筆。背景紀錄服務未回應：" + error.message + "。請確認已重新載入 1.9.5 版擴充。";
       return;
     }
     if (requestedCharacterKey !== selectedCharacterKey) return;
     const errors = status.captures.filter(capture => capture.error);
-    const outdated = status.recorderVersion !== "1.9.4" || errors.some(capture => /version.*less than|VersionError|版本/i.test(capture.error));
+    const outdated = status.recorderVersion !== "1.9.5" || errors.some(capture => /version.*less than|VersionError|版本/i.test(capture.error));
     reloadExtensionEl.hidden = !outdated;
     const saved = local.lastSavedAt ? "，最後保存 " + new Date(local.lastSavedAt).toLocaleString("zh-TW") : "";
     const selected = characterCatalog.find(character => character.key === selectedCharacterKey);
@@ -836,12 +867,18 @@ async function refreshCaptureStatus() {
       (outdated ? "。背景程式仍是舊版，請按「重新載入擴充」後重開紀錄頁。" : "") +
       (errors.length ? "。保存錯誤：" + errors.map(capture => capture.error).join(" / ") : "");
     const revision = selectedCharacterKey + ":" + local.count + ":" + local.lastSavedAt;
-    if (lastSavedCharacterKey !== selectedCharacterKey || !lastSavedRevision) {
+    if (lastSavedCharacterKey !== selectedCharacterKey) {
       lastSavedCharacterKey = selectedCharacterKey;
       latestSavedAt = local.lastSavedAt;
       lastSavedRevision = revision;
+    } else if (!lastSavedRevision) {
+      latestSavedAt = Math.max(latestSavedAt, local.lastSavedAt);
+      lastSavedRevision = revision;
     } else if (lastSavedRevision !== revision) {
-      if (canAppendLiveRows()) {
+      if (local.lastSavedAt && local.lastSavedAt <= latestSavedAt) {
+        lastSavedRevision = revision;
+        refreshPendingMvpArchive(selectedCharacterKey);
+      } else if (canAppendLiveRows()) {
         if (await appendLiveRows(latestSavedAt)) {
           latestSavedAt = local.lastSavedAt;
           lastSavedRevision = revision;
