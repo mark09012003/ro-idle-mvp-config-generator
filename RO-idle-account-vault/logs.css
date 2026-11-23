@@ -86,6 +86,7 @@ select, input[type="search"] {border: 1px solid #59566f; background: #171721; co
 .combat-log-panes {display:grid;grid-template-columns:minmax(245px,.8fr) minmax(0,1.2fr);grid-template-rows:minmax(0,1fr);flex:1;min-height:150px;gap:6px;}
 .combat-mvp-pane {display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;min-height:0;gap:6px;}
 .combat-mvp-pane > details {min-width:0;min-height:0;margin:0;overflow:auto;contain:paint;overscroll-behavior:contain;}
+.combat-mvp-pane > #mvp-archive:has(.mvp-detail[open]) {overflow:hidden;}
 .combat-mvp-pane > #live-mvp {max-height:min(30vh,190px);}
 .combat-mvp-pane > #mvp-archive:not([open]) {align-self:start;}
 #mvp-archive > summary {position:static;}
