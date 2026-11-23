@@ -1,5 +1,22 @@
 
 globalThis.CombatLogs = {
+  skillAliases: {
+    NPC_SUMMONSLAVE: "召喚隨從",
+    NPC_CALLSLAVE: "召回隨從",
+    NPC_SUMMONMONSTER: "召喚魔物",
+    NPC_POWERUP: "力量提升",
+    NPC_AGIUP: "敏捷提升",
+    NPC_SELFDESTRUCTION: "自爆",
+    NPC_CRITICALSLASH: "致命攻擊",
+    NPC_DARKBREATH: "黑暗吐息",
+    NPC_DARKBLESSING: "黑暗祝福",
+    NPC_BARRIER: "防護罩",
+    NPC_REBIRTH: "重生",
+    NPC_EARTHQUAKE: "地震連繫",
+    NPC_PULSESTRIKE: "脈震衝撞",
+    NPC_STONESKIN: "鋼筋鐵骨",
+    NPC_WIDESILENCE: "廣範圍沉默",
+  },
   mvpIndexTypes: new Set([
     "found", "ambush", "targetSwitch", "playerAttack", "monsterAttack", "skillHit", "monsterSkill", "mobSkill",
     "devoted", "devotionHit", "kill", "mvp", "worldMvp", "death", "stop", "mapChange", "teleport", "arrive",
@@ -10,6 +27,17 @@ globalThis.CombatLogs = {
   },
   dayKey(time) {
     return new Date(time).toLocaleDateString("sv-SE", {timeZone: "Asia/Taipei"});
+  },
+  skillName(code, labels = {}) {
+    if (!code) return "技能";
+    if (labels.skills?.[code]) return labels.skills[code];
+    if (this.skillAliases[code]) return this.skillAliases[code];
+    const [prefix, ...parts] = String(code).split("_");
+    const readable = parts.join(" ") || String(code);
+    return prefix === "NPC" ? `怪物技能「${readable}」` : readable;
+  },
+  translateSkillCodes(text, labels = {}) {
+    return String(text || "").replace(/\b[A-Z]{2,}_[A-Z0-9_]+\b/g, code => this.skillName(code, labels));
   },
   categories: {all: "全部", combat: "戰鬥", skill: "技能", exp: "經驗值", loot: "掉寶", system: "系統", warn: "警告"},
   category(row) {
@@ -157,14 +185,14 @@ globalThis.CombatLogs = {
   },
   describeArchivedEvent(row, names, labels, battle) {
     const body = row.data?.body;
-    if (!body || typeof body !== "object") return row.text || "";
+    if (!body || typeof body !== "object") return this.translateSkillCodes(row.text, labels);
     const battleMonster = body.monsterId != null && battle.monsterId != null &&
       Number(body.monsterId) === Number(battle.monsterId) ? battle.monsterName : "";
     const monster = body.monsterName || names.get(Number(body.monsterId)) || battleMonster ||
       (body.monsterId == null ? "" : "怪物 #" + body.monsterId) || battle.monsterName || "目標";
-    const skill = (labels.skills?.[body.skill] || body.skill || "技能") + (body.lv ? " Lv." + body.lv : "");
+    const skill = this.skillName(body.skill, labels) + (body.lv ? " Lv." + body.lv : "");
     const effectKey = body.status ?? body.effect ?? body.buff ?? body.skill;
-    const effect = body.statusName || body.effectName || labels.skills?.[effectKey] || effectKey || "狀態效果";
+    const effect = body.statusName || body.effectName || (effectKey ? this.skillName(effectKey, labels) : "狀態效果");
     const item = labels.items?.[body.itemId] || (body.itemId == null ? "道具" : "道具 #" + body.itemId);
     const number = value => Number.isFinite(value) ? value.toLocaleString("zh-TW") : "";
     const damage = number(body.damage);

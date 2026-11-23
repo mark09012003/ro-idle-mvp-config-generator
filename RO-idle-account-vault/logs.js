@@ -252,8 +252,14 @@ playbackEl.onchange = startLinePlayback;
 playbackSpeedEl.onchange = startLinePlayback;
 
 const mvpDetailEntries = new Map();
+let logEventLabels = {};
 const logEventLabelsReady = fetch("log-event-labels.json")
   .then(response => response.ok ? response.json() : {})
+  .then(labels => {
+    logEventLabels = labels;
+    if (displayedRows.length) renderLogRows(displayedRows);
+    return labels;
+  })
   .catch(() => {});
 
 function fitMvpDetail(detail, reveal = false) {
@@ -612,12 +618,20 @@ function renderLogRows(rows) {
       caption.dateTime = new Date(receivedAt).toISOString();
       caption.textContent = "[" + new Date(receivedAt).toLocaleTimeString("zh-TW", {hour12: false, timeZone: "Asia/Taipei"}) + "]";
       const text = document.createElement("pre");
-      text.textContent = (row.text || "").replace(/^\[\d{1,2}:\d{2}:\d{2}\]\s*/, "");
+      text.textContent = CombatLogs.translateSkillCodes(
+        (row.text || "").replace(/^\[\d{1,2}:\d{2}:\d{2}\]\s*/, ""), logEventLabels
+      );
       if (row.kind === "事件 JSON") {
         const details = document.createElement("details");
         const summary = document.createElement("summary");summary.textContent = row.event || "事件 JSON";
         details.append(summary, text);article.append(caption, details);
       } else article.append(caption, text);
+    }
+    if (row.kind !== "事件 JSON") {
+      const text = article.querySelector(":scope > pre");
+      if (text) text.textContent = CombatLogs.translateSkillCodes(
+        (row.text || "").replace(/^\[\d{1,2}:\d{2}:\d{2}\]\s*/, ""), logEventLabels
+      );
     }
     const battle = CombatLogs.battle(row, mvpBattles);
     if (battle) {
