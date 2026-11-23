@@ -865,20 +865,42 @@ input[type="checkbox"] { accent-color: var(--gold); }
 #generator > section { scroll-margin-top: 12px; }
 #generator > section:target { border-color: var(--gold); }
 .operation-profile { padding: 8px; margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
-.macro-toolbar, .macro-head, .macro-step { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
-.macro-toolbar { justify-content: space-between; margin-bottom: 8px; }
-.macro-card { margin: 8px 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
-.macro-card label { margin: 0; }
-.macro-head .macro-name { flex: 1 1 180px; }
-.macro-head .macro-number { width: 92px; }
-.macro-condition { margin: 8px 0; }
-.macro-condition-ui { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 8px 0; padding: 7px; border-radius: 7px; background: var(--paper); }
-.macro-condition-ui select, .macro-condition-ui input { width: auto !important; margin: 0 !important; }
-.macro-step { padding: 6px; margin-top: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
-.macro-step select { width: auto; min-width: 125px; margin: 0; }
-.macro-step input { width: min(170px, 100%) !important; margin: 0 !important; }
-.macro-step .step-value { flex: 1 1 180px; }
+.macro-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.macro-toolbar p { margin: 0; }
+.macro-card { margin: 12px 0; padding: 12px; border: 1px solid #ccd6e2; border-radius: 10px; background: #f8fafc; box-shadow: 0 1px 2px rgb(30 50 70 / 8%); }
+.macro-head { display: grid; grid-template-columns: auto minmax(180px, 1fr) 110px 150px auto auto; align-items: end; gap: 10px; padding-bottom: 11px; border-bottom: 1px solid var(--line); }
+.macro-field { display: grid; gap: 4px; margin: 0; color: var(--dim); font-size: 14px; }
+.macro-field > span { font-weight: 700; }
+.macro-field input, .macro-field select { margin: 0 !important; }
+.macro-check { display: flex; align-items: center; gap: 6px; min-height: 32px; margin: 0; font-size: 14px; white-space: nowrap; }
+.macro-name { min-width: 0; }
+.macro-number { width: 100% !important; }
+.macro-section-title { display: block; margin: 12px 0 7px; color: var(--title); font-size: 15px; }
+.macro-condition { margin: 9px 0 0; }
+.macro-condition-ui { display: grid; gap: 7px; margin: 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.macro-condition-row { display: grid; grid-template-columns: minmax(170px, .8fr) minmax(180px, 1.2fr) auto; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 7px; background: var(--head); }
+.macro-condition-row > b { font-size: 14px; }
+.macro-condition-row select, .macro-condition-row input { width: 100% !important; margin: 0 !important; }
+.macro-condition-row .condition-values { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.macro-condition-row .condition-values input { min-width: 0; }
+.macro-add-condition, .macro-add-step { width: 100%; margin: 0; border-style: dashed; background: var(--paper); }
+.macro-steps { display: grid; gap: 7px; }
+.macro-step { display: grid; grid-template-columns: 28px minmax(135px, .55fr) minmax(220px, 1.45fr) auto; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.macro-step-index { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: white; font-weight: 700; }
+.macro-step select { width: 100%; min-width: 0; margin: 0; }
+.macro-step input { width: min(180px, 100%) !important; margin: 0 !important; }
+.macro-step .step-value { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.macro-row-actions { display: flex; gap: 5px; }
+.macro-delete { color: var(--danger); }
+.macro-head > .macro-delete { align-self: end; min-height: 32px; }
 .macro-empty { padding: 14px; text-align: center; color: var(--dim); border: 1px dashed var(--line); border-radius: 8px; }
+@media (max-width: 720px) {
+  .macro-head { grid-template-columns: 1fr 1fr; align-items: end; }
+  .macro-condition-row { grid-template-columns: 1fr auto; }
+  .macro-condition-row .condition-values { grid-column: 1 / -1; grid-row: 2; }
+  .macro-step { grid-template-columns: 28px minmax(0, 1fr) auto; }
+  .macro-step .step-value { grid-column: 2 / -1; }
+}
 .operation-profile summary { font-weight: 700; }
 .operation-profile ol { padding-left: 22px; }
 .operation-profile li p { margin: 2px 0 6px; overflow-wrap: anywhere; }
@@ -1835,10 +1857,11 @@ function saveCustomMacros() {
 
 function renderMacroStep(step, macroIndex, stepIndex) {
   const row = element("div", ""); row.className = "macro-step";
+  const number = element("span", String(stepIndex + 1)); number.className = "macro-step-index";
   const type = macroSelect(Object.entries(macroStepLabels), step.do);
   type.onchange = () => { customMacros[macroIndex].steps[stepIndex] = defaultMacroStep(type.value); saveCustomMacros(); renderMacroEditor(); };
-  row.append(type);
-  const field = element("span", ""); field.className = "step-value macro-step";
+  row.append(number, type);
+  const field = element("span", ""); field.className = "step-value";
   const bind = (input, key, number = false) => {
     input.oninput = () => { customMacros[macroIndex].steps[stepIndex][key] = number ? Number(input.value) : input.value; saveCustomMacros(); };
     field.append(input);
@@ -1863,8 +1886,10 @@ function renderMacroStep(step, macroIndex, stepIndex) {
   const up = element("button", "▲"); up.type = "button"; up.disabled = stepIndex === 0;
   up.onclick = () => { const steps = customMacros[macroIndex].steps; [steps[stepIndex - 1], steps[stepIndex]] = [steps[stepIndex], steps[stepIndex - 1]]; saveCustomMacros(); renderMacroEditor(); };
   const remove = element("button", "移除"); remove.type = "button";
+  remove.classList.add("macro-delete");
   remove.onclick = () => { customMacros[macroIndex].steps.splice(stepIndex, 1); saveCustomMacros(); renderMacroEditor(); };
-  row.append(up, remove); return row;
+  const actions = element("span", ""); actions.className = "macro-row-actions"; actions.append(up, remove);
+  row.append(actions); return row;
 }
 
 const macroConditionDefs = [
@@ -1897,21 +1922,23 @@ function renderMacroCondition(macro) {
   for (const [key, current] of Object.entries(cond).filter(([key]) => key !== "or")) {
     const def = macroConditionByKey.get(key); if (!def) continue;
     const [, , label, type, , min, max] = def;
-    const row = element("div", ""); row.className = "macro-step"; row.append(element("b", label));
+    const row = element("div", ""); row.className = "macro-condition-row"; row.append(element("b", label));
+    const values = element("span", ""); values.className = "condition-values";
     const update = value => { macro.cond = {...(macro.cond ?? {}), [key]: value}; saveCustomMacros(); };
-    if (type === "boolean") { const input = macroSelect([["true", "是"], ["false", "否"]], String(current)); input.onchange = () => update(input.value === "true"); row.append(input); }
-    else if (type === "list") { const input = macroInput(Array.isArray(current) ? current.join(", ") : ""); input.placeholder = "輸入 ID，多個用逗號分隔"; input.oninput = () => update(input.value.split(",").map(value => value.trim()).filter(Boolean)); row.append(input); }
+    if (type === "boolean") { const input = macroSelect([["true", "是"], ["false", "否"]], String(current)); input.onchange = () => update(input.value === "true"); values.append(input); }
+    else if (type === "list") { const input = macroInput(Array.isArray(current) ? current.join(", ") : ""); input.placeholder = "輸入 ID，多個用逗號分隔"; input.oninput = () => update(input.value.split(",").map(value => value.trim()).filter(Boolean)); values.append(input); }
     else if (type === "item") {
       const itemId = macroInput(current?.itemId ?? "", "number", 1); itemId.placeholder = "道具 ID";
       const qty = macroInput(current?.qty ?? "", "number", 1, 30000); qty.placeholder = "數量";
-      const apply = () => update({itemId: Number(itemId.value), qty: Number(qty.value)}); itemId.oninput = apply; qty.oninput = apply; row.append(itemId, qty, "個");
-    } else if (type === "doing") { const input = macroSelect([["idle", "待機"], ["searching", "找怪"], ["attacking", "攻擊"], ["casting", "詠唱"], ["sitting", "坐著"], ["looting", "撿東西"]], current?.[0] ?? "searching"); input.onchange = () => update([input.value]); row.append(input); }
-    else { const input = macroInput(current, "number", type === "percent" ? 0 : min, type === "percent" ? 100 : max); input.oninput = () => update(Number(input.value)); row.append(input, type === "percent" ? "%" : ""); }
-    const remove = element("button", "✕"); remove.type = "button"; remove.onclick = () => { const next = {...macro.cond}; delete next[key]; macro.cond = Object.keys(next).length ? next : undefined; saveCustomMacros(); renderMacroEditor(); }; row.append(remove); wrap.append(row);
+      const apply = () => update({itemId: Number(itemId.value), qty: Number(qty.value)}); itemId.oninput = apply; qty.oninput = apply; values.append(itemId, qty, "個");
+    } else if (type === "doing") { const input = macroSelect([["idle", "待機"], ["searching", "找怪"], ["attacking", "攻擊"], ["casting", "詠唱"], ["sitting", "坐著"], ["looting", "撿東西"]], current?.[0] ?? "searching"); input.onchange = () => update([input.value]); values.append(input); }
+    else { const input = macroInput(current, "number", type === "percent" ? 0 : min, type === "percent" ? 100 : max); input.oninput = () => update(Number(input.value)); values.append(input, type === "percent" ? "%" : ""); }
+    const remove = element("button", "✕"); remove.type = "button"; remove.classList.add("macro-delete"); remove.onclick = () => { const next = {...macro.cond}; delete next[key]; macro.cond = Object.keys(next).length ? next : undefined; saveCustomMacros(); renderMacroEditor(); }; row.append(values, remove); wrap.append(row);
   }
   const add = document.createElement("select"); add.append(new Option("＋ 新增條件…", ""));
   for (const group of ["自己", "隊友", "目標", "周圍"]) { const options = macroConditionDefs.filter(def => def[0] === group && !(def[1] in cond)); if (!options.length) continue; const optgroup = document.createElement("optgroup"); optgroup.label = group; optgroup.append(...options.map(def => new Option(def[2], def[1]))); add.append(optgroup); }
   add.onchange = () => { if (!add.value) return; const def = macroConditionByKey.get(add.value); const value = def[3] === "list" || def[3] === "doing" ? [def[4]] : def[3] === "item" ? {itemId: 0, qty: 1} : def[4]; macro.cond = {...cond, [add.value]: value}; saveCustomMacros(); renderMacroEditor(); };
+  add.className = "macro-add-condition";
   wrap.append(add);
   if (!Object.keys(cond).length) wrap.append(element("span", "沒有條件：冷卻時間到就會執行。"));
   return wrap;
@@ -1934,8 +1961,20 @@ function renderMacroEditor() {
     const position = macroSelect([["first", "放在最前面"], ["last", "放在最後面"]], macro._generatorPosition ?? "last");
     position.onchange = () => { macro._generatorPosition = position.value; saveCustomMacros(); };
     const remove = element("button", "刪除"); remove.type = "button";
+    remove.classList.add("macro-delete");
     remove.onclick = () => { customMacros.splice(index, 1); saveCustomMacros(); renderMacroEditor(); };
-    head.append(enabled, "啟用", name, "冷卻", cooldown, "秒", once, "只執行一次", position, remove); card.append(head);
+    const checkLabel = (input, text) => { const label = element("label", ""); label.className = "macro-check"; label.append(input, text); return label; };
+    const fieldLabel = (title, input) => { const label = element("label", ""); label.className = "macro-field"; label.append(element("span", title), input); return label; };
+    head.append(
+      checkLabel(enabled, "啟用"),
+      fieldLabel("巨集名稱", name),
+      fieldLabel("冷卻（秒）", cooldown),
+      fieldLabel("執行順序", position),
+      checkLabel(once, "只執行一次"),
+      remove,
+    );
+    card.append(head);
+    card.append(element("strong", "觸發條件")); card.lastElementChild.className = "macro-section-title";
     card.append(renderMacroCondition(macro));
     const condition = document.createElement("details"); condition.className = "macro-condition";
     const summary = element("summary", "進階：直接編輯觸發條件 JSON"); condition.append(summary);
@@ -1943,9 +1982,11 @@ function renderMacroEditor() {
     const apply = element("button", "套用條件 JSON"); apply.type = "button";
     apply.onclick = () => { try { const value = JSON.parse(cond.value); Object.keys(value).length ? macro.cond = value : delete macro.cond; saveCustomMacros(); renderMacroEditor(); } catch { status("觸發條件 JSON 格式有誤。", true); } };
     condition.append(cond, apply); card.append(condition);
-    const steps = element("div", ""); macro.steps.forEach((step, stepIndex) => steps.append(renderMacroStep(step, index, stepIndex))); card.append(steps);
+    card.append(element("strong", "執行步驟")); card.lastElementChild.className = "macro-section-title";
+    const steps = element("div", ""); steps.className = "macro-steps"; macro.steps.forEach((step, stepIndex) => steps.append(renderMacroStep(step, index, stepIndex))); card.append(steps);
     const addStep = macroSelect([["", "＋ 新增步驟…"], ...Object.entries(macroStepLabels)], ""); addStep.disabled = macro.steps.length >= 10;
     addStep.onchange = () => { if (addStep.value) { macro.steps.push(defaultMacroStep(addStep.value)); saveCustomMacros(); renderMacroEditor(); } };
+    addStep.className = "macro-add-step";
     card.append(addStep); list.append(card);
   });
   byId("add-macro").disabled = customMacros.length >= 10;
