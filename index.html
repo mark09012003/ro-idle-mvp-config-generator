@@ -893,8 +893,8 @@ input[type="checkbox"] { accent-color: var(--gold); }
 @media (min-width: 900px) {
   #generator:not([data-guided]) {
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-    grid-template-areas: "route monsters" "route template" "route switches" "preview preview";
-    grid-template-rows: min-content min-content auto auto;
+    grid-template-areas: "route monsters" "route template" "route switches" "custom custom" "preview preview";
+    grid-template-rows: min-content min-content auto auto auto;
     gap: 12px;
     align-items: start;
   }
@@ -902,6 +902,7 @@ input[type="checkbox"] { accent-color: var(--gold); }
   #generator:not([data-guided]) .section-monsters { grid-area: monsters; }
   #generator:not([data-guided]) .section-switch { grid-area: switches; }
   #generator:not([data-guided]) .section-template { grid-area: template; }
+  #generator:not([data-guided]) #custom-macro-section { grid-area: custom; }
   #generator:not([data-guided]) #preview-section { grid-area: preview; }
   #generator:not([data-guided]) .section-route {
     align-self: stretch;
