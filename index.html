@@ -1744,6 +1744,18 @@ byId("buffJob").onchange = () => {
   clearPreview();
 };
 
+function applyRouteBuffDefaults() {
+  const skill = buffJobs.find(job => job.id === value("buffJob"))?.buffs.find(([id]) => id === value("buff"));
+  if (!skill || value("buffWhen") !== "selfLacks" || skill[2].scope === "others") return;
+  byId("buffBeforeMove").checked = true;
+  byId("routeBuffLevel").value = skill[2].maxLv;
+  updateOptions();
+  clearPreview();
+}
+
+byId("buff").addEventListener("change", applyRouteBuffDefaults);
+byId("buffWhen").addEventListener("change", applyRouteBuffDefaults);
+
 function updateOptions() {
   const leader = value("mode") === "leader";
   byId("leader").hidden = !leader;
