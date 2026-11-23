@@ -380,7 +380,7 @@ globalThis.VaultLogs = {
             settings.put({key, characterId:row.characterId || "", character:row.character || "", account:row.account || ""}, "character:" + key);
             const write = () => {
               transaction.objectStore("logs").put({...row, characterKey:key, eventAt:row.eventAt ?? row.data?.wallMs ?? row.wallMs ?? row.receivedAt,
-                ...(row.kind === "事件 JSON" || CombatLogs.marker(row) || CombatLogs.mvpText(row) ? {mvpQueued: row.receivedAt} : {})});
+                ...(CombatLogs.mvpIndexRelevant(row) ? {mvpQueued: row.receivedAt} : {})});
               saved++;
             };
             if (accepted) write();
@@ -706,7 +706,7 @@ globalThis.VaultLogs = {
         if (count) await setLogPresence(key, true);
         return count;
       }).then(count => {
-        if (count) this.refreshMvpIndex(key).catch(() => {});
+        if (count && records.some(row => CombatLogs.mvpIndexRelevant(row))) this.refreshMvpIndex(key).catch(() => {});
         return count;
       })));
       return counts.reduce((total, count) => total + count, 0);

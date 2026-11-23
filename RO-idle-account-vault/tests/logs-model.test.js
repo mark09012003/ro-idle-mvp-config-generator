@@ -28,6 +28,9 @@ const event = (id, seq, type) => ({
   assert.equal(result.filter(row => row.kind === "事件 JSON").length, 2);
 }
 
+assert.equal(CombatLogs.mvpIndexRelevant(event("attack", 400, "playerAttack")), true);
+assert.equal(CombatLogs.mvpIndexRelevant(event("buff", 400, "buffStart")), false);
+
 {
   const rows = [
     text(200, "skill", "技能文字"),

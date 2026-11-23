@@ -1,5 +1,9 @@
 
 globalThis.CombatLogs = {
+  mvpIndexTypes: new Set([
+    "found", "ambush", "targetSwitch", "playerAttack", "monsterAttack", "skillHit", "monsterSkill",
+    "devoted", "devotionHit", "kill", "mvp", "worldMvp", "death", "stop", "mapChange", "teleport", "arrive",
+  ]),
   eventTime(row) {
     const time = row.eventAt ?? row.data?.wallMs ?? row.wallMs ?? row.receivedAt;
     return Number.isFinite(time) ? time : row.receivedAt;
@@ -32,6 +36,10 @@ globalThis.CombatLogs = {
     return /^★?\s*MVP[！!]\s*打倒了/.test(text) ||
       /^★?\s*【MVP】你的隊伍在.+搶到了/.test(text) ||
       /^【MVP】.+被別的隊伍搶走了/.test(text);
+  },
+  mvpIndexRelevant(row) {
+    if (this.marker(row) || this.mvpText(row)) return true;
+    return this.mvpIndexTypes.has(row.data?.body?.type);
   },
   dedupeRenderedEvents(rows) {
     const rendered = new Map();

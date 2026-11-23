@@ -540,6 +540,7 @@ let exhausted = false;
 let loading = false;
 let pendingReset = false;
 let pendingAnimateNew = true;
+let latestSavedAt = 0;
 function matches(row) {
   const query = searchEl.value.trim().toLocaleLowerCase();
   return row.characterKey === selectedCharacterKey && (!selectedMvpBattleId || CombatLogs.battle(row, mvpBattles)?.id === selectedMvpBattleId) &&
@@ -687,6 +688,57 @@ async function load(reset = false, animateNew = false, refreshArchive = true) {
     }
   }
 }
+
+function canAppendLiveRows() {
+  return autoScrollEl.checked && offset <= 200 && !selectedMvpBattleId && !mvpOnlyEl.checked && !searchEl.value.trim();
+}
+
+async function appendLiveRows(since) {
+  await characterSettingsReady;
+  if (loading || !selectedCharacterKey || !canAppendLiveRows()) return false;
+  loading = true;
+  moreEl.disabled = true;
+  try {
+    const key = selectedCharacterKey;
+    const db = await VaultLogs.openCharacter(key);
+    if (key !== selectedCharacterKey) {db.close();return false;}
+    const incoming = await new Promise((resolve, reject) => {
+      const range = IDBKeyRange.bound([key, Math.max(0, since || 0)], [key, Number.MAX_SAFE_INTEGER]);
+      const request = db.transaction("logs", "readonly").objectStore("logs")
+        .index("characterReceivedAt").openCursor(range, "prev");
+      const found = [];
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {resolve(found);return;}
+        found.push(cursor.value);
+        cursor.continue();
+      };
+    });
+    db.close();
+    if (key !== selectedCharacterKey || !canAppendLiveRows()) return false;
+    const known = new Set(displayedRows.map(row => row.id));
+    const added = incoming.filter(row => !known.has(row.id) && matches(row));
+    if (added.length) {
+      displayedRows = [...added, ...displayedRows].slice(0, 200);
+      offset = displayedRows.length;
+      for (const row of displayedRows.slice(added.length)) revealedLogIds.add(row.id);
+      renderLogRows(displayedRows);
+      statusEl.textContent = "目前顯示 " + offset + " 筆";
+      scrollEl.scrollTop = scrollEl.scrollHeight;
+      startLinePlayback();
+    }
+    if (incoming.some(row => CombatLogs.mvpIndexRelevant(row))) refreshMvpArchive(key);
+    document.querySelector("#latest").textContent = "回到最新";
+    return true;
+  } catch (error) {
+    statusEl.textContent = "增量讀取失敗：" + error.message;
+    return false;
+  } finally {
+    loading = false;
+    moreEl.disabled = false;
+  }
+}
 document.querySelector("#refresh").onclick = () => load(true);
 document.querySelector("#latest").onclick = () => {
   selectedMvpBattleId = "";selectedCategory = "all";
@@ -748,7 +800,8 @@ async function refreshStorageUsage(force = false) {
   }
 }
 
-let lastArchiveCount = -1;
+let lastSavedRevision = "";
+let lastSavedCharacterKey = "";
 async function refreshCaptureStatus() {
   refreshStorageUsage();
   const element = document.querySelector("#capture-status");
@@ -783,13 +836,22 @@ async function refreshCaptureStatus() {
       (outdated ? "。背景程式仍是舊版，請按「重新載入擴充」後重開紀錄頁。" : "") +
       (errors.length ? "。保存錯誤：" + errors.map(capture => capture.error).join(" / ") : "");
     const revision = selectedCharacterKey + ":" + local.count + ":" + local.lastSavedAt;
-    if (lastArchiveCount !== revision) {
-      if (offset <= 200 && autoScrollEl.checked) {
-        document.querySelector("#latest").textContent = "回到最新";
-        load(true, true);
-      } else document.querySelector("#latest").textContent = "回到最新（有新訊息）";
+    if (lastSavedCharacterKey !== selectedCharacterKey || !lastSavedRevision) {
+      lastSavedCharacterKey = selectedCharacterKey;
+      latestSavedAt = local.lastSavedAt;
+      lastSavedRevision = revision;
+    } else if (lastSavedRevision !== revision) {
+      if (canAppendLiveRows()) {
+        if (await appendLiveRows(latestSavedAt)) {
+          latestSavedAt = local.lastSavedAt;
+          lastSavedRevision = revision;
+        }
+      } else {
+        document.querySelector("#latest").textContent = "回到最新（有新訊息）";
+        latestSavedAt = local.lastSavedAt;
+        lastSavedRevision = revision;
+      }
     }
-    lastArchiveCount = revision;
   } catch (error) {element.textContent = "保存狀態讀取失敗：" + error.message;}
 }
 refreshCaptureStatus();
