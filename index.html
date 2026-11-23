@@ -1955,6 +1955,38 @@ function validateOrGroups(cond) {
   }
 }
 
+function renderNamedConditions(values, choices, update) {
+  const selected = Array.isArray(values) ? [...values] : [];
+  const wrap = element("span", "");
+  const draw = () => {
+    wrap.replaceChildren();
+    const add = macroSelect([["", "按名稱新增…"], ...[...choices]
+      .filter(([id]) => !selected.some(value => String(value) === String(id)))
+      .map(([id, name]) => [String(id), name])], "");
+    add.onchange = () => {
+      if (!add.value) return;
+      selected.push([...choices.keys()].find(id => String(id) === add.value));
+      update([...selected]);
+      draw();
+    };
+    wrap.append(add);
+    selected.forEach((id, index) => {
+      const name = choices.get(id) ?? choices.get(Number(id)) ?? String(id);
+      const remove = element("button", name + " ×");
+      remove.type = "button";
+      remove.setAttribute("aria-label", "移除 " + name);
+      remove.onclick = () => {
+        selected.splice(index, 1);
+        update([...selected]);
+        draw();
+      };
+      wrap.append(remove);
+    });
+  };
+  draw();
+  return wrap;
+}
+
 function renderMacroCondition(macro, groupIndex = null, refresh = renderMacroEditor, save = saveCustomMacros) {
   const wrap = element("div", ""); wrap.className = "macro-condition-ui";
   wrap.append(element("strong", groupIndex === null ? "觸發條件（同一組全部成立才執行）" : `或者（OR）第 ${groupIndex + 1} 組`));
@@ -1973,6 +2005,14 @@ function renderMacroCondition(macro, groupIndex = null, refresh = renderMacroEdi
     const values = element("span", ""); values.className = "condition-values";
     const update = value => change(key, value);
     if (type === "boolean") { const input = macroSelect([["true", "是"], ["false", "否"]], String(current)); input.onchange = () => update(input.value === "true"); values.append(input); }
+    else if (key === "maps" || key === "nearMonsters" || key === "notNearMonsters") {
+      const catalog = JSON.parse(byId("ro-catalog.json").textContent);
+      const entries = key === "maps"
+        ? catalog.map(map => [map.id, map.name])
+        : catalog.flatMap(map => map.monsters.map(monster => [monster.id, monster.name]));
+      const choices = new Map([...new Map(entries)].sort((a, b) => a[1].localeCompare(b[1], "zh-TW")));
+      values.append(renderNamedConditions(current, choices, update));
+    }
     else if (type === "list") { const input = macroInput(Array.isArray(current) ? current.join(", ") : ""); input.placeholder = "輸入 ID，多個用逗號分隔"; input.oninput = () => update(input.value.split(",").map(value => value.trim()).filter(Boolean)); values.append(input); }
     else if (type === "item") {
       const itemId = macroInput(current?.itemId ?? "", "number", 1); itemId.placeholder = "道具 ID";
