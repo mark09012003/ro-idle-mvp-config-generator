@@ -1147,17 +1147,16 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </div>
 <div id="follower" hidden>
 <label class="number-field">隊友少於幾人時換圖（選填）<input id="partyBelow" type="number" min="1" max="11" aria-describedby="partyBelow-help"><span id="partyBelow-help" class="count-help">隊友人數＝隊伍總人數 − 1（扣除自己）。6 人隊伍填 5。</span></label>
-<label class="check"><input id="fly" type="checkbox">隊友不足時在原圖用蒼蠅翅膀（單圖用；巡迴僅在「沿用角色設定」時採用）</label>
 </div>
-<label class="check"><input id="waitForParty" type="checkbox">等待隊友</label>
+<label class="check"><input id="waitForParty" type="checkbox" checked>等待隊友</label>
 <div id="wait-options" hidden>
 <p class="section-help">角色死亡並自動回到原圖後，會執行優先且符合條件的巨集。等待期間會暫停攻擊。</p>
   <div class="fields">
-    <label>隊友少於幾人時等待<input id="waitBelow" type="number" min="1" max="11" value="6" aria-describedby="waitBelow-help"><span id="waitBelow-help" class="count-help">隊友人數＝隊伍總人數 − 1（扣除自己）。6 人隊伍填 5。</span></label>
+    <label>隊友少於幾人時等待<input id="waitBelow" type="number" min="1" max="11" value="11" aria-describedby="waitBelow-help"><span id="waitBelow-help" class="count-help">隊友人數＝隊伍總人數 − 1（扣除自己）。6 人隊伍填 5。</span></label>
     <label>等待秒數<input id="waitSeconds" type="number" min="1" max="60" value="5"></label>
     <label>死亡後的行為<select id="waitPosition">
       <option value="top">死亡後回原圖繼續打</option>
-      <option value="bottom">死亡後換到下一張圖</option>
+      <option value="bottom" selected>死亡後換到下一張圖</option>
     </select></label>
     <label>等待巨集冷卻（秒）<input id="waitCooldown" type="number" min="5" max="86400" value="5"></label>
     <label id="target-job-field">標的角色職業
@@ -1321,7 +1320,6 @@ SOFTWARE.
     if (!Number.isInteger(cooldown) || cooldown < 5 || cooldown > 86400) {
       throw new Error("換圖冷卻請填 5～86400 秒。");
     }
-    const extraFly = options.mode === "follower" && options.fly && partyBelow !== null;
     const wait = options.waitForParty;
     const waitBelow = Number(options.waitBelow);
     const waitSeconds = Number(options.waitSeconds);
@@ -1429,7 +1427,7 @@ SOFTWARE.
       }
       const departure = options.departure ?? "auto";
       const departureAction = departure === "auto"
-        ? (buffBeforeMove ? "teleport" : extraFly ? "fly" : "none")
+        ? (buffBeforeMove ? "teleport" : "none")
         : departure;
       const departureStep = {
         teleport: {do: "skill", skill: "AL_TELEPORT", lv: 2},
@@ -1460,10 +1458,6 @@ SOFTWARE.
         }
         return [{name: routeName(position, row, destination), cooldownSec: cooldown, cond, steps}];
       });
-      const flies = extraFly ? [{
-        name: `隊友少於${partyBelow}人_使用蒼蠅翅膀`, cooldownSec: cooldown,
-        cond: {maps: mapIds, partyBelow}, steps: [{do: "item", itemId: 601}],
-      }] : [];
       const waiting = wait ? [{
         name: `隊友少於${waitBelow}人_${buffBeforeMove ? "補 Buff 並等待" : "等待"}`,
         cooldownSec: waitCooldown,
@@ -1479,7 +1473,7 @@ SOFTWARE.
       config.macros = [
         ...structuredClone(firstMacros),
         ...(!waitLast ? waiting : []),
-        ...moves, ...(moves.length ? [] : flies),
+        ...moves,
         ...(waitLast ? waiting : []),
         ...structuredClone(lastMacros),
       ].map(normalizeMacroActions);
@@ -2281,7 +2275,6 @@ function updateOptions() {
   routeLevel.max = skill?.[2].maxLv ?? 10;
   if (Number(routeLevel.value) > Number(routeLevel.max)) routeLevel.value = routeLevel.max;
   byId("follower").hidden = leader;
-  byId("fly").disabled = !value("partyBelow");
   const wait = checked("waitForParty");
   byId("wait-options").hidden = !wait;
   byId("target-job-field").hidden = leader;
@@ -2412,10 +2405,10 @@ byId("route-preset").onchange = event => {
     byId("maxLv").value = support ? "2" : "0";
     byId("departure").value = "fly";
     byId("partyBelow").value = leader ? "" : "11";
-    byId("fly").checked = false;
     byId("routeWait").value = "0";
-    byId("waitForParty").checked = leader;
+    byId("waitForParty").checked = true;
     byId("waitBelow").value = "11";
+    byId("waitPosition").value = "bottom";
     byId("buffBeforeMove").checked = false;
     byId("buffWhen").value = "selfLacks";
     byId("buffJob").value = job ?? "";
@@ -2466,7 +2459,7 @@ byId("generator").onsubmit = event => {
     for (const id of ["mode", "buff", "buffWhen", "cooldown", "groupSize", "partyBelow", "departure", "targetEscape", "escape", "targetAction", "otherAction", "priority", "minLv", "maxLv"]) {
       options[id] = value(id);
     }
-    for (const id of ["fly", "onlyMvp", "avoidAggressive"]) options[id] = checked(id);
+    for (const id of ["onlyMvp", "avoidAggressive"]) options[id] = checked(id);
     if (options.supportOnly) options.onlyMvp = false;
     results = RoConfigBuilder.generate(null, route, options);
     renderPreview();
