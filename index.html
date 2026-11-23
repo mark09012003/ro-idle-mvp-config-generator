@@ -894,6 +894,8 @@ input[type="checkbox"] { accent-color: var(--gold); }
 .macro-delete { color: var(--danger); }
 .macro-head > .macro-delete { align-self: end; min-height: 32px; }
 .macro-empty { padding: 14px; text-align: center; color: var(--dim); border: 1px dashed var(--line); border-radius: 8px; }
+#custom-macro-details > summary { margin: -2px 0; color: var(--title); font-size: 16px; font-weight: 700; cursor: pointer; }
+#custom-macro-details[open] > summary { margin-bottom: 10px; }
 @media (max-width: 720px) {
   .macro-head { grid-template-columns: 1fr 1fr; align-items: end; }
   .macro-condition-row { grid-template-columns: 1fr auto; }
@@ -1086,13 +1088,13 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </fieldset>
 <fieldset class="targets">
 <legend>這份配置會主動找哪些怪</legend>
-<label class="check"><input id="onlyMvp" type="checkbox">只找我在地圖裡勾選的 MVP／Boss</label>
+<label class="check"><input id="onlyMvp" type="checkbox" checked>只找我在地圖裡勾選的 MVP／Boss</label>
 <p class="section-help">白名單限制主動選怪。被其他怪攻擊時，仍依牠的怪物規則處理。</p>
 <details>
 <summary>進階選怪條件</summary>
 <p class="section-help">可限制怪物等級、避開主動怪，並指定符合條件的怪物依什麼順序挑選。</p>
 <div class="fields">
-<label>符合條件的怪物先選哪隻<select id="priority"><option value="arrival">依遇到順序</option><option value="exp">優先經驗</option><option value="loot">優先掉落</option></select></label>
+<label>符合條件的怪物先選哪隻<select id="priority"><option value="arrival">依遇到順序</option><option value="exp">優先經驗</option><option value="loot" selected>優先掉落</option></select></label>
 <label>怪物最低等級（0 為不限）<input id="minLv" type="number" min="0" max="99" value="0" required></label>
 <label>怪物最高等級（0 為不限）<input id="maxLv" type="number" min="0" max="99" value="0" required></label>
 </div>
@@ -1174,7 +1176,8 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </div>
 </section>
 <section id="custom-macro-section">
-<h2>自訂巨集（選填）</h2>
+<details id="custom-macro-details">
+<summary>自訂巨集（選填）</summary>
 <p class="section-help">用表單加入製作聖水、箭矢、自動施放技能等巨集。這些巨集會套用到每一份配置。</p>
 <div class="macro-toolbar"><p id="macro-count" class="section-help" role="status">自訂巨集 0 條；每份配置最多 10 條。</p><button class="btn primary" id="add-macro" type="button">＋ 新增巨集</button></div>
 <div id="macro-list"></div>
@@ -1182,6 +1185,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <p class="section-help">可貼上遊戲匯出的巨集陣列。修改後按「套用 JSON」。含換圖或切換配置步驟的巨集會由巡迴產生器重建。</p>
 <textarea id="macros" rows="8" spellcheck="false">[]</textarea>
 <button class="btn" id="apply-macro-json" type="button">套用 JSON</button>
+</details>
 </details>
 </section>
 <section id="preview-section">
@@ -1761,7 +1765,8 @@ byId("source").onchange = async event => {
   customMacros = [];
   renderMacroEditor();
   updateMacroCount();
-  byId("priority").value = "arrival";
+  byId("priority").value = "loot";
+  byId("onlyMvp").checked = true;
   if (!file) return;
   try {
     const candidate = JSON.parse(await file.text());
@@ -1772,7 +1777,8 @@ byId("source").onchange = async event => {
     customMacros = structuredClone(base.config.macros ?? []);
     renderMacroEditor();
     updateMacroCount();
-    byId("priority").value = base.config.targets?.priority ?? "arrival";
+    byId("priority").value = base.config.targets?.priority ?? "loot";
+    byId("onlyMvp").checked = Boolean(base.config.targets?.whitelist?.length);
     byId("source-status").textContent = [base.name, base.job].filter(Boolean).join(" · ") || file.name;
   } catch (error) {
     if (byId("source").files[0] === file) {
