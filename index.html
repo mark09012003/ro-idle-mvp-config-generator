@@ -1416,7 +1416,7 @@ SOFTWARE.
       const departureStep = {
         teleport: {do: "skill", skill: "AL_TELEPORT", lv: 2},
         fly: {do: "item", itemId: 601},
-        butterfly: {do: "butterfly"},
+        butterfly: {do: "item", itemId: 602},
       }[departureAction];
       const moves = segment.flatMap((row, position) => {
         const last = position === segment.length - 1;
@@ -1461,7 +1461,7 @@ SOFTWARE.
         ...moves, ...(moves.length ? [] : flies),
         ...(!waitFirst && waitLast ? waiting : []),
         ...structuredClone(lastMacros),
-      ];
+      ].map(normalizeMacroActions);
       if (config.macros.length > 10) {
         throw new Error(`配置 ${label(index)} 共有 ${config.macros.length} 條巨集，超過每份配置 10 條的上限。`);
       }
@@ -1773,8 +1773,8 @@ byId("source").onchange = async event => {
     if (byId("source").files[0] !== file) return;
     RoConfigBuilder.validateBase(candidate);
     base = candidate;
-    byId("macros").value = JSON.stringify(base.config.macros ?? [], null, 2);
-    customMacros = structuredClone(base.config.macros ?? []);
+    customMacros = structuredClone(base.config.macros ?? []).map(normalizeMacroActions);
+    byId("macros").value = JSON.stringify(customMacros, null, 2);
     renderMacroEditor();
     updateMacroCount();
     byId("priority").value = base.config.targets?.priority ?? "loot";
@@ -1827,6 +1827,14 @@ byId("buffWhen").addEventListener("change", applyRouteBuffDefaults);
 let customMacros = [];
 const macroStepLabels = {skill: "放技能", item: "用道具", equip: "換上裝備", unequip: "卸下裝備", wait: "等待", fly: "用蒼蠅翅膀", butterfly: "用蝴蝶翅膀", town: "回城補給後回來", macro: "接著執行巨集", homunFeed: "餵生命體", arrow: "製作箭矢", produce: "製作物品", quiver: "做成箭矢筒", log: "在紀錄顯示", stop: "停止掛機"};
 
+function normalizeMacroActions(macro) {
+  return {...macro, steps: (macro.steps ?? []).map(step => {
+    if (step.do === "fly") return {...step, do: "item", itemId: 601};
+    if (step.do === "butterfly") return {...step, do: "item", itemId: 602};
+    return step;
+  })};
+}
+
 function macroInput(value, type = "text", min, max) {
   const input = document.createElement("input");
   input.type = type; input.value = value ?? "";
@@ -1845,6 +1853,8 @@ function macroSelect(options, value) {
 function defaultMacroStep(type) {
   return type === "skill" ? {do: "skill", skill: "", lv: 1} :
     type === "item" ? {do: "item", itemId: 501} :
+    type === "fly" ? {do: "item", itemId: 601} :
+    type === "butterfly" ? {do: "item", itemId: 602} :
     type === "equip" ? {do: "equip", itemId: 1201} :
     type === "unequip" ? {do: "unequip", slot: "ammo"} :
     type === "wait" ? {do: "wait", sec: 3} :
@@ -2002,7 +2012,7 @@ function applyMacroJson() {
   try {
     const macros = JSON.parse(value("macros"));
     if (!Array.isArray(macros)) throw new Error("必須是陣列");
-    customMacros = structuredClone(macros);
+    customMacros = structuredClone(macros).map(normalizeMacroActions);
     renderMacroEditor(); updateMacroCount(); clearPreview();
   } catch (error) { status(`巨集 JSON 格式有誤：${error.message}`, true); }
 }
@@ -2090,7 +2100,7 @@ function describeOperation(macro, mapNames, buffNames) {
   const steps = macro.steps.map(step => {
     if (step.do === "wait") return `等待 ${step.sec} 秒`;
     if (step.do === "fly" || (step.do === "item" && step.itemId === 601)) return "使用蒼蠅翅膀";
-    if (step.do === "butterfly") return "使用蝴蝶翅膀";
+    if (step.do === "butterfly" || (step.do === "item" && step.itemId === 602)) return "使用蝴蝶翅膀";
     if (step.do === "profile") return `切換配置 ${step.name}`;
     if (step.do === "map") return `前往 ${mapNames.get(step.mapId) ?? step.mapId}`;
     if (step.do === "skill") return `施放 ${buffNames.get(step.skill) ?? step.skill}${step.lv ? " Lv." + step.lv : ""}${step.target === "ally" ? " 給隊友" : step.target === "self" ? " 給自己" : ""}`;
