@@ -1958,18 +1958,29 @@ function validateOrGroups(cond) {
 function renderNamedConditions(values, choices, update) {
   const selected = Array.isArray(values) ? [...values] : [];
   const wrap = element("span", "");
+  const search = macroInput("", "search");
+  search.placeholder = "輸入名稱快速搜尋";
+  search.setAttribute("aria-label", "搜尋條件選項");
+  const picker = element("span", "");
+  wrap.append(search, picker);
   const draw = () => {
-    wrap.replaceChildren();
-    const add = macroSelect([["", "按名稱新增…"], ...[...choices]
+    picker.replaceChildren();
+    const query = search.value.trim().toLowerCase();
+    const matches = [...choices]
       .filter(([id]) => !selected.some(value => String(value) === String(id)))
+      .filter(([id, name]) => name.toLowerCase().includes(query) || String(id).toLowerCase().includes(query));
+    const add = macroSelect([["", matches.length ? "按名稱新增…" : "找不到符合的選項"], ...matches
       .map(([id, name]) => [String(id), name])], "");
+    add.disabled = !matches.length;
     add.onchange = () => {
       if (!add.value) return;
       selected.push([...choices.keys()].find(id => String(id) === add.value));
       update([...selected]);
+      search.value = "";
       draw();
+      search.focus();
     };
-    wrap.append(add);
+    picker.append(add);
     selected.forEach((id, index) => {
       const name = choices.get(id) ?? choices.get(Number(id)) ?? String(id);
       const remove = element("button", name + " ×");
@@ -1980,9 +1991,21 @@ function renderNamedConditions(values, choices, update) {
         update([...selected]);
         draw();
       };
-      wrap.append(remove);
+      picker.append(remove);
     });
   };
+  search.addEventListener("input", draw);
+  search.addEventListener("keydown", event => {
+    if (event.key !== "Enter" || event.isComposing) return;
+    event.preventDefault();
+    const add = picker.querySelector("select");
+    if (add.options.length === 2) {
+      add.selectedIndex = 1;
+      add.onchange();
+    } else if (!add.disabled) {
+      add.focus();
+    }
+  });
   draw();
   return wrap;
 }
