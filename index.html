@@ -932,8 +932,8 @@ input[type="checkbox"] { accent-color: var(--gold); }
 @media (min-width: 900px) {
   #generator:not([data-guided]) {
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-    grid-template-areas: "route presets" "route monsters" "route template" "route switches" "custom custom" "preview preview";
-    grid-template-rows: min-content min-content min-content auto auto auto;
+    grid-template-areas: "route presets" "route monsters" "route switches" "custom custom" "preview preview";
+    grid-template-rows: min-content min-content auto auto auto;
     gap: 12px;
     align-items: start;
   }
@@ -941,7 +941,6 @@ input[type="checkbox"] { accent-color: var(--gold); }
   #generator:not([data-guided]) .section-presets { grid-area: presets; }
   #generator:not([data-guided]) .section-monsters { grid-area: monsters; }
   #generator:not([data-guided]) .section-switch { grid-area: switches; }
-  #generator:not([data-guided]) .section-template { grid-area: template; }
   #generator:not([data-guided]) #custom-macro-section { grid-area: custom; }
   #generator:not([data-guided]) #preview-section { grid-area: preview; }
   #generator:not([data-guided]) .section-route {
@@ -1004,14 +1003,10 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 
 
 .map-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
-.route-preset-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0; }
-.route-preset-picker select { flex: 1 1 12rem; min-width: 0; }
 .map-actions span, #empty-route { color: var(--dim); font-size: 12px; }
 .map-actions .btn:disabled { border-color: var(--line); background: var(--head); color: var(--dim); }
 #go-preview { font-size: 12px; color: var(--accent); white-space: nowrap; }
 #generator[data-guided] #go-preview { display: none; }
-#template-details > summary { color: var(--title); font-weight: 700; }
-#template-details[open] > summary { margin-bottom: 8px; }
 
 .page-header { justify-content: space-between; margin-bottom: 0; }
 .page-header .btn { flex: 0 0 auto; height: 24px; font-size: 13px; }
@@ -1065,9 +1060,9 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <ol id="route" role="list" aria-labelledby="route-title"></ol>
 <p id="catalog-status" role="status"></p>
 </section>
-<section id="preset-section" class="section-presets" aria-label="快速範本">
-<label class="route-preset-picker">快速範本
-<select id="route-preset">
+<section id="preset-section" class="section-presets" aria-labelledby="preset-title">
+<h2 id="preset-title">快速範本</h2>
+<select id="route-preset" aria-labelledby="preset-title">
 <option value="">選擇角色範本…</option>
 <optgroup label="標的角色">
 <option value="leader-hunter" data-preset="leader" data-job="hunter" data-buff="AC_CONCENTRATION">神射手 · 心神凝聚</option>
@@ -1080,7 +1075,6 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <option value="hunter" data-preset="hunter">找怪並幫忙打</option>
 </optgroup>
 </select>
-</label>
 </section>
 <section id="monster-section" class="section-monsters">
 <h2>怪物控制與選怪</h2>
@@ -1122,14 +1116,6 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <label class="check"><input id="avoidAggressive" type="checkbox">避開主動怪</label>
 </details>
 </fieldset>
-</section>
-<section id="template-section" class="section-template">
-<details id="template-details"><summary>掛機範本（選填）</summary>
-<p class="section-help">直接產生時只輸出地圖、選怪和巨集。匯入範本時會沿用檔內的技能與補給等欄位。</p>
-<label for="source">選擇遊戲匯出的 JSON（選填）</label>
-<input id="source" type="file" accept=".json,application/json">
-<p id="source-status" role="status">目前直接產生部分設定。</p>
-</details>
 </section>
 <section id="switch-section" class="section-switch">
 <h2>換圖與配置切換</h2>
@@ -1524,7 +1510,6 @@ const byId = id => document.getElementById(id);
 const value = id => byId(id).value;
 const checked = id => byId(id).checked;
 const route = [];
-let base;
 let results = [];
 let maps = [];
 const selectedMaps = new Set();
@@ -1796,37 +1781,6 @@ byId("add").onclick = () => {
   clearPreview();
 };
 
-byId("source").onchange = async event => {
-  const file = event.target.files[0];
-  base = undefined;
-  clearPreview();
-  byId("source-status").textContent = "目前直接產生部分設定。";
-  byId("macros").value = "[]";
-  customMacros = [];
-  renderMacroEditor();
-  updateMacroCount();
-  byId("priority").value = "loot";
-  byId("onlyMvp").checked = true;
-  if (!file) return;
-  try {
-    const candidate = JSON.parse(await file.text());
-    if (byId("source").files[0] !== file) return;
-    RoConfigBuilder.validateBase(candidate);
-    base = candidate;
-    customMacros = structuredClone(base.config.macros ?? []).map(normalizeMacroActions);
-    byId("macros").value = JSON.stringify(customMacros, null, 2);
-    renderMacroEditor();
-    updateMacroCount();
-    byId("priority").value = base.config.targets?.priority ?? "loot";
-    byId("onlyMvp").checked = Boolean(base.config.targets?.whitelist?.length);
-    byId("source-status").textContent = [base.name, base.job].filter(Boolean).join(" · ") || file.name;
-  } catch (error) {
-    if (byId("source").files[0] === file) {
-      byId("source").value = "";
-      byId("source-status").textContent = error instanceof SyntaxError ? "這個檔案不是有效的 JSON。" : error.message;
-    }
-  }
-};
 
 let buffJobs = [];
 
@@ -2517,13 +2471,13 @@ byId("generator").onsubmit = event => {
     }
     for (const id of ["fly", "onlyMvp", "avoidAggressive"]) options[id] = checked(id);
     if (options.supportOnly) options.onlyMvp = false;
-    results = RoConfigBuilder.generate(base, route, options);
+    results = RoConfigBuilder.generate(null, route, options);
     renderPreview();
     byId("download").disabled = false;
     const instruction = results.length > 1 ? "請在遊戲中以預覽所示的名稱儲存每份配置，再從 01 開始。" : "";
     const warning = checked("avoidAggressive") || Number(value("maxLv")) || Number(value("minLv"))
       ? " 已啟用選怪篩選，請確認標的符合設定。" : "";
-    const format = base ? "配置" : "部分設定（掛機地圖與目標、事件巨集）";
+    const format = "部分設定（掛機地圖與目標、事件巨集）";
     status(`已產生 ${results.length} 份${format}。${instruction}${warning}`);
   } catch (error) {
     status(error.message, true);
