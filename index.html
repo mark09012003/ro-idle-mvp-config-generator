@@ -865,6 +865,18 @@ input[type="checkbox"] { accent-color: var(--gold); }
 #generator > section { scroll-margin-top: 12px; }
 #generator > section:target { border-color: var(--gold); }
 .operation-profile { padding: 8px; margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
+.macro-toolbar, .macro-head, .macro-step { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.macro-toolbar { justify-content: space-between; margin-bottom: 8px; }
+.macro-card { margin: 8px 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
+.macro-card label { margin: 0; }
+.macro-head .macro-name { flex: 1 1 180px; }
+.macro-head .macro-number { width: 92px; }
+.macro-condition { margin: 8px 0; }
+.macro-step { padding: 6px; margin-top: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
+.macro-step select { width: auto; min-width: 125px; margin: 0; }
+.macro-step input { width: min(170px, 100%) !important; margin: 0 !important; }
+.macro-step .step-value { flex: 1 1 180px; }
+.macro-empty { padding: 14px; text-align: center; color: var(--dim); border: 1px dashed var(--line); border-radius: 8px; }
 .operation-profile summary { font-weight: 700; }
 .operation-profile ol { padding-left: 22px; }
 .operation-profile li p { margin: 2px 0 6px; overflow-wrap: anywhere; }
@@ -1139,12 +1151,13 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </section>
 <section id="custom-macro-section">
 <h2>自訂巨集（選填）</h2>
-<p class="section-help">可加入製作聖水、製作箭矢或自動施放技能等遊戲支援的巨集。請貼上遊戲匯出的巨集陣列；這些巨集會加入每一份配置。</p>
-<label for="macros">巨集陣列（JSON）</label>
-<textarea id="macros" rows="8" spellcheck="false" placeholder='[{"name":"自訂巨集","cooldownSec":5,"cond":{},"steps":[{"do":"skill","skill":"技能 ID","lv":1}]}]'>[]</textarea>
-<p id="macro-count" class="section-help" role="status">自訂巨集 0 條；每份配置最多 10 條。</p>
-<details><summary>格式說明</summary>
-<p>每條巨集需包含名稱、觸發條件 <code>cond</code> 及 1～10 個 <code>steps</code>。建議先在遊戲內建立並匯出，再複製需要的巨集。含換圖 <code>map</code> 或切換配置 <code>profile</code> 步驟的巨集會由巡迴產生器重建，不會重複加入。</p>
+<p class="section-help">用表單加入製作聖水、箭矢、自動施放技能等巨集。這些巨集會套用到每一份配置。</p>
+<div class="macro-toolbar"><p id="macro-count" class="section-help" role="status">自訂巨集 0 條；每份配置最多 10 條。</p><button class="btn primary" id="add-macro" type="button">＋ 新增巨集</button></div>
+<div id="macro-list"></div>
+<details id="macro-json-details"><summary>進階：直接編輯巨集 JSON</summary>
+<p class="section-help">可貼上遊戲匯出的巨集陣列。修改後按「套用 JSON」。含換圖或切換配置步驟的巨集會由巡迴產生器重建。</p>
+<textarea id="macros" rows="8" spellcheck="false">[]</textarea>
+<button class="btn" id="apply-macro-json" type="button">套用 JSON</button>
 </details>
 </section>
 <section id="preview-section">
@@ -1712,6 +1725,8 @@ byId("source").onchange = async event => {
   clearPreview();
   byId("source-status").textContent = "目前直接產生部分設定。";
   byId("macros").value = "[]";
+  customMacros = [];
+  renderMacroEditor();
   updateMacroCount();
   byId("priority").value = "arrival";
   if (!file) return;
@@ -1721,6 +1736,8 @@ byId("source").onchange = async event => {
     RoConfigBuilder.validateBase(candidate);
     base = candidate;
     byId("macros").value = JSON.stringify(base.config.macros ?? [], null, 2);
+    customMacros = structuredClone(base.config.macros ?? []);
+    renderMacroEditor();
     updateMacroCount();
     byId("priority").value = base.config.targets?.priority ?? "arrival";
     byId("source-status").textContent = [base.name, base.job].filter(Boolean).join(" · ") || file.name;
@@ -1767,6 +1784,113 @@ function applyRouteBuffDefaults() {
 
 byId("buff").addEventListener("change", applyRouteBuffDefaults);
 byId("buffWhen").addEventListener("change", applyRouteBuffDefaults);
+
+let customMacros = [];
+const macroStepLabels = {skill: "放技能", item: "用道具", wait: "等待", fly: "用蒼蠅翅膀", butterfly: "用蝴蝶翅膀", town: "回城補給後回來", arrow: "製作箭矢", produce: "製作物品", quiver: "做成箭矢筒", log: "在紀錄顯示", stop: "停止掛機"};
+
+function macroInput(value, type = "text", min, max) {
+  const input = document.createElement("input");
+  input.type = type; input.value = value ?? "";
+  if (min != null) input.min = min;
+  if (max != null) input.max = max;
+  return input;
+}
+
+function macroSelect(options, value) {
+  const select = document.createElement("select");
+  select.append(...options.map(([id, label]) => new Option(label, id)));
+  select.value = value;
+  return select;
+}
+
+function defaultMacroStep(type) {
+  return type === "skill" ? {do: "skill", skill: "", lv: 1} :
+    type === "item" ? {do: "item", itemId: 501} :
+    type === "wait" ? {do: "wait", sec: 3} :
+    type === "arrow" ? {do: "arrow", source: 0, times: 1} :
+    type === "produce" ? {do: "produce", itemId: 0, qty: 1} :
+    type === "quiver" ? {do: "quiver", arrowId: 1750, qty: 1} :
+    type === "log" ? {do: "log", text: "巨集執行了"} : {do: type};
+}
+
+function saveCustomMacros() {
+  byId("macros").value = JSON.stringify(customMacros, null, 2);
+  updateMacroCount();
+  clearPreview();
+}
+
+function renderMacroStep(step, macroIndex, stepIndex) {
+  const row = element("div", ""); row.className = "macro-step";
+  const type = macroSelect(Object.entries(macroStepLabels), step.do);
+  type.onchange = () => { customMacros[macroIndex].steps[stepIndex] = defaultMacroStep(type.value); saveCustomMacros(); renderMacroEditor(); };
+  row.append(type);
+  const field = element("span", ""); field.className = "step-value macro-step";
+  const bind = (input, key, number = false) => {
+    input.oninput = () => { customMacros[macroIndex].steps[stepIndex][key] = number ? Number(input.value) : input.value; saveCustomMacros(); };
+    field.append(input);
+  };
+  if (step.do === "skill") {
+    bind(macroInput(step.skill), "skill"); field.prepend("技能 ID ");
+    field.append(" 等級 "); bind(macroInput(step.lv, "number", 1, 10), "lv", true);
+    const target = macroSelect([["", "預設對象"], ["self", "自己"], ["ally", "隊友"]], step.target ?? "");
+    target.onchange = () => { target.value ? step.target = target.value : delete step.target; saveCustomMacros(); }; field.append(target);
+  } else if (step.do === "item") { field.append("道具 ID "); bind(macroInput(step.itemId, "number", 1), "itemId", true); }
+  else if (step.do === "wait") { bind(macroInput(step.sec, "number", 1, 60), "sec", true); field.append(" 秒"); }
+  else if (step.do === "arrow") { field.append("材料 ID "); bind(macroInput(step.source, "number", 1), "source", true); field.append(" 次數 "); bind(macroInput(step.times, "number", 1, 100), "times", true); }
+  else if (step.do === "produce") { field.append("成品 ID "); bind(macroInput(step.itemId, "number", 1), "itemId", true); field.append(" 數量 "); bind(macroInput(step.qty, "number", 1, 100), "qty", true); }
+  else if (step.do === "quiver") { field.append("箭矢 ID "); bind(macroInput(step.arrowId, "number", 1), "arrowId", true); field.append(" 筒數 "); bind(macroInput(step.qty, "number", 1, 100), "qty", true); }
+  else if (step.do === "log") bind(macroInput(step.text), "text");
+  else field.textContent = "不需額外設定";
+  row.append(field);
+  const up = element("button", "▲"); up.type = "button"; up.disabled = stepIndex === 0;
+  up.onclick = () => { const steps = customMacros[macroIndex].steps; [steps[stepIndex - 1], steps[stepIndex]] = [steps[stepIndex], steps[stepIndex - 1]]; saveCustomMacros(); renderMacroEditor(); };
+  const remove = element("button", "移除"); remove.type = "button";
+  remove.onclick = () => { customMacros[macroIndex].steps.splice(stepIndex, 1); saveCustomMacros(); renderMacroEditor(); };
+  row.append(up, remove); return row;
+}
+
+function renderMacroEditor() {
+  const list = byId("macro-list"); list.replaceChildren();
+  if (!customMacros.length) { const empty = element("p", "尚未新增自訂巨集。"); empty.className = "macro-empty"; list.append(empty); }
+  customMacros.forEach((macro, index) => {
+    const card = element("article", ""); card.className = "macro-card";
+    const head = element("div", ""); head.className = "macro-head";
+    const enabled = macroInput("", "checkbox"); enabled.checked = macro.enabled !== false;
+    enabled.onchange = () => { enabled.checked ? delete macro.enabled : macro.enabled = false; saveCustomMacros(); };
+    const name = macroInput(macro.name); name.className = "macro-name"; name.maxLength = 40; name.placeholder = "巨集名稱";
+    name.oninput = () => { macro.name = name.value; saveCustomMacros(); };
+    const cooldown = macroInput(macro.cooldownSec ?? 30, "number", 5, 86400); cooldown.className = "macro-number";
+    cooldown.oninput = () => { macro.cooldownSec = Number(cooldown.value); saveCustomMacros(); };
+    const once = macroInput("", "checkbox"); once.checked = Boolean(macro.once);
+    once.onchange = () => { once.checked ? macro.once = true : delete macro.once; saveCustomMacros(); };
+    const remove = element("button", "刪除"); remove.type = "button";
+    remove.onclick = () => { customMacros.splice(index, 1); saveCustomMacros(); renderMacroEditor(); };
+    head.append(enabled, "啟用", name, "冷卻", cooldown, "秒", once, "只執行一次", remove); card.append(head);
+    const condition = document.createElement("details"); condition.className = "macro-condition";
+    const summary = element("summary", `觸發條件${macro.cond ? "（已設定）" : "（無條件）"}`); condition.append(summary);
+    const cond = document.createElement("textarea"); cond.rows = 3; cond.spellcheck = false; cond.value = macro.cond ? JSON.stringify(macro.cond, null, 2) : "{}";
+    const apply = element("button", "套用條件 JSON"); apply.type = "button";
+    apply.onclick = () => { try { const value = JSON.parse(cond.value); Object.keys(value).length ? macro.cond = value : delete macro.cond; saveCustomMacros(); renderMacroEditor(); } catch { status("觸發條件 JSON 格式有誤。", true); } };
+    condition.append(cond, apply); card.append(condition);
+    const steps = element("div", ""); macro.steps.forEach((step, stepIndex) => steps.append(renderMacroStep(step, index, stepIndex))); card.append(steps);
+    const addStep = macroSelect([["", "＋ 新增步驟…"], ...Object.entries(macroStepLabels)], ""); addStep.disabled = macro.steps.length >= 10;
+    addStep.onchange = () => { if (addStep.value) { macro.steps.push(defaultMacroStep(addStep.value)); saveCustomMacros(); renderMacroEditor(); } };
+    card.append(addStep); list.append(card);
+  });
+  byId("add-macro").disabled = customMacros.length >= 10;
+}
+
+function applyMacroJson() {
+  try {
+    const macros = JSON.parse(value("macros"));
+    if (!Array.isArray(macros)) throw new Error("必須是陣列");
+    customMacros = structuredClone(macros);
+    renderMacroEditor(); updateMacroCount(); clearPreview();
+  } catch (error) { status(`巨集 JSON 格式有誤：${error.message}`, true); }
+}
+
+byId("add-macro").onclick = () => { customMacros.push({name: `巨集 ${customMacros.length + 1}`, cooldownSec: 30, cond: {hpBelow: 30}, steps: [{do: "wait", sec: 1}]}); saveCustomMacros(); renderMacroEditor(); };
+byId("apply-macro-json").onclick = applyMacroJson;
 
 function updateMacroCount() {
   const count = byId("macro-count");
@@ -1919,9 +2043,12 @@ byId("generator").onsubmit = event => {
     try { macros = JSON.parse(value("macros")); }
     catch { throw new Error("巨集欄位的 JSON 格式有誤。"); }
     if (!Array.isArray(macros) || macros.some(macro =>
+      typeof macro?.name !== "string" || !macro.name.trim() || macro.name.length > 40 ||
+      !Number.isInteger(macro.cooldownSec) || macro.cooldownSec < 5 || macro.cooldownSec > 86400 ||
+      (macro.cond != null && (typeof macro.cond !== "object" || Array.isArray(macro.cond))) ||
       !Array.isArray(macro?.steps) || !macro.steps.length || macro.steps.length > 10 ||
       macro.steps.some(step => typeof step?.do !== "string"))) {
-      throw new Error("請填入巨集陣列，每條巨集需有 1～10 個步驟。");
+      throw new Error("每條自訂巨集需要 1～40 字名稱、5～86400 秒冷卻，以及 1～10 個有效步驟。");
     }
     if (Number(value("maxLv")) && Number(value("minLv")) > Number(value("maxLv"))) throw new Error("最低等級不可高於最高等級。");
     if (value("mode") === "leader" && value("buffJob") && !value("buff")) {
@@ -2022,6 +2149,7 @@ byId("generator").addEventListener("invalid", event => {
 }, true);
 
 updateOptions();
+renderMacroEditor();
 loadCatalog();
 
 loadBuffJobs();
