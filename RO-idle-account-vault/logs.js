@@ -195,6 +195,8 @@ let mvpBattles = [];
 const revealedLogIds = new Set();
 let playbackTimer;
 let selectedMvpBattleId = "";
+let focusedMvpDetail = null;
+let mvpHistoryScrollTop = 0;
 const playbackEl = document.querySelector("#line-playback");
 const playbackSpeedEl = document.querySelector("#playback-speed");
 
@@ -237,14 +239,12 @@ function fitMvpDetail(detail, reveal = false) {
   if (!detail.open || !pane?.open || !rows?.childElementCount || !pane.clientHeight) return;
   const bottom = pane.getBoundingClientRect().top + pane.clientTop + pane.clientHeight -
     parseFloat(getComputedStyle(pane).paddingBottom);
-  const next = detail.nextElementSibling?.querySelector(":scope > summary");
   const box = rows.getBoundingClientRect();
-  const following = (next ?? detail).getBoundingClientRect().bottom - box.bottom;
   const minimum = 64;
-  let height = bottom - box.top - following;
+  let height = bottom - box.top;
   if (reveal && height < minimum) {
     pane.scrollTop += minimum - height;
-    height = bottom - rows.getBoundingClientRect().top - following;
+    height = bottom - rows.getBoundingClientRect().top;
   }
   rows.style.height = Math.max(minimum, Math.floor(height)) + "px";
 }
@@ -333,7 +333,23 @@ function createMvpDetail(battle, characterKey, title) {
     }
   }
   detail.ontoggle = () => {
-    if (!detail.open) return;
+    const pane = detail.closest("#mvp-archive");
+    if (!detail.open) {
+      if (focusedMvpDetail === detail) {
+        focusedMvpDetail = null;
+        rows.style.height = "";
+        requestAnimationFrame(() => {if (pane) pane.scrollTop = mvpHistoryScrollTop;});
+      }
+      return;
+    }
+    if (focusedMvpDetail !== detail) {
+      mvpHistoryScrollTop = pane?.scrollTop ?? 0;
+      focusedMvpDetail = detail;
+    }
+    for (const other of detail.parentElement?.querySelectorAll(":scope > .mvp-detail[open]") ?? []) {
+      if (other !== detail) other.open = false;
+    }
+    if (pane) pane.scrollTop = 0;
     if (loaded) fitMvpDetail(detail, true);
     else loadDetails(true);
   };

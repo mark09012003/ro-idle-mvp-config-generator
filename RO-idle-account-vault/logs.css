@@ -69,6 +69,7 @@ select, input[type="search"] {border: 1px solid #59566f; background: #171721; co
 #delete-character-logs {color:#ffb4bc;border-color:#9f6572;}
 
 #mvp-archive-list:has(.mvp-detail[open]) {max-height:min(52vh, 500px);}
+#mvp-archive-list:has(.mvp-detail[open]) > .mvp-detail:not([open]) {display:none;}
 .mvp-detail {min-width:0;}
 .mvp-detail-toolbar {display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:5px 7px 0;}
 .mvp-detail-status {margin:4px 7px;color:var(--dim);font-size:12px;}
