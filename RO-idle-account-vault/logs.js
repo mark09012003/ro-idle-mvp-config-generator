@@ -15,6 +15,29 @@ let characterCatalog = [];
 let catalogRevision = "";
 let lastCatalogRefresh = 0;
 
+let logViewerPort;
+let logViewerClosing = false;
+function connectLogViewerPresence() {
+  if (logViewerClosing) return;
+  logViewerPort = chrome.runtime.connect({name: "ro-vault-log-viewer"});
+  const publish = () => {
+    try {logViewerPort.postMessage({type: "visibility", visible: document.visibilityState === "visible"});} catch {}
+  };
+  logViewerPort.onDisconnect.addListener(() => {
+    logViewerPort = null;
+    if (!logViewerClosing) setTimeout(connectLogViewerPresence, 500);
+  });
+  publish();
+}
+connectLogViewerPresence();
+document.addEventListener("visibilitychange", () => {
+  try {logViewerPort?.postMessage({type: "visibility", visible: document.visibilityState === "visible"});} catch {}
+});
+window.addEventListener("pagehide", () => {
+  logViewerClosing = true;
+  try {logViewerPort?.disconnect();} catch {}
+});
+
 function characterOptionText(character) {
   return (character.character || "舊紀錄（角色無法辨識）") +
     (character.account ? " · " + character.account : "") +

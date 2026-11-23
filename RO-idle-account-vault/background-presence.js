@@ -24,5 +24,5 @@
     if (event.source !== window || event.origin !== location.origin) return;
     if (event.data?.source === "ro-vault:background-presence-setting") setEnabled(event.data.enabled === true);
   });
-  setEnabled(true);
+  setEnabled(false);
 })();

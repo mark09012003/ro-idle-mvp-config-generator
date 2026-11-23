@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "RO放置仙境 帳號櫃",
   "short_name": "帳號櫃",
-  "version": "1.10.77",
+  "version": "1.10.78",
   "description": "保存帳密，切換時清除遊戲 Cookie 並填入帳密及點擊登入；角色由使用者自行選擇。",
   "permissions": [
     "cookies",
@@ -43,7 +43,8 @@
       ],
       "js": [
         "logs-model.js",
-        "logs-capture.js"
+        "logs-capture.js",
+        "background-presence-setting.js"
       ],
       "run_at": "document_start"
     },
@@ -61,6 +62,7 @@
         "https://ro-idle.app/*"
       ],
       "js": [
+        "background-presence.js",
         "logs-stream.js"
       ],
       "run_at": "document_start",

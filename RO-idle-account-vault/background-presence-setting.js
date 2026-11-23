@@ -4,8 +4,9 @@
   function publish(enabled) {
     window.postMessage({source: "ro-vault:background-presence-setting", enabled}, location.origin);
   }
-  chrome.storage.local.get({pointerActivityEnabled: true}).then(settings => publish(settings.pointerActivityEnabled)).catch(() => {});
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && changes.pointerActivityEnabled) publish(changes.pointerActivityEnabled.newValue === true);
+  chrome.runtime.onMessage.addListener(message => {
+    if (message?.type === "ro-vault:background-presence") publish(message.enabled === true);
   });
+  chrome.runtime.sendMessage({type: "ro-vault:background-presence-status"})
+    .then(result => publish(result?.enabled === true)).catch(() => publish(false));
 })();

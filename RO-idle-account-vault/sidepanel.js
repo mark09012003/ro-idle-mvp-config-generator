@@ -1843,5 +1843,6 @@ document.querySelector("#open-logs").addEventListener("click", guard(async () =>
   if (tab?.url?.startsWith(AccountVault.SITE) && !new URL(tab.url).pathname.startsWith("/info")) {
     await chrome.storage.session.set({["last-game-tab:" + tab.windowId]: tab.id});
   }
+  await chrome.runtime.sendMessage({type: "ro-vault:prepare-log-viewer"}).catch(() => {});
   await chrome.tabs.create({url: chrome.runtime.getURL("logs.html")});
 }));

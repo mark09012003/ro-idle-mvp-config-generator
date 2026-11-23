@@ -178,6 +178,53 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 refreshSavedLogin().catch(() => {});
 
+const logViewerPorts = new Map();
+let logViewerPreparedUntil = 0;
+let logViewerPresence = false;
+let logViewerPrepareTimer;
+
+function logViewerShouldKeepGameVisible() {
+  return Date.now() < logViewerPreparedUntil || [...logViewerPorts.values()].some(Boolean);
+}
+
+async function publishLogViewerPresence(force = false) {
+  const enabled = logViewerShouldKeepGameVisible();
+  if (!force && enabled === logViewerPresence) return;
+  logViewerPresence = enabled;
+  const tabs = await chrome.tabs.query({url: AccountVault.SITE + "*"});
+  await Promise.all(tabs.filter(tab => tab.id != null).map(tab =>
+    chrome.tabs.sendMessage(tab.id, {type: "ro-vault:background-presence", enabled}).catch(() => {})
+  ));
+}
+
+chrome.runtime.onConnect.addListener(port => {
+  if (port.name !== "ro-vault-log-viewer" || port.sender?.id !== chrome.runtime.id) return;
+  logViewerPorts.set(port, false);
+  port.onMessage.addListener(message => {
+    if (message?.type !== "visibility") return;
+    logViewerPorts.set(port, message.visible === true);
+    publishLogViewerPresence().catch(() => {});
+  });
+  port.onDisconnect.addListener(() => {
+    logViewerPorts.delete(port);
+    publishLogViewerPresence().catch(() => {});
+  });
+});
+
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (sender.id !== chrome.runtime.id) return;
+  if (message?.type === "ro-vault:background-presence-status") {
+    reply({enabled: logViewerShouldKeepGameVisible()});
+    return;
+  }
+  if (message?.type !== "ro-vault:prepare-log-viewer") return;
+  logViewerPreparedUntil = Date.now() + 5000;
+  clearTimeout(logViewerPrepareTimer);
+  logViewerPrepareTimer = setTimeout(() => publishLogViewerPresence().catch(() => {}), 5100);
+  publishLogViewerPresence().then(() => reply({ok: true}), error => reply({ok: false, error: error.message}));
+  return true;
+});
+
 
 const activityAlarm = "random-pointer-activity";
 const backgroundPresenceEnabled = false;
