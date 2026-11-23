@@ -1,5 +1,8 @@
 
 globalThis.CombatLogs = {
+  monsterAliases: new Map([
+    [1364, "風靈龜"], [1594, "水靈龜"], [1600, "火焰龜"], [1601, "果樹龜"], [1602, "岩石龜"],
+  ]),
   skillAliases: {
     NPC_SUMMONSLAVE: "召喚隨從",
     NPC_CALLSLAVE: "召回隨從",
@@ -42,6 +45,10 @@ globalThis.CombatLogs = {
   },
   translateSkillCodes(text, labels = {}) {
     return String(text || "").replace(/\b[A-Z]{2,}_[A-Z0-9_]+\b/g, code => this.skillName(code, labels));
+  },
+  translateMonsterIds(text, names = new Map()) {
+    return String(text || "").replace(/怪物\s*#(\d+)/g, (source, id) =>
+      names.get(Number(id)) || this.monsterAliases.get(Number(id)) || source);
   },
   categories: {all: "全部", combat: "戰鬥", skill: "技能", exp: "經驗值", loot: "掉寶", system: "系統", warn: "警告"},
   category(row) {
@@ -208,10 +215,10 @@ globalThis.CombatLogs = {
   },
   describeArchivedEvent(row, names, labels, battle) {
     const body = row.data?.body;
-    if (!body || typeof body !== "object") return this.translateSkillCodes(row.text, labels);
+    if (!body || typeof body !== "object") return this.translateMonsterIds(this.translateSkillCodes(row.text, labels), names);
     const battleMonster = body.monsterId != null && battle.monsterId != null &&
       Number(body.monsterId) === Number(battle.monsterId) ? battle.monsterName : "";
-    const monster = body.monsterName || names.get(Number(body.monsterId)) || battleMonster ||
+    const monster = body.monsterName || names.get(Number(body.monsterId)) || this.monsterAliases.get(Number(body.monsterId)) || battleMonster ||
       (body.monsterId == null ? "" : "怪物 #" + body.monsterId) || battle.monsterName || "目標";
     const skill = this.skillName(body.skill, labels) + (body.lv ? " Lv." + body.lv : "");
     const effectKey = body.status ?? body.effect ?? body.buff ?? body.skill;

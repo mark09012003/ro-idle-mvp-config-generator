@@ -33,6 +33,8 @@ assert.equal(CombatLogs.mvpIndexRelevant(event("mob-skill", 400, "mobSkill")), t
 assert.equal(CombatLogs.mvpIndexRelevant(event("buff", 400, "buffStart")), false);
 assert.equal(CombatLogs.translateSkillCodes("黃金蟲 使用 NPC_SUMMONSLAVE Lv.10。"), "黃金蟲 使用 召喚隨從 Lv.10。");
 assert.equal(CombatLogs.translateSkillCodes("使用 NPC_UNKNOWN_ATTACK"), "使用 怪物技能「UNKNOWN ATTACK」");
+assert.equal(CombatLogs.translateMonsterIds("怪物 #1364 離開戰鬥。"), "風靈龜 離開戰鬥。");
+assert.equal(CombatLogs.translateMonsterIds("怪物 #9999 離開戰鬥。", new Map([[9999, "測試怪物"]])), "測試怪物 離開戰鬥。");
 
 {
   const labels = {skills: {PR_LEXAETERNA: "天使之怒"}};

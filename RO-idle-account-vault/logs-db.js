@@ -797,7 +797,15 @@ globalThis.VaultLogs = {
       }
       const filtered = archived.filter(row => !relatedOnly || row.kind === "遊戲文字" || CombatLogs.directlyRelatedToMvp(row, battle));
       const rows = CombatLogs.dedupeRenderedEvents(filtered);
-      return {rows: fromEnd ? rows.slice(-limit) : rows.slice(0, limit), more: rows.length > limit, total: rows.length};
+      const monsterNames = {};
+      for (const row of archived) {
+        const body = row.data?.body;
+        if (body?.monsterId != null && typeof body.monsterName === "string" && body.monsterName) {
+          monsterNames[body.monsterId] = body.monsterName;
+        }
+      }
+      return {rows: fromEnd ? rows.slice(-limit) : rows.slice(0, limit), more: rows.length > limit,
+        total: rows.length, monsterNames};
     },
     async indexedMvpBattles(key, monsterNames = new Map()) {
       if (!key) return [];

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "RO放置仙境 帳號櫃",
   "short_name": "帳號櫃",
-  "version": "1.10.82",
+  "version": "1.10.83",
   "description": "保存帳密，切換時清除遊戲 Cookie 並填入帳密及點擊登入；角色由使用者自行選擇。",
   "permissions": [
     "cookies",

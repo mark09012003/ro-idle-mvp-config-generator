@@ -336,6 +336,7 @@ function createMvpDetail(battle, characterKey, title) {
         monsterNamesReady, logEventLabelsReady,
       ]);
       if (request !== revision) return;
+      const receivedNames = new Map([...names, ...Object.entries(data.monsterNames ?? {}).map(([id, name]) => [Number(id), name])]);
       const entries = data.rows.map(row => {
         const line = document.createElement("div");
         line.className = "saved-log";
@@ -345,7 +346,7 @@ function createMvpDetail(battle, characterKey, title) {
         time.className = "log-time";
         time.textContent = new Date(CombatLogs.eventTime(row)).toLocaleTimeString("zh-TW", {timeZone:"Asia/Taipei", hour12:false});
         const message = document.createElement("pre");
-        message.textContent = CombatLogs.describeArchivedEvent(row, names, labels ?? {}, battle).replace(/^\[\d{1,2}:\d{2}:\d{2}\]\s*/, "");
+        message.textContent = CombatLogs.describeArchivedEvent(row, receivedNames, labels ?? {}, battle).replace(/^\[\d{1,2}:\d{2}:\d{2}\]\s*/, "");
         line.append(time, message);
         return line;
       });
