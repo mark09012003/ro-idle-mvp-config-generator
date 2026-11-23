@@ -1777,7 +1777,7 @@ if (pointerActivityInput && !pointerActivityInput.closest("[hidden]") && !previe
 }
 
 document.querySelector("#open-config-generator").addEventListener("click", guard(async () => {
-  await chrome.tabs.create({url: chrome.runtime.getURL("config-generator.html")});
+  await chrome.tabs.create({url: "https://mark09012003.github.io/ro-idle-mvp-config-generator/"});
 }));
 
 document.querySelector("#open-logs").addEventListener("click", guard(async () => {

@@ -1105,18 +1105,6 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <label class="number-field">隊友少於幾人時換圖（選填）<input id="partyBelow" type="number" min="1" max="11" aria-describedby="partyBelow-help"><span id="partyBelow-help" class="count-help">隊友人數＝隊伍總人數 − 1（扣除自己）。6 人隊伍填 5。</span></label>
 <label class="check"><input id="fly" type="checkbox">隊友不足時使用蒼蠅翅膀（巡迴時須選「沿用角色設定」）</label>
 </div>
-<fieldset class="targets">
-<legend>補 Buff 巨集</legend>
-<p class="section-help">缺少指定 Buff 時，另外觸發補放。要把補 Buff 排進換圖步驟，請用上方的「換圖前先補 Buff」。</p>
-<label class="check"><input id="castBuffEnabled" type="checkbox" disabled>缺少 Buff 時自動補放</label>
-<div id="cast-buff-fields" class="fields" hidden>
-  <label>施放職業<select id="castBuffJob"><option value="">請選職業</option></select></label>
-  <label>施放對象<select id="castBuffTarget"><option value="self">自己</option><option value="ally">隊友</option></select></label>
-  <label>補放技能<select id="castBuffSkill"><option value="">請先選職業</option></select></label>
-  <label>技能等級<input id="castBuffLevel" type="number" min="1" max="10" value="1"></label>
-  <label>冷卻（秒）<input id="castBuffCooldown" type="number" min="5" max="86400" value="5"></label>
-</div>
-</fieldset>
 <label class="check"><input id="waitForParty" type="checkbox">等待隊友</label>
 <div id="wait-options" hidden>
 <p class="section-help">角色死亡後若已自動回到原圖，會依巨集順序執行先符合條件的那條。等待期間會暫停攻擊。</p>
@@ -1287,16 +1275,7 @@ SOFTWARE.
         !Number.isInteger(routeBuffLevel) || routeBuffLevel < 1 || routeBuffLevel > 10)) {
       throw new Error("換圖前自補需要選擇「缺少 Buff 時換圖」及有效的技能等級。");
     }
-    const standalone = options.castBuff;
-    const castBuff = buffBeforeMove && (route.length > 1 || wait) && standalone?.target === "self" && standalone.skill === buff
-      ? null : standalone;
-    if (castBuff && (!/^[A-Z0-9_]{1,40}$/.test(castBuff.skill) ||
-        !["self", "ally"].includes(castBuff.target) ||
-        !Number.isInteger(castBuff.level) || castBuff.level < 1 || castBuff.level > 10 ||
-        !Number.isInteger(castBuff.cooldown) || castBuff.cooldown < 5 || castBuff.cooldown > 86400)) {
-      throw new Error("請選擇補放技能，並確認等級和冷卻時間。");
-    }
-    const capacity = Math.min(Number(options.groupSize), 10 - baseMacros.length - Number(Boolean(wait)) - Number(Boolean(castBuff)));
+    const capacity = Math.min(Number(options.groupSize), 10 - baseMacros.length - Number(Boolean(wait)));
     if (!Number.isInteger(capacity) || capacity < 1) {
       throw new Error("原有巨集已用完 10 個名額，請先移除幾條巨集。");
     }
@@ -1418,19 +1397,11 @@ SOFTWARE.
         },
         steps: [...(buffBeforeMove ? [{do: "skill", skill: buff, lv: routeBuffLevel}] : []), {do: "wait", sec: waitSeconds}],
       }] : [];
-      const buffMacros = castBuff ? [{
-        name: ("補 Buff_" + (castBuff.name || castBuff.skill)).slice(0, 40),
-        cooldownSec: castBuff.cooldown,
-        cond: castBuff.target === "ally"
-          ? {maps: mapIds, inParty: true, allyLacks: [castBuff.skill]}
-          : {maps: mapIds, selfLacks: [castBuff.skill]},
-        steps: [{do: "skill", skill: castBuff.skill, lv: castBuff.level, target: castBuff.target}],
-      }] : [];
       const waitFirst = options.waitPosition === "top";
       const waitLast = options.waitPosition === "bottom" || buffBeforeMove;
       config.macros = [
         ...(waitFirst ? waiting : []),
-        ...buffMacros, ...(!waitFirst && !waitLast ? waiting : []),
+        ...(!waitFirst && !waitLast ? waiting : []),
         ...structuredClone(baseMacros), ...moves, ...(moves.length ? [] : flies),
         ...(!waitFirst && waitLast ? waiting : []),
       ];
@@ -1756,8 +1727,6 @@ async function loadBuffJobs() {
     buffJobs = JSON.parse(document.getElementById("buff-catalog.json").textContent);
     byId("buffJob").append(...buffJobs.map(job => new Option(job.name, job.id)));
     byId("buffJob").disabled = false;
-    byId("castBuffJob").append(...buffJobs.map(job => new Option(job.name, job.id)));
-    byId("castBuffEnabled").disabled = false;
   } catch {
     byId("buff-status").textContent = "無法讀取 Buff 清單，請重新載入擴充元件。";
     byId("buff-status").hidden = false;
@@ -1775,41 +1744,7 @@ byId("buffJob").onchange = () => {
   clearPreview();
 };
 
-function updateCastBuffSkills() {
-  const job = buffJobs.find(candidate => candidate.id === value("castBuffJob"));
-  const ally = value("castBuffTarget") === "ally";
-  const previous = value("castBuffSkill");
-  const skills = (job?.buffs ?? []).filter(([, , info]) =>
-    ally ? info.scope !== "self" : info.scope !== "others");
-  byId("castBuffSkill").replaceChildren(
-    new Option(!job ? "請先選職業" : skills.length ? "請選技能" : "這個職業沒有可用技能", ""),
-    ...skills.map(([id, name]) => new Option(name, id)),
-  );
-  if (skills.some(([id]) => id === previous)) byId("castBuffSkill").value = previous;
-  updateCastBuffLevel();
-  clearPreview();
-}
-
-function updateCastBuffLevel() {
-  const skill = buffJobs.find(job => job.id === value("castBuffJob"))?.buffs
-    .find(([id]) => id === value("castBuffSkill"));
-  const level = byId("castBuffLevel");
-  level.max = skill?.[2].maxLv ?? 10;
-  if (Number(level.value) > Number(level.max)) level.value = level.max;
-  clearPreview();
-}
-
-byId("castBuffJob").onchange = updateCastBuffSkills;
-byId("castBuffTarget").onchange = updateCastBuffSkills;
-byId("castBuffSkill").onchange = updateCastBuffLevel;
-
 function updateOptions() {
-  const casting = checked("castBuffEnabled");
-  byId("cast-buff-fields").hidden = !casting;
-  for (const id of ["castBuffJob", "castBuffSkill", "castBuffLevel", "castBuffCooldown"]) {
-    byId(id).required = casting;
-    byId(id).disabled = !casting;
-  }
   const leader = value("mode") === "leader";
   byId("leader").hidden = !leader;
   byId("buff").required = leader && Boolean(value("buffJob"));
@@ -1952,19 +1887,8 @@ byId("generator").onsubmit = event => {
     if (value("mode") === "leader" && value("buffJob") && !value("buff")) {
       throw new Error("請選擇用來判斷換圖的 Buff。");
     }
-    const castBuff = checked("castBuffEnabled") ? {
-      skill: value("castBuffSkill"),
-      name: byId("castBuffSkill").selectedOptions[0]?.text,
-      target: value("castBuffTarget"),
-      level: Number(value("castBuffLevel")),
-      cooldown: Number(value("castBuffCooldown")),
-    } : null;
-    if (castBuff && castBuff.level > Number(byId("castBuffLevel").max)) {
-      throw new Error("補放技能等級超過上限。");
-    }
     const options = {
       macros,
-      castBuff,
       buffBeforeMove: !byId("route-buff-options").hidden && checked("buffBeforeMove"),
       routeBuffLevel: value("routeBuffLevel"),
       waitForParty: checked("waitForParty"),
@@ -1984,10 +1908,8 @@ byId("generator").onsubmit = event => {
     const instruction = results.length > 1 ? "請在遊戲中以預覽所示的名稱儲存每份配置，再從 01 開始。" : "";
     const warning = checked("avoidAggressive") || Number(value("maxLv")) || Number(value("minLv"))
       ? " 已啟用選怪篩選，請確認標的符合設定。" : "";
-    const mergedBuff = options.buffBeforeMove && (route.length > 1 || options.waitForParty) && castBuff?.target === "self" && castBuff.skill === options.buff
-      ? " 同技能的獨立自補已併入換圖巨集。" : "";
     const format = base ? "配置" : "部分設定（掛機地圖與目標、事件巨集）";
-    status(`已產生 ${results.length} 份${format}。${instruction}${warning}${mergedBuff}`);
+    status(`已產生 ${results.length} 份${format}。${instruction}${warning}`);
   } catch (error) {
     status(error.message, true);
   }
