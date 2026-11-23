@@ -872,6 +872,8 @@ input[type="checkbox"] { accent-color: var(--gold); }
 .macro-head .macro-name { flex: 1 1 180px; }
 .macro-head .macro-number { width: 92px; }
 .macro-condition { margin: 8px 0; }
+.macro-condition-ui { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 8px 0; padding: 7px; border-radius: 7px; background: var(--paper); }
+.macro-condition-ui select, .macro-condition-ui input { width: auto !important; margin: 0 !important; }
 .macro-step { padding: 6px; margin-top: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
 .macro-step select { width: auto; min-width: 125px; margin: 0; }
 .macro-step input { width: min(170px, 100%) !important; margin: 0 !important; }
@@ -1260,8 +1262,15 @@ SOFTWARE.
       throw new Error("每張地圖只能加入巡迴一次。同圖的多隻 MVP 可以一起勾選。");
     }
 
-    const baseMacros = options.macros.filter(macro =>
+    const retainedMacros = options.macros.filter(macro =>
       !macro.steps.some(step => ["map", "profile"].includes(step.do)));
+    const cleanMacro = macro => {
+      const {_generatorPosition, _generatorConditionAdvanced, ...clean} = macro;
+      return clean;
+    };
+    const firstMacros = retainedMacros.filter(macro => macro._generatorPosition === "first").map(cleanMacro);
+    const lastMacros = retainedMacros.filter(macro => macro._generatorPosition !== "first").map(cleanMacro);
+    const baseMacros = [...firstMacros, ...lastMacros];
     const partyBelow = options.mode === "follower" && options.partyBelow !== "" ? Number(options.partyBelow) : null;
     if (partyBelow !== null && (!Number.isInteger(partyBelow) || partyBelow < 1 || partyBelow > 11)) {
       throw new Error("隊友人數請填 1～11，或留空。");
@@ -1420,10 +1429,12 @@ SOFTWARE.
       const waitFirst = options.waitPosition === "top";
       const waitLast = options.waitPosition === "bottom" || buffBeforeMove;
       config.macros = [
+        ...structuredClone(firstMacros),
         ...(waitFirst ? waiting : []),
         ...(!waitFirst && !waitLast ? waiting : []),
-        ...structuredClone(baseMacros), ...moves, ...(moves.length ? [] : flies),
+        ...moves, ...(moves.length ? [] : flies),
         ...(!waitFirst && waitLast ? waiting : []),
+        ...structuredClone(lastMacros),
       ];
       if (config.macros.length > 10) {
         throw new Error(`配置 ${label(index)} 共有 ${config.macros.length} 條巨集，超過每份配置 10 條的上限。`);
@@ -1849,6 +1860,52 @@ function renderMacroStep(step, macroIndex, stepIndex) {
   row.append(up, remove); return row;
 }
 
+const macroConditionLabels = {
+  none: "無條件（冷卻到就執行）", hpBelow: "HP 低於 %", spBelow: "SP 低於 %",
+  inParty: "在隊伍裡", notInParty: "不在隊伍裡", partyBelow: "同圖隊友少於",
+  selfLacks: "自己缺少狀態", selfHas: "自己有狀態", engaged: "是否交戰中", advanced: "進階／複合條件",
+};
+
+function macroConditionType(macro) {
+  const cond = macro.cond;
+  if (macro._generatorConditionAdvanced) return "advanced";
+  if (!cond || !Object.keys(cond).length) return "none";
+  const keys = Object.keys(cond);
+  if (keys.length !== 1) return "advanced";
+  const key = keys[0];
+  if (key === "inParty") return cond.inParty ? "inParty" : "notInParty";
+  return key in macroConditionLabels ? key : "advanced";
+}
+
+function renderMacroCondition(macro) {
+  const wrap = element("div", ""); wrap.className = "macro-condition-ui";
+  const type = macroConditionType(macro);
+  const select = macroSelect(Object.entries(macroConditionLabels), type);
+  select.onchange = () => {
+    if (select.value === "advanced") macro._generatorConditionAdvanced = true;
+    else delete macro._generatorConditionAdvanced;
+    macro.cond = select.value === "hpBelow" ? {hpBelow: 30} : select.value === "spBelow" ? {spBelow: 30} :
+      select.value === "inParty" ? {inParty: true} : select.value === "notInParty" ? {inParty: false} :
+      select.value === "partyBelow" ? {partyBelow: 1} : select.value === "selfLacks" ? {selfLacks: [""]} :
+      select.value === "selfHas" ? {selfHas: [""]} : select.value === "engaged" ? {engaged: true} :
+      select.value === "advanced" ? (macro.cond ?? {}) : undefined;
+    saveCustomMacros(); renderMacroEditor();
+  };
+  wrap.append("觸發條件", select);
+  const bindCondition = (input, read) => { input.oninput = () => { macro.cond = read(input); saveCustomMacros(); }; wrap.append(input); };
+  if (type === "hpBelow") bindCondition(macroInput(macro.cond.hpBelow, "number", 1, 100), input => ({hpBelow: Number(input.value)}));
+  else if (type === "spBelow") bindCondition(macroInput(macro.cond.spBelow, "number", 1, 100), input => ({spBelow: Number(input.value)}));
+  else if (type === "partyBelow") bindCondition(macroInput(macro.cond.partyBelow, "number", 1, 11), input => ({partyBelow: Number(input.value)}));
+  else if (type === "selfLacks" || type === "selfHas") {
+    const input = macroInput(macro.cond[type]?.[0] ?? ""); input.placeholder = "狀態／技能 ID，例如 AL_BLESSING";
+    bindCondition(input, input => ({[type]: [input.value.trim().toUpperCase()]}));
+  } else if (type === "engaged") {
+    const engaged = macroSelect([["true", "交戰中"], ["false", "未交戰"]], String(macro.cond.engaged));
+    engaged.onchange = () => { macro.cond = {engaged: engaged.value === "true"}; saveCustomMacros(); }; wrap.append(engaged);
+  }
+  return wrap;
+}
+
 function renderMacroEditor() {
   const list = byId("macro-list"); list.replaceChildren();
   if (!customMacros.length) { const empty = element("p", "尚未新增自訂巨集。"); empty.className = "macro-empty"; list.append(empty); }
@@ -1863,11 +1920,14 @@ function renderMacroEditor() {
     cooldown.oninput = () => { macro.cooldownSec = Number(cooldown.value); saveCustomMacros(); };
     const once = macroInput("", "checkbox"); once.checked = Boolean(macro.once);
     once.onchange = () => { once.checked ? macro.once = true : delete macro.once; saveCustomMacros(); };
+    const position = macroSelect([["first", "放在最前面"], ["last", "放在最後面"]], macro._generatorPosition ?? "last");
+    position.onchange = () => { macro._generatorPosition = position.value; saveCustomMacros(); };
     const remove = element("button", "刪除"); remove.type = "button";
     remove.onclick = () => { customMacros.splice(index, 1); saveCustomMacros(); renderMacroEditor(); };
-    head.append(enabled, "啟用", name, "冷卻", cooldown, "秒", once, "只執行一次", remove); card.append(head);
+    head.append(enabled, "啟用", name, "冷卻", cooldown, "秒", once, "只執行一次", position, remove); card.append(head);
+    card.append(renderMacroCondition(macro));
     const condition = document.createElement("details"); condition.className = "macro-condition";
-    const summary = element("summary", `觸發條件${macro.cond ? "（已設定）" : "（無條件）"}`); condition.append(summary);
+    const summary = element("summary", "進階：直接編輯觸發條件 JSON"); condition.append(summary);
     const cond = document.createElement("textarea"); cond.rows = 3; cond.spellcheck = false; cond.value = macro.cond ? JSON.stringify(macro.cond, null, 2) : "{}";
     const apply = element("button", "套用條件 JSON"); apply.type = "button";
     apply.onclick = () => { try { const value = JSON.parse(cond.value); Object.keys(value).length ? macro.cond = value : delete macro.cond; saveCustomMacros(); renderMacroEditor(); } catch { status("觸發條件 JSON 格式有誤。", true); } };
@@ -1889,7 +1949,7 @@ function applyMacroJson() {
   } catch (error) { status(`巨集 JSON 格式有誤：${error.message}`, true); }
 }
 
-byId("add-macro").onclick = () => { customMacros.push({name: `巨集 ${customMacros.length + 1}`, cooldownSec: 30, cond: {hpBelow: 30}, steps: [{do: "wait", sec: 1}]}); saveCustomMacros(); renderMacroEditor(); };
+byId("add-macro").onclick = () => { customMacros.push({name: `巨集 ${customMacros.length + 1}`, cooldownSec: 30, cond: {hpBelow: 30}, steps: [{do: "wait", sec: 1}], _generatorPosition: "last"}); saveCustomMacros(); renderMacroEditor(); };
 byId("apply-macro-json").onclick = applyMacroJson;
 
 function updateMacroCount() {
