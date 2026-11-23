@@ -1079,9 +1079,12 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <fieldset class="targets">
 <legend>快速範本</legend>
 <div class="route-presets">
-<button type="button" data-route-preset="leader" aria-pressed="false"><strong>標的</strong><small>優先打王</small></button>
-<button type="button" data-route-preset="support" aria-pressed="false"><strong>非標的</strong><small>輔助不找怪</small></button>
-<button type="button" data-route-preset="hunter" aria-pressed="false"><strong>非標的</strong><small>主動找怪</small></button>
+<button type="button" data-route-preset="leader" data-job="hunter" data-buff="AC_CONCENTRATION" aria-pressed="false"><strong>標的 · 神射手</strong><small>心神凝聚</small></button>
+<button type="button" data-route-preset="leader" data-job="monk" data-buff="AL_INCAGI" aria-pressed="false"><strong>標的 · 武術宗師</strong><small>加速術</small></button>
+<button type="button" data-route-preset="leader" data-job="alchemist" data-buff="MC_LOUD" aria-pressed="false"><strong>標的 · 創造者</strong><small>大聲吶喊</small></button>
+<button type="button" data-route-preset="leader" data-job="blacksmith" data-buff="MC_LOUD" aria-pressed="false"><strong>標的 · 神工匠</strong><small>大聲吶喊</small></button>
+<button type="button" data-route-preset="support" aria-pressed="false"><strong>非標的</strong><small>純輔助，看到怪就飛</small></button>
+<button type="button" data-route-preset="hunter" aria-pressed="false"><strong>非標的</strong><small>找怪並幫忙打</small></button>
 </div>
 <label class="check"><input id="supportOnly" type="checkbox">輔助模式：不主動找怪，保留自衛和隊友輔助</label>
 <p id="route-preset-status" class="section-help" role="status"></p>
@@ -1375,7 +1378,7 @@ SOFTWARE.
       const rowRules = row.map.monsters.map(monster => {
         const override = row.smallRules?.[monster.id];
         const selected = row.targets.includes(monster.id);
-        const escape = override?.escape ?? (selected ? options.targetEscape : options.escape);
+        const escape = options.supportOnly ? "sight" : (override?.escape ?? (selected ? options.targetEscape : options.escape));
         const defaultAction = selected
           ? (options.targetAction || (options.mode === "leader" ? "priority" : "defend"))
           : (options.otherAction || "defend");
@@ -1410,12 +1413,14 @@ SOFTWARE.
       profile.name = label(index);
       profile.exportedAt = Date.now();
       if (Array.isArray(profile.sections)) {
-        profile.sections = [...new Set([...profile.sections, "map", "macros", ...(options.supportOnly ? ["party"] : [])])];
+        profile.sections = [...new Set([...profile.sections, "map", "macros", ...(options.supportOnly || options.assistAttack ? ["party"] : [])])];
       }
       const config = profile.config;
       if (options.supportOnly) {
         config.partyAssist = false;
         config.partySupport = true;
+      } else if (options.assistAttack) {
+        config.partyAssist = true;
       }
       config.lockMap = segment[0].map.id;
       const mapIds = segment.map(row => row.map.id);
@@ -2444,16 +2449,34 @@ byId("generator").addEventListener("input", event => {
 });
 
 const routePresetButtons = document.querySelectorAll("[data-route-preset]");
+let activeRoutePreset = "";
 for (const button of routePresetButtons) {
   button.onclick = () => {
     const preset = button.dataset.routePreset;
     const support = preset === "support";
-    byId("mode").value = preset === "leader" ? "leader" : "follower";
+    const leader = preset === "leader";
+    activeRoutePreset = preset;
+    byId("mode").value = leader ? "leader" : "follower";
     byId("supportOnly").checked = support;
     byId("targetAction").value = support ? "defend" : "priority";
     byId("otherAction").value = "defend";
-    if (preset === "leader") byId("escape").value = "afterTarget";
+    byId("targetEscape").value = support ? "sight" : "";
+    byId("escape").value = support ? "sight" : "afterTarget";
     byId("onlyMvp").checked = !support;
+    byId("minLv").value = "2";
+    byId("maxLv").value = support ? "2" : "0";
+    byId("departure").value = "fly";
+    byId("routeWait").value = "0";
+    byId("waitForParty").checked = leader;
+    byId("waitBelow").value = "11";
+    byId("buffBeforeMove").checked = false;
+    byId("buffWhen").value = "selfLacks";
+    byId("buffJob").value = button.dataset.job ?? "";
+    byId("buffJob").onchange();
+    if (leader) {
+      byId("buff").value = button.dataset.buff;
+      applyRouteBuffDefaults();
+    }
     for (const option of routePresetButtons) option.setAttribute("aria-pressed", String(option === button));
     const title = button.querySelector("strong").textContent;
     const description = button.querySelector("small").textContent;
@@ -2485,6 +2508,7 @@ byId("generator").onsubmit = event => {
     const options = {
       macros,
       supportOnly: checked("supportOnly"),
+      assistAttack: activeRoutePreset === "hunter" && value("mode") === "follower",
       routeCondition: routeConditionEditor.cond,
       routeWait: value("routeWait"),
       buffBeforeMove: !byId("route-buff-options").hidden && checked("buffBeforeMove"),
