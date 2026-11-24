@@ -1146,7 +1146,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
   <p>搜尋中或閒置、未交戰且 SP 大於 10 時，先補上方選定的 Buff，再執行所選的離圖動作。沿用角色設定時會使用瞬間移動 Lv.2。若也開啟等待隊友，會在等待前補同一個 Buff。</p>
 </div>
 <div id="follower" hidden>
-<label class="number-field">隊友少於幾人時換圖（選填）<input id="partyBelow" type="number" min="1" max="11" aria-describedby="partyBelow-help"><span id="partyBelow-help" class="count-help">隊友人數＝隊伍總人數 − 1（扣除自己）。6 人隊伍填 5。</span></label>
+<label class="number-field">換圖門檻：隊伍總人數（含自己，選填）<input id="movePartySize" type="number" min="2" max="12" aria-describedby="movePartySize-help"><span id="movePartySize-help" class="count-help">同圖人數未達設定時換圖。</span></label>
 </div>
 <label class="check"><input id="waitForParty" type="checkbox" checked>等待隊友</label>
 <div id="wait-options" hidden>
@@ -1308,9 +1308,9 @@ SOFTWARE.
     const firstMacros = retainedMacros.filter(macro => macro._generatorPosition === "first").map(cleanMacro);
     const lastMacros = retainedMacros.filter(macro => macro._generatorPosition !== "first").map(cleanMacro);
     const baseMacros = [...firstMacros, ...lastMacros];
-    const partyBelow = options.mode === "follower" && options.partyBelow !== "" ? Number(options.partyBelow) : null;
+    const partyBelow = options.mode === "follower" && options.movePartySize ? Number(options.movePartySize) - 1 : null;
     if (partyBelow !== null && (!Number.isInteger(partyBelow) || partyBelow < 1 || partyBelow > 11)) {
-      throw new Error("隊友人數請填 1～11，或留空。");
+      throw new Error("換圖的隊伍總人數請填 2～12，或留空。");
     }
     const buff = options.buff.trim().toUpperCase();
     if (options.mode === "leader" && buff && !/^[A-Z][A-Z0-9_]*$/.test(buff)) {
@@ -2409,7 +2409,7 @@ byId("route-preset").onchange = event => {
     byId("minLv").value = "2";
     byId("maxLv").value = support ? "2" : "0";
     byId("departure").value = "fly";
-    byId("partyBelow").value = leader ? "" : "11";
+    byId("movePartySize").value = leader ? "" : "12";
     byId("routeWait").value = "0";
     byId("waitForParty").checked = true;
     byId("waitPartySize").value = "12";
@@ -2460,7 +2460,7 @@ byId("generator").onsubmit = event => {
       waitCooldown: value("waitCooldown"),
       waitPosition: value("waitPosition"),
     };
-    for (const id of ["mode", "buff", "buffWhen", "cooldown", "groupSize", "partyBelow", "departure", "targetEscape", "escape", "targetAction", "otherAction", "priority", "minLv", "maxLv"]) {
+    for (const id of ["mode", "buff", "buffWhen", "cooldown", "groupSize", "movePartySize", "departure", "targetEscape", "escape", "targetAction", "otherAction", "priority", "minLv", "maxLv"]) {
       options[id] = value(id);
     }
     for (const id of ["onlyMvp", "avoidAggressive"]) options[id] = checked(id);
@@ -2573,6 +2573,11 @@ function restoreRouteDraft() {
   try {
     const draft = JSON.parse(localStorage.getItem(routeDraftKey));
     if (!draft) return;
+    const oldMoveBelow = Number(draft.fields?.partyBelow);
+    if (draft.fields && draft.fields.movePartySize === undefined &&
+        Number.isInteger(oldMoveBelow) && oldMoveBelow >= 1 && oldMoveBelow <= 11) {
+      draft.fields.movePartySize = String(oldMoveBelow + 1);
+    }
     const oldWaitBelow = Number(draft.fields?.waitBelow);
     if (draft.fields && draft.fields.waitPartySize === undefined &&
         Number.isInteger(oldWaitBelow) && oldWaitBelow >= 1 && oldWaitBelow <= 11) {
