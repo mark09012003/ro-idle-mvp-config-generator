@@ -1072,7 +1072,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </optgroup>
 <optgroup label="非標的角色">
 <option value="support" data-preset="support">純輔助 · 看到怪就飛</option>
-<option value="hunter" data-preset="hunter">找怪並幫忙打</option>
+<option value="hunter" data-preset="hunter">主動找怪</option>
 </optgroup>
 </select>
 </section>
@@ -1394,15 +1394,9 @@ SOFTWARE.
       profile.name = label(index);
       profile.exportedAt = Date.now();
       if (Array.isArray(profile.sections)) {
-        profile.sections = [...new Set([...profile.sections, "map", "macros", ...(options.supportOnly || options.assistAttack ? ["party"] : [])])];
+        profile.sections = [...new Set([...profile.sections, "map", "macros"])];
       }
       const config = profile.config;
-      if (options.supportOnly) {
-        config.partyAssist = false;
-        config.partySupport = true;
-      } else if (options.assistAttack) {
-        config.partyAssist = true;
-      }
       config.lockMap = segment[0].map.id;
       const mapIds = segment.map(row => row.map.id);
       const targets = new Set(segment.flatMap(row => row.targets));
@@ -2453,7 +2447,6 @@ byId("generator").onsubmit = event => {
     const options = {
       macros,
       supportOnly: activeRoutePreset === "support" && value("mode") === "follower",
-      assistAttack: activeRoutePreset === "hunter" && value("mode") === "follower",
       routeCondition: routeConditionEditor.cond,
       routeWait: value("routeWait"),
       buffBeforeMove: !byId("route-buff-options").hidden && checked("buffBeforeMove"),
