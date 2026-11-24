@@ -1146,13 +1146,12 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
   <p>搜尋中或閒置、未交戰且 SP 大於 10 時，先補上方選定的 Buff，再執行所選的離圖動作。沿用角色設定時會使用瞬間移動 Lv.2。若也開啟等待隊友，會在等待前補同一個 Buff。</p>
 </div>
 <div id="follower" hidden>
-<label class="number-field">換圖門檻：隊伍總人數（含自己，選填）<input id="movePartySize" type="number" min="2" max="12" aria-describedby="movePartySize-help"><span id="movePartySize-help" class="count-help">同圖人數未達設定時換圖。</span></label>
 </div>
+<label id="party-size-field" class="number-field">隊伍總人數（含自己）<input id="partySize" type="number" min="2" max="12" value="12" aria-describedby="party-size-help"><span id="party-size-help" class="count-help">換圖與等待隊友共用此人數。</span></label>
 <label class="check"><input id="waitForParty" type="checkbox" checked>等待隊友</label>
 <div id="wait-options" hidden>
 <p class="section-help">角色死亡並自動回到原圖後，會執行優先且符合條件的巨集。等待期間會暫停攻擊。</p>
   <div class="fields">
-    <label>隊伍總人數（含自己）<input id="waitPartySize" type="number" min="2" max="12" value="12" aria-describedby="waitPartySize-help"><span id="waitPartySize-help" class="count-help">同圖人數未達設定時等待。</span></label>
     <label>等待秒數<input id="waitSeconds" type="number" min="1" max="60" value="5"></label>
     <label id="wait-position-field">死亡後的行為<select id="waitPosition">
       <option value="top">死亡後回原圖繼續打</option>
@@ -1308,7 +1307,8 @@ SOFTWARE.
     const firstMacros = retainedMacros.filter(macro => macro._generatorPosition === "first").map(cleanMacro);
     const lastMacros = retainedMacros.filter(macro => macro._generatorPosition !== "first").map(cleanMacro);
     const baseMacros = [...firstMacros, ...lastMacros];
-    const partyBelow = options.mode === "follower" && options.movePartySize ? Number(options.movePartySize) - 1 : null;
+    const teammateThreshold = Number(options.partySize) - 1;
+    const partyBelow = options.mode === "follower" && options.partySize ? teammateThreshold : null;
     if (partyBelow !== null && (!Number.isInteger(partyBelow) || partyBelow < 1 || partyBelow > 11)) {
       throw new Error("換圖的隊伍總人數請填 2～12，或留空。");
     }
@@ -1321,7 +1321,7 @@ SOFTWARE.
       throw new Error("換圖冷卻請填 5～86400 秒。");
     }
     const wait = options.waitForParty;
-    const waitBelow = Number(options.waitPartySize) - 1;
+    const waitBelow = teammateThreshold;
     const waitSeconds = Number(options.waitSeconds);
     const waitCooldown = Number(options.waitCooldown);
     const jobInput = options.mode === "follower" ? (options.targetJob ?? "").trim().toLowerCase() : "";
@@ -2278,6 +2278,9 @@ function updateOptions() {
   byId("follower").hidden = leader;
   const wait = checked("waitForParty");
   byId("wait-options").hidden = !wait;
+  byId("party-size-field").hidden = leader && !wait;
+  byId("partySize").disabled = leader && !wait;
+  byId("partySize").required = wait;
   byId("target-job-field").hidden = leader;
   byId("wait-position-field").hidden = !leader;
   byId("waitPosition").disabled = !wait || !leader;
@@ -2286,7 +2289,7 @@ function updateOptions() {
   const customJob = wait && !leader && value("targetJob") === "custom";
   byId("custom-job-field").hidden = !customJob;
   byId("customJob").required = customJob;
-  for (const id of ["waitPartySize", "waitSeconds", "waitCooldown"]) {
+  for (const id of ["waitSeconds", "waitCooldown"]) {
     byId(id).disabled = !wait;
     byId(id).required = wait;
   }
@@ -2409,10 +2412,9 @@ byId("route-preset").onchange = event => {
     byId("minLv").value = "2";
     byId("maxLv").value = support ? "2" : "0";
     byId("departure").value = "fly";
-    byId("movePartySize").value = leader ? "" : "12";
     byId("routeWait").value = "0";
     byId("waitForParty").checked = true;
-    byId("waitPartySize").value = "12";
+    byId("partySize").value = "12";
     byId("waitPosition").value = "bottom";
     byId("buffBeforeMove").checked = false;
     byId("buffWhen").value = "selfLacks";
@@ -2455,12 +2457,12 @@ byId("generator").onsubmit = event => {
       routeBuffLevel: value("routeBuffLevel"),
       waitForParty: checked("waitForParty"),
       targetJob: value("targetJob") === "custom" ? value("customJob") : value("targetJob"),
-      waitPartySize: value("waitPartySize"),
+      partySize: value("partySize"),
       waitSeconds: value("waitSeconds"),
       waitCooldown: value("waitCooldown"),
       waitPosition: value("waitPosition"),
     };
-    for (const id of ["mode", "buff", "buffWhen", "cooldown", "groupSize", "movePartySize", "departure", "targetEscape", "escape", "targetAction", "otherAction", "priority", "minLv", "maxLv"]) {
+    for (const id of ["mode", "buff", "buffWhen", "cooldown", "groupSize", "departure", "targetEscape", "escape", "targetAction", "otherAction", "priority", "minLv", "maxLv"]) {
       options[id] = value(id);
     }
     for (const id of ["onlyMvp", "avoidAggressive"]) options[id] = checked(id);
@@ -2573,15 +2575,14 @@ function restoreRouteDraft() {
   try {
     const draft = JSON.parse(localStorage.getItem(routeDraftKey));
     if (!draft) return;
-    const oldMoveBelow = Number(draft.fields?.partyBelow);
-    if (draft.fields && draft.fields.movePartySize === undefined &&
-        Number.isInteger(oldMoveBelow) && oldMoveBelow >= 1 && oldMoveBelow <= 11) {
-      draft.fields.movePartySize = String(oldMoveBelow + 1);
-    }
-    const oldWaitBelow = Number(draft.fields?.waitBelow);
-    if (draft.fields && draft.fields.waitPartySize === undefined &&
-        Number.isInteger(oldWaitBelow) && oldWaitBelow >= 1 && oldWaitBelow <= 11) {
-      draft.fields.waitPartySize = String(oldWaitBelow + 1);
+    const fields = draft.fields;
+    if (fields && fields.partySize === undefined) {
+      const useWait = fields.mode !== "follower" || fields.waitForParty !== false;
+      const total = useWait ? fields.waitPartySize : fields.movePartySize;
+      const legacy = Number(useWait ? fields.waitBelow : fields.partyBelow);
+      if (typeof total === "string") fields.partySize = total;
+      else if (Number.isInteger(legacy) && legacy >= 1 && legacy <= 11) fields.partySize = String(legacy + 1);
+      else if (!useWait) fields.partySize = "";
     }
     const mapsById = new Map(maps.map(map => [map.id, map]));
     for (const row of draft.route ?? []) {
