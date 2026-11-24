@@ -1517,6 +1517,7 @@ function status(message, error = false) {
 }
 
 function clearPreview() {
+  queueMicrotask(saveRouteDraft);
   results = [];
   byId("preview").replaceChildren();
   byId("download").disabled = true;
@@ -1540,6 +1541,7 @@ function respawnLabel(monster) {
 }
 
 function updateMapSelection() {
+  queueMicrotask(saveRouteDraft);
   byId("map-selection").textContent = `已勾選 ${selectedMaps.size} 張`;
   byId("add").disabled = !selectedMaps.size;
   byId("clear-maps").hidden = !selectedMaps.size;
@@ -2542,11 +2544,69 @@ byId("generator").addEventListener("invalid", event => {
   }
 }, true);
 
-updateOptions();
-renderMacroEditor();
-loadCatalog();
+const routeDraftKey = "ro-idle-route-draft-v1";
+let routeDraftReady = false;
 
-loadBuffJobs();
+function draftFields() {
+  return [...byId("generator").querySelectorAll("input[id], select[id], textarea[id]")]
+    .filter(field => field.type !== "file" && field.id !== "route-preset");
+}
+
+function saveRouteDraft() {
+  if (!routeDraftReady) return;
+  try {
+    localStorage.setItem(routeDraftKey, JSON.stringify({
+      route: route.map(({map, targets, smallRules}) => ({mapId: map.id, targets, smallRules})),
+      selectedMaps: [...selectedMaps],
+      fields: Object.fromEntries(draftFields().map(field =>
+        [field.id, field.type === "checkbox" ? field.checked : field.value])),
+      customMacros,
+      routeCondition: routeConditionEditor.cond,
+      preset: activeRoutePreset,
+    }));
+  } catch {
+    // Storage may be disabled in private browsing or for local files.
+  }
+}
+
+function restoreRouteDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(routeDraftKey));
+    if (!draft) return;
+    const mapsById = new Map(maps.map(map => [map.id, map]));
+    for (const row of draft.route ?? []) {
+      const map = mapsById.get(row.mapId);
+      if (map) route.push({map, targets: row.targets ?? [], smallRules: row.smallRules ?? {}});
+    }
+    for (const id of draft.selectedMaps ?? []) if (mapsById.has(id)) selectedMaps.add(id);
+    for (const field of draftFields()) {
+      const saved = draft.fields?.[field.id];
+      if (field.type === "checkbox" && typeof saved === "boolean") field.checked = saved;
+      else if (field.type !== "checkbox" && typeof saved === "string" && field.id !== "buff") field.value = saved;
+    }
+    const savedBuffLevel = draft.fields?.routeBuffLevel;
+    byId("buffJob").onchange();
+    if (typeof draft.fields?.buff === "string") byId("buff").value = draft.fields.buff;
+    if (typeof savedBuffLevel === "string") byId("routeBuffLevel").value = savedBuffLevel;
+    if (Array.isArray(draft.customMacros)) customMacros = draft.customMacros;
+    if (draft.routeCondition) routeConditionEditor.cond = draft.routeCondition;
+    activeRoutePreset = draft.preset ?? "";
+  } catch {
+    // A missing or unreadable draft should not prevent opening the generator.
+  }
+}
+
+Promise.all([loadCatalog(), loadBuffJobs()]).then(() => {
+  restoreRouteDraft();
+  updateOptions();
+  renderMacroEditor();
+  renderRouteOr();
+  renderRoute();
+  renderMapChoices();
+  routeDraftReady = maps.length > 0;
+  byId("generator").addEventListener("change", saveRouteDraft);
+  window.addEventListener("pagehide", saveRouteDraft);
+});
 
 </script>
 </body>
