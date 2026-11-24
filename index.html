@@ -1152,7 +1152,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <div id="wait-options" hidden>
 <p class="section-help">角色死亡並自動回到原圖後，會執行優先且符合條件的巨集。等待期間會暫停攻擊。</p>
   <div class="fields">
-    <label>隊友少於幾人時等待<input id="waitBelow" type="number" min="1" max="11" value="11" aria-describedby="waitBelow-help"><span id="waitBelow-help" class="count-help">隊友人數＝隊伍總人數 − 1（扣除自己）。6 人隊伍填 5。</span></label>
+    <label>隊伍總人數（含自己）<input id="waitPartySize" type="number" min="2" max="12" value="12" aria-describedby="waitPartySize-help"><span id="waitPartySize-help" class="count-help">同圖人數未達設定時等待。</span></label>
     <label>等待秒數<input id="waitSeconds" type="number" min="1" max="60" value="5"></label>
     <label id="wait-position-field">死亡後的行為<select id="waitPosition">
       <option value="top">死亡後回原圖繼續打</option>
@@ -1321,7 +1321,7 @@ SOFTWARE.
       throw new Error("換圖冷卻請填 5～86400 秒。");
     }
     const wait = options.waitForParty;
-    const waitBelow = Number(options.waitBelow);
+    const waitBelow = Number(options.waitPartySize) - 1;
     const waitSeconds = Number(options.waitSeconds);
     const waitCooldown = Number(options.waitCooldown);
     const jobInput = options.mode === "follower" ? (options.targetJob ?? "").trim().toLowerCase() : "";
@@ -1329,7 +1329,7 @@ SOFTWARE.
     if (wait && (!Number.isInteger(waitBelow) || waitBelow < 1 || waitBelow > 11 ||
                  !Number.isInteger(waitSeconds) || waitSeconds < 1 || waitSeconds > 60 ||
                  !Number.isInteger(waitCooldown) || waitCooldown < 5 || waitCooldown > 86400)) {
-      throw new Error("等待條件請填隊友 1～11 人、等待 1～60 秒、冷卻 5～86400 秒。");
+      throw new Error("等待條件請填隊伍總人數 2～12 人、等待 1～60 秒、冷卻 5～86400 秒。");
     }
     if (wait && options.mode === "follower" && !targetJob) {
       throw new Error("非標的角色開啟等待隊友時，請指定標的角色職業。");
@@ -2286,7 +2286,7 @@ function updateOptions() {
   const customJob = wait && !leader && value("targetJob") === "custom";
   byId("custom-job-field").hidden = !customJob;
   byId("customJob").required = customJob;
-  for (const id of ["waitBelow", "waitSeconds", "waitCooldown"]) {
+  for (const id of ["waitPartySize", "waitSeconds", "waitCooldown"]) {
     byId(id).disabled = !wait;
     byId(id).required = wait;
   }
@@ -2412,7 +2412,7 @@ byId("route-preset").onchange = event => {
     byId("partyBelow").value = leader ? "" : "11";
     byId("routeWait").value = "0";
     byId("waitForParty").checked = true;
-    byId("waitBelow").value = "11";
+    byId("waitPartySize").value = "12";
     byId("waitPosition").value = "bottom";
     byId("buffBeforeMove").checked = false;
     byId("buffWhen").value = "selfLacks";
@@ -2455,7 +2455,7 @@ byId("generator").onsubmit = event => {
       routeBuffLevel: value("routeBuffLevel"),
       waitForParty: checked("waitForParty"),
       targetJob: value("targetJob") === "custom" ? value("customJob") : value("targetJob"),
-      waitBelow: value("waitBelow"),
+      waitPartySize: value("waitPartySize"),
       waitSeconds: value("waitSeconds"),
       waitCooldown: value("waitCooldown"),
       waitPosition: value("waitPosition"),
@@ -2573,6 +2573,11 @@ function restoreRouteDraft() {
   try {
     const draft = JSON.parse(localStorage.getItem(routeDraftKey));
     if (!draft) return;
+    const oldWaitBelow = Number(draft.fields?.waitBelow);
+    if (draft.fields && draft.fields.waitPartySize === undefined &&
+        Number.isInteger(oldWaitBelow) && oldWaitBelow >= 1 && oldWaitBelow <= 11) {
+      draft.fields.waitPartySize = String(oldWaitBelow + 1);
+    }
     const mapsById = new Map(maps.map(map => [map.id, map]));
     for (const row of draft.route ?? []) {
       const map = mapsById.get(row.mapId);
