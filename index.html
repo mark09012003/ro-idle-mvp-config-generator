@@ -2566,6 +2566,7 @@ function renderRoleSettings() {
       recommendation.append(
         element("strong", "推薦帶隊職業"),
         element("p", "鐵匠、鍊金術師、神射手、武術宗師。這些職業能自行補 Buff，方便用來判斷換圖。"),
+        element("p", "預設以帶隊角色身上的 Buff 判斷換圖，等待則按同圖隊友人數判斷。若自訂巨集用職業辨認帶隊角色，請避免安排多名同職業的隊員：職業條件只能確認有沒有該職業的隊友，無法辨認哪一位才是帶隊角色。"),
       );
       panel.append(recommendation, byId("buff-picker-slot"), byId("leader-death-settings"));
     }
