@@ -1275,7 +1275,8 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <section id="preview-section">
 <h2>操作預覽與下載</h2>
 <p id="preview-note" class="section-help">展開每份配置，核對等待、離圖和配置切換順序。下載後按配置名稱在遊戲中儲存，從 01 開始。</p>
-<div class="actions"><button class="btn primary" type="submit">產生預覽</button><button class="btn" id="download" type="button" disabled>下載 ZIP</button></div>
+<div class="actions"><button class="btn primary" type="submit">產生預覽</button><button class="btn" id="download" type="button" disabled>下載 ZIP</button><button class="btn" id="download-all-modes" type="submit">匯出三種模式 ZIP</button></div>
+<p class="section-help">三種模式共用路線和隊伍設定，怪物規則採用各模式的固定值。</p>
 <p id="status" role="status"></p>
 <div id="preview"></div>
 </section>
@@ -2524,6 +2525,7 @@ byId("route-preset").onchange = event => {
 
 byId("generator").onsubmit = event => {
   event.preventDefault();
+  const exportAll = event.submitter?.id === "download-all-modes";
   clearPreview();
   try {
     let macros;
@@ -2537,11 +2539,11 @@ byId("generator").onsubmit = event => {
       macro.steps.some(step => typeof step?.do !== "string"))) {
       throw new Error("每條自訂巨集需要 1～40 字名稱、5～86400 秒冷卻，以及 1～10 個有效步驟。");
     }
-    if (routeMode() === "leader" && value("buffJob") && !value("buff")) {
+    if (!exportAll && routeMode() === "leader" && value("buffJob") && !value("buff")) {
       throw new Error("請選擇用來判斷換圖的 Buff。");
     }
     const supportOnly = value("combatMode") === "support";
-    const customCombat = checked("customCombat");
+    const customCombat = !exportAll && checked("customCombat");
     if (customCombat && Number(value("maxLv")) && Number(value("minLv")) > Number(value("maxLv"))) {
       throw new Error("最低等級不可高於最高等級。");
     }
@@ -2573,6 +2575,43 @@ byId("generator").onsubmit = event => {
     for (const id of ["buff", "buffWhen", "cooldown", "groupSize", "departure"]) {
       options[id] = value(id);
     }
+    if (exportAll) {
+      const targetJob = options.targetJob || value("buffJob");
+      if (options.waitForParty && !targetJob) {
+        throw new Error("請先用引導指定標的職業，或在換圖設定選擇提供 Buff 的職業，再匯出三種模式。");
+      }
+      const leaderPreset = [...byId("route-preset").options].find(option =>
+        option.dataset.preset === "leader" && option.dataset.job === targetJob);
+      const presetBuff = leaderPreset?.dataset.buff;
+      const presetBuffLevel = buffJobs.find(job => job.id === targetJob)?.buffs
+        .find(([id]) => id === presetBuff)?.[2].maxLv;
+      const leaderBuff = options.buff || (presetBuffLevel ? presetBuff : "");
+      const leaderBuffWhen = options.buff ? options.buffWhen : "selfLacks";
+      const leaderBuffLevel = options.buff ? options.routeBuffLevel : presetBuffLevel;
+      const leaderPrecast = Boolean(leaderBuff) && leaderBuffWhen === "selfLacks" &&
+        (options.buff ? checked("buffBeforeMove") : Boolean(presetBuffLevel));
+      const modes = [
+        {folder: "輸出", mode: "leader", supportOnly: false},
+        {folder: "輔助", mode: "follower", supportOnly: true},
+        {folder: "協助找王打王", mode: "follower", supportOnly: false},
+      ];
+      const entries = modes.flatMap(({folder, mode, supportOnly}) =>
+        RoConfigBuilder.generate(null, route, {
+          ...options,
+          mode,
+          supportOnly,
+          targetJob,
+          onlyMvp: !supportOnly,
+          maxLv: supportOnly ? 2 : 0,
+          buff: mode === "leader" ? leaderBuff : "",
+          buffWhen: leaderBuffWhen,
+          routeBuffLevel: leaderBuffLevel,
+          buffBeforeMove: mode === "leader" && leaderPrecast,
+        }).map(({file, profile}) => [`${folder}/${file}`, profile]));
+      downloadProfileZip(entries, "RO-idle_MVP_route_三種模式.zip");
+      status(`已匯出三種模式，共 ${entries.length} 份配置。請依角色用途選擇資料夾。`);
+      return;
+    }
     results = RoConfigBuilder.generate(null, route, options);
     renderPreview();
     byId("download").disabled = false;
@@ -2584,10 +2623,14 @@ byId("generator").onsubmit = event => {
   }
 };
 
-byId("download").onclick = () => {
-  const files = Object.fromEntries(results.map(({file, profile}) => [file, fflate.strToU8(JSON.stringify(profile, null, 2) + "\n")]));
-  download(fflate.zipSync(files), "RO-idle_MVP_route.zip", "application/zip");
-};
+function downloadProfileZip(entries, filename) {
+  const files = Object.fromEntries(entries.map(([file, profile]) =>
+    [file, fflate.strToU8(JSON.stringify(profile, null, 2) + "\n")]));
+  download(fflate.zipSync(files), filename, "application/zip");
+}
+
+byId("download").onclick = () => downloadProfileZip(
+  results.map(({file, profile}) => [file, profile]), "RO-idle_MVP_route.zip");
 
 const guideSteps = [
   ["guide-job-section", "先決定隊伍要跟著哪個職業。"],
