@@ -2450,8 +2450,8 @@ function renderRoleSettings() {
       }
     };
     action.onchange();
-    panel.append(fields);
     if (id === "output") panel.append(byId("buff-picker-slot"), byId("leader-death-settings"));
+    else panel.append(fields);
     const advanced = id === "output" ? routeAdvanced : element("details", "");
     if (id !== "output") {
       advanced.className = "role-advanced";
@@ -2485,6 +2485,7 @@ function renderRoleSettings() {
     }
     (id === "output" ? routeAdvanced.querySelector(".advanced-route-content") : advanced).append(combat);
     panel.append(advanced);
+    if (id === "output") panel.append(fields);
     byId("role-settings").append(panel);
     if (id !== "output") renderRouteOr(id);
   }
