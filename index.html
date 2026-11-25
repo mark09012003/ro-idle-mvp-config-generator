@@ -1004,18 +1004,13 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 .count-help { display: block; margin: 0 0 6px; color: var(--dim); font-size: 12px; font-weight: normal; line-height: 1.45; }
 .switch-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 7px; margin-bottom: 10px; }
 #generator .switch-heading h2 { margin: 0; padding: 0; border: 0; }
-.role-settings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 12px; margin-top: 12px; }
+.role-settings { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px; }
 .role-settings > fieldset { min-width: 0; margin: 0; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--head); }
 .role-settings > fieldset > legend { color: var(--title); font-size: 14px; font-weight: 700; padding-inline: 5px; }
-.role-settings > fieldset > .role-description { min-height: 3em; margin: 0 0 8px; }
-.role-settings > fieldset > .fields { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.role-settings > fieldset > .role-description { margin: 0 0 8px; }
 .role-settings #lead-buff-picker { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .role-settings #leader-death-settings { margin-top: 10px; }
 .role-settings #route-buff-options .check { margin-top: 4px; }
-@media (max-width: 800px) {
-  .role-settings { grid-template-columns: minmax(0, 1fr); }
-  .role-settings > fieldset > .role-description { min-height: 0; }
-}
 .switch-basics { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
 .section-monsters .switch-basics { margin-top: 12px; }
 .switch-basics { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 16px; }
