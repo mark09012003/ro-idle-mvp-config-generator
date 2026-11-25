@@ -1145,6 +1145,51 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <option value="assist">協助找王／打王</option>
 </select></label>
 <p id="combat-mode-help" class="section-help"></p>
+<details>
+<summary>進階設定</summary>
+<label class="check"><input id="customCombat" type="checkbox">啟用自訂攻擊、逃生與選怪規則</label>
+<p class="section-help">啟用後，也可在巡迴地圖內調整個別怪物。組隊協助設定依所選模式匯出。</p>
+<fieldset id="custom-combat-fields" disabled>
+<legend>自訂規則</legend>
+<fieldset class="targets">
+<legend>攻擊與逃生</legend>
+<div class="scheme-grid">
+<div class="monster-scheme"><h3>勾選的 MVP／Boss</h3>
+<label>攻擊方式<select id="targetAction">
+<option value="">依角色用途</option><option value="priority">優先打</option><option value="attack">主動打</option><option value="defend">被打才還手</option>
+</select></label>
+<label>逃生時機<select id="targetEscape">
+<option value="">不逃</option><option value="sight">看到就逃</option><option value="attacked">被打才逃</option><option value="afterTarget">被打時先打完目標再逃</option>
+</select></label>
+</div>
+<div class="monster-scheme"><h3>小怪與未勾選的 Boss</h3>
+<label>攻擊方式<select id="otherAction">
+<option value="defend">被打才還手</option><option value="priority">優先打</option><option value="attack">主動打</option>
+</select></label>
+<label>逃生時機<select id="escape">
+<option value="sight">看到就逃</option><option value="attacked">被打才逃</option><option value="afterTarget">被打時先打完目標再逃</option><option value="">不逃</option>
+</select></label>
+</div>
+</div>
+<p class="section-help">「依角色用途」會讓標的角色優先打王，非標的角色被打才還手。單隻怪物的設定優先於整套方案。</p>
+</fieldset>
+<fieldset class="targets">
+<legend>這份配置會主動找哪些怪</legend>
+<label class="check"><input id="onlyMvp" type="checkbox" checked>只找我在地圖裡勾選的 MVP／Boss</label>
+<p class="section-help">白名單限制主動選怪。被其他怪攻擊時，仍依牠的怪物規則處理。</p>
+<details>
+<summary>進階選怪條件</summary>
+<p class="section-help">可限制怪物等級、避開主動怪，並指定符合條件的怪物依什麼順序挑選。</p>
+<div class="fields">
+<label>符合條件的怪物先選哪隻<select id="priority"><option value="arrival">依遇到順序</option><option value="exp">優先經驗</option><option value="loot" selected>優先掉落</option></select></label>
+<label>怪物最低等級（0 為不限）<input id="minLv" type="number" min="0" max="99" value="0" required></label>
+<label>怪物最高等級（0 為不限）<input id="maxLv" type="number" min="0" max="99" value="0" required></label>
+</div>
+<label class="check"><input id="avoidAggressive" type="checkbox">避開主動怪</label>
+</details>
+</fieldset>
+</fieldset>
+</details>
 </section>
 <section id="switch-section" class="section-switch">
 <h2>換圖與配置切換</h2>
@@ -1387,8 +1432,14 @@ SOFTWARE.
       if (rowIds.length > 200) throw new Error("單張地圖超出遊戲的 200 筆怪物規則上限。");
       const rowRules = row.map.monsters.map(monster => {
         const selected = row.targets.includes(monster.id);
-        const escape = options.supportOnly ? "sight" : selected ? "" : "afterTarget";
-        const action = !options.supportOnly && selected ? "priority" : "defend";
+        const override = options.customCombat ? row.smallRules?.[monster.id] : undefined;
+        const customAction = selected ? options.targetAction || (options.mode === "leader" ? "priority" : "defend") : options.otherAction;
+        const escape = options.customCombat
+          ? override?.escape ?? (selected ? options.targetEscape : options.escape)
+          : options.supportOnly ? "sight" : selected ? "" : "afterTarget";
+        const action = options.customCombat
+          ? override?.action ?? customAction
+          : !options.supportOnly && selected ? "priority" : "defend";
         return [monster.id, {monsterId: monster.id, action, ...(escape ? {escape} : {})}, selected];
       });
       const conflicts = rowRules.some(([id, rule, selected]) => {
@@ -1658,6 +1709,18 @@ async function loadCatalog() {
   }
 }
 
+function ruleSelect(label, current, choices, onChange) {
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", label);
+  select.replaceChildren(...choices.map(([key, name]) => new Option(name, key)));
+  select.value = current;
+  select.onchange = () => {
+    onChange(select.value);
+    clearPreview();
+  };
+  return select;
+}
+
 function monsterEditor(row) {
   const details = element("details", "");
   details.className = "route-monsters";
@@ -1678,6 +1741,25 @@ function monsterEditor(row) {
     label.append(input, ` ${boss.name}（${boss.kind === "mvp" ? "MVP" : "Boss"}） · 重生 ${respawnLabel(boss)}`);
     details.append(label);
   }
+  if (!checked("customCombat") || !monsters.length) return details;
+
+  const table = element("table", "");
+  const header = table.createTHead().insertRow();
+  for (const title of ["怪物", "動作", "逃生"]) header.append(element("th", title));
+  const body = table.createTBody();
+  for (const monster of monsters) {
+    const rule = row.smallRules[monster.id] ??= {};
+    const line = body.insertRow();
+    line.insertCell().textContent = monster.name;
+    line.insertCell().append(ruleSelect(`${monster.name} 動作`, rule.action ?? "", [
+      ["", "沿用所屬方案"], ["defend", "被打才還手"], ["attack", "主動打"], ["priority", "優先打"], ["lure", "引怪"],
+    ], action => { rule.action = action || undefined; }));
+    line.insertCell().append(ruleSelect(`${monster.name} 逃生`, rule.escape ?? "default", [
+      ["default", "沿用所屬方案"], ["sight", "看到就逃"], ["attacked", "被打才逃"],
+      ["afterTarget", "先打完目標再逃"], ["", "不逃"],
+    ], escape => { rule.escape = escape === "default" ? undefined : escape; }));
+  }
+  details.append(table);
   return details;
 }
 
@@ -2261,6 +2343,7 @@ function updateMacroCount() {
 }
 
 function updateOptions() {
+  byId("custom-combat-fields").disabled = !checked("customCombat");
   const support = value("combatMode") === "support";
   byId("combat-mode-help").textContent = support
     ? "所有怪物都設為被打才還手、看到就逃。白名單留空，選怪等級為 2～2。若要對隊友正在打的怪施放天使之怒等技能，請在遊戲內自行開啟「協助隊友打怪」。"
@@ -2399,6 +2482,8 @@ byId("generator").addEventListener("input", event => {
   clearPreview();
 });
 
+byId("customCombat").onchange = renderRoute;
+
 byId("route-preset").onchange = event => {
     const picker = event.currentTarget;
     const {preset, job, buff} = picker.selectedOptions[0].dataset;
@@ -2407,6 +2492,8 @@ byId("route-preset").onchange = event => {
     const leader = preset === "leader";
     byId("mode").value = leader ? "leader" : "follower";
     byId("combatMode").value = support ? "support" : leader ? "output" : "assist";
+    byId("customCombat").checked = false;
+    renderRoute();
     byId("departure").value = "fly";
     byId("routeWait").value = "0";
     byId("waitForParty").checked = true;
@@ -2444,14 +2531,23 @@ byId("generator").onsubmit = event => {
       throw new Error("請選擇用來判斷換圖的 Buff。");
     }
     const supportOnly = value("combatMode") === "support";
+    const customCombat = checked("customCombat");
+    if (customCombat && Number(value("maxLv")) && Number(value("minLv")) > Number(value("maxLv"))) {
+      throw new Error("最低等級不可高於最高等級。");
+    }
     const options = {
       macros,
       supportOnly,
-      onlyMvp: !supportOnly,
-      priority: "loot",
-      minLv: 2,
-      maxLv: supportOnly ? 2 : 0,
-      avoidAggressive: false,
+      customCombat,
+      onlyMvp: customCombat ? checked("onlyMvp") : !supportOnly,
+      priority: customCombat ? value("priority") : "loot",
+      minLv: customCombat ? value("minLv") : 2,
+      maxLv: customCombat ? value("maxLv") : supportOnly ? 2 : 0,
+      avoidAggressive: customCombat && checked("avoidAggressive"),
+      targetAction: value("targetAction"),
+      targetEscape: value("targetEscape"),
+      otherAction: value("otherAction"),
+      escape: value("escape"),
       routeCondition: routeConditionEditor.cond,
       routeWait: value("routeWait"),
       buffBeforeMove: !byId("route-buff-options").hidden && checked("buffBeforeMove"),
