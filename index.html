@@ -1004,7 +1004,9 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 .count-help { display: block; margin: 0 0 6px; color: var(--dim); font-size: 12px; font-weight: normal; line-height: 1.45; }
 .switch-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 7px; margin-bottom: 10px; }
 #generator .switch-heading h2 { margin: 0; padding: 0; border: 0; }
-#route-role { padding: 3px 8px; border-radius: 999px; background: var(--using); color: var(--title); font-size: 12px; white-space: nowrap; }
+.role-settings { display: grid; gap: 8px; margin: 12px 0; }
+.role-settings fieldset { min-width: 0; margin: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
+.role-settings legend { color: var(--title); font-weight: 700; padding-inline: 4px; }
 .switch-basics { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
 .section-monsters .switch-basics { margin-top: 12px; }
 .switch-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 6px 12px; }
@@ -1076,13 +1078,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
   <label class="guide-question">隊伍總人數（含自己）<input id="guide-party-size" type="number" min="1" max="12" step="1"></label>
 </section>
 <section id="monster-section" class="section-monsters">
-<div class="switch-heading"><h2>戰鬥與巡迴設定</h2><span id="route-role">帶隊角色</span></div>
-<label>戰鬥模式<select id="combatMode" aria-describedby="combat-mode-help">
-<option value="output">輸出</option>
-<option value="support">輔助</option>
-<option value="assist">協助找王／打王</option>
-</select></label>
-<p id="combat-mode-help" class="section-help"></p>
+<div class="switch-heading"><h2>戰鬥與巡迴設定</h2></div>
 <details>
 <summary>進階設定</summary>
 <label class="check"><input id="customCombat" type="checkbox">啟用自訂攻擊、逃生與選怪規則</label>
@@ -1188,6 +1184,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </div>
   </div>
 </details>
+<div id="role-settings" class="role-settings"></div>
 </section>
 <section id="route-section" class="section-route">
 <h2>地圖與巡迴路線</h2>
@@ -1228,6 +1225,11 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <section id="preview-section">
 <h2>操作預覽與下載</h2>
 <p id="preview-note" class="section-help">展開每份配置，核對等待、離圖和配置切換順序。下載後按配置名稱在遊戲中儲存，從 01 開始。</p>
+<label class="number-field">單一模式預覽<select id="combatMode">
+<option value="output">帶隊角色</option>
+<option value="support">輔助角色</option>
+<option value="assist">協助角色</option>
+</select></label>
 <div class="actions"><button class="btn primary" type="submit">產生預覽</button><button class="btn" id="download" type="button" disabled>下載 ZIP</button><button class="btn" id="download-all-modes" type="submit">匯出三種模式 ZIP</button></div>
 <p class="section-help">三種模式共用路線和隊伍設定，怪物規則採用各模式的固定值。</p>
 <p id="status" role="status"></p>
@@ -1461,9 +1463,11 @@ SOFTWARE.
         const destination = last ? groups[next].segment[0] : segment[position + 1];
         if (destination.map.id === row.map.id) return [];
         const steps = [];
-        if (routeWait) steps.push({do: "wait", sec: routeWait});
+        const action = options.roleAction === undefined ? departureStep : options.roleAction;
+        if (options.roleAction === undefined && routeWait) steps.push({do: "wait", sec: routeWait});
+        if (action?.do === "wait") steps.push(action);
         if (buffBeforeMove) steps.push({do: "skill", skill: buff, lv: routeBuffLevel});
-        if (departureStep) steps.push(departureStep);
+        if (action && action.do !== "wait") steps.push(action);
         if (last && groups.length > 1) steps.push({do: "profile", name: label(next)});
         steps.push({do: "map", mapId: destination.map.id});
         const cond = {maps: [row.map.id]};
@@ -2293,13 +2297,8 @@ function routeMode() {
 
 function updateOptions() {
   byId("custom-combat-fields").disabled = !checked("customCombat");
-  const support = value("combatMode") === "support";
-  byId("combat-mode-help").textContent = support
-    ? "所有怪物都設為被打才還手、看到就逃。白名單留空，選怪等級為 2～2。若要對隊友正在打的怪施放天使之怒等技能，請在遊戲內自行開啟「協助隊友打怪」。"
-    : "優先打勾選的王，遇到王不逃；其他怪被打才還手，打完當前目標再逃。白名單只收錄勾選的王，並開啟協助隊友打怪與協助時略過逃生設定的怪物。";
   updateMacroCount();
   const leader = routeMode() === "leader";
-  byId("route-role").textContent = leader ? "帶隊角色" : "非帶隊角色";
   const targetJobLabel = byId("targetJob").selectedOptions[0]?.textContent;
   byId("guide-route-summary").textContent = `已帶入隊伍總人數 ${value("partySize")} 人，帶隊角色職業為 ${targetJobLabel ?? "未選擇"}。`;
   byId("leader").hidden = !leader;
@@ -2429,6 +2428,72 @@ const recommendedLeaderBuffs = new Map([
   ["blacksmith", "MC_LOUD"],
 ]);
 
+const combatRoles = [
+  {id: "output", label: "帶隊角色", mode: "leader", supportOnly: false, help: "優先打勾選的王，負責帶隊換圖。"},
+  {id: "support", label: "輔助角色", mode: "follower", supportOnly: true, help: "看到怪就逃。若要幫忙施放天使之怒等技能，請在遊戲內開啟「協助隊友打怪」。"},
+  {id: "assist", label: "協助角色", mode: "follower", supportOnly: false, help: "適用十字軍、騎士領主、神射手或其他輸出。"},
+];
+
+function renderRoleSettings() {
+  for (const {id, label, help} of combatRoles) {
+    const panel = element("fieldset", "");
+    panel.append(element("legend", label), Object.assign(element("p", help), {className: "section-help"}));
+    const fields = element("div", "");
+    fields.className = "fields";
+    const action = macroSelect([
+      ["default", "沿用進階換圖設定"], ["none", "直接換圖"], ["wait", "等待"],
+      ["fly", "使用蒼蠅翅膀"], ["butterfly", "使用蝴蝶翅膀"],
+      ["item", "使用其他道具"], ["skill", "施放技能"],
+    ], "default");
+    action.id = `role-${id}-action`;
+    const actionLabel = element("label", "換圖前的行動");
+    actionLabel.append(action);
+    fields.append(actionLabel);
+    const inputs = [
+      ["wait", "seconds", "等待秒數", macroInput("5", "number", 1, 60)],
+      ["item", "item", "道具 ID", macroInput("", "number", 1)],
+      ["skill", "skill", "技能 ID（例如 AL_TELEPORT）", macroInput("")],
+      ["skill", "level", "技能等級", macroInput("1", "number", 1, 10)],
+    ].map(([type, key, title, input]) => {
+      const field = element("label", title);
+      input.id = `role-${id}-${key}`;
+      field.append(input);
+      fields.append(field);
+      return {type, input, field};
+    });
+    action.onchange = () => {
+      for (const {type, input, field} of inputs) {
+        const visible = action.value === type;
+        field.hidden = !visible;
+        input.disabled = !visible;
+        input.required = visible;
+      }
+    };
+    action.onchange();
+    panel.append(fields);
+    byId("role-settings").append(panel);
+  }
+}
+
+function roleDepartureAction(id) {
+  const setting = key => value(`role-${id}-${key}`);
+  switch (setting("action")) {
+    case "none": return null;
+    case "wait": return {do: "wait", sec: Number(setting("seconds"))};
+    case "fly": return {do: "item", itemId: 601};
+    case "butterfly": return {do: "item", itemId: 602};
+    case "item": return {do: "item", itemId: Number(setting("item"))};
+    case "skill": {
+      const skill = setting("skill").trim().toUpperCase();
+      if (!/^[A-Z][A-Z0-9_]*$/.test(skill)) throw new Error("請輸入有效的換圖技能 ID。");
+      return {do: "skill", skill, lv: Number(setting("level"))};
+    }
+    default: return undefined;
+  }
+}
+
+renderRoleSettings();
+
 byId("generator").onsubmit = event => {
   event.preventDefault();
   const exportAll = event.submitter?.id === "download-all-modes";
@@ -2455,6 +2520,7 @@ byId("generator").onsubmit = event => {
     }
     const options = {
       macros,
+      roleAction: exportAll ? undefined : roleDepartureAction(value("combatMode")),
       mode: routeMode(),
       supportOnly,
       customCombat,
@@ -2488,15 +2554,11 @@ byId("generator").onsubmit = event => {
       const leaderBuffLevel = options.buff ? options.routeBuffLevel : presetBuffLevel;
       const leaderPrecast = Boolean(leaderBuff) && leaderBuffWhen === "selfLacks" &&
         (options.buff ? checked("buffBeforeMove") : Boolean(presetBuffLevel));
-      const modes = [
-        {folder: "輸出", mode: "leader", supportOnly: false},
-        {folder: "輔助", mode: "follower", supportOnly: true},
-        {folder: "協助找王打王", mode: "follower", supportOnly: false},
-      ];
-      const entries = modes.flatMap(({folder, mode, supportOnly}) =>
+      const entries = combatRoles.flatMap(({id, label, mode, supportOnly}) =>
         RoConfigBuilder.generate(null, route, {
           ...options,
           mode,
+          roleAction: roleDepartureAction(id),
           supportOnly,
           targetJob,
           onlyMvp: !supportOnly,
@@ -2505,7 +2567,7 @@ byId("generator").onsubmit = event => {
           buffWhen: leaderBuffWhen,
           routeBuffLevel: leaderBuffLevel,
           buffBeforeMove: mode === "leader" && leaderPrecast,
-        }).map(({file, profile}) => [`${folder}/${file}`, profile]));
+        }).map(({file, profile}) => [`${label}/${file}`, profile]));
       downloadProfileZip(entries, "RO-idle_MVP_route_三種模式.zip");
       status(`已匯出三種模式，共 ${entries.length} 份配置。請依角色用途選擇資料夾。`);
       return;
@@ -2534,7 +2596,7 @@ const guideSteps = [
   ["guide-job-section", "推薦武術宗師、神射手、鍊金術師等有自帶 Buff 的職業。"],
   ["guide-party-section", "填入隊伍總人數，我會換算等待和換圖用的隊友數。"],
   ["route-section", "想打哪些王？按王名篩選，勾選地圖後按「加入巡迴」。"],
-  ["monster-section", "選擇戰鬥模式與死亡後的行為。"],
+  ["monster-section", "設定三種角色的換圖前行動，以及死亡後的處理方式。"],
   ["preview-section", "按產生預覽，檢查遊戲內執行順序，再下載 JSON 或 ZIP。"],
 ];
 let guideIndex = 0;
@@ -2712,6 +2774,7 @@ function restoreRouteDraft() {
 
 Promise.all([loadCatalog(), loadBuffJobs()]).then(() => {
   restoreRouteDraft();
+  for (const {id} of combatRoles) byId(`role-${id}-action`).onchange();
   updateOptions();
   renderMacroEditor();
   renderRouteOr();
