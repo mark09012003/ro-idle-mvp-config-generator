@@ -1014,6 +1014,8 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 #advanced-route { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; }
 #advanced-route > summary { padding: 8px 12px; font-weight: 600; }
 .advanced-route-content { padding: 10px 12px; border-top: 1px solid var(--line); }
+.role-advanced { margin-top: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+#party-size-field { max-width: 230px; }
 
 .header-actions { display: flex; gap: 6px; flex: 0 0 auto; }
 :root[data-theme="dark"] {
@@ -1079,7 +1081,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </section>
 <section id="monster-section" class="section-monsters">
 <div class="switch-heading"><h2>戰鬥與巡迴設定</h2></div>
-<details>
+<details id="role-combat-template">
 <summary>進階設定</summary>
 <label class="check"><input id="customCombat" type="checkbox">啟用自訂攻擊、逃生與選怪規則</label>
 <p class="section-help">啟用後，也可在巡迴地圖內調整個別怪物。組隊協助設定依所選模式匯出。</p>
@@ -1127,13 +1129,15 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <p id="guide-route-summary" class="section-help"></p>
 <div class="switch-basics">
   <div class="switch-inputs">
+    <label id="party-size-field">隊伍總人數（含自己）<input id="partySize" type="number" min="1" max="12" required></label>
     <div id="buff-picker-slot">
-      <div id="lead-buff-picker" class="fields">
-        <label>職業篩選<select id="buffFilter"><option value="">全部職業</option></select></label>
-        <label>判斷換圖的 Buff<select id="buff" aria-describedby="buff-status"><option value="">不使用 Buff 條件</option></select></label>
+      <div id="lead-buff-picker">
+        <label>判斷帶隊角色身上的 Buff<input id="buff-search" type="text" list="buff-options" autocomplete="off" placeholder="輸入 Buff 或職業名稱搜尋"></label>
+        <datalist id="buff-options"></datalist>
+        <input id="buff" type="hidden">
+        <p class="section-help">留空即可停用 Buff 判斷。</p>
       </div>
     </div>
-    <label id="party-size-field">隊伍總人數（含自己）<input id="partySize" type="number" min="1" max="12" required></label>
   </div>
   <label class="check switch-wait"><input id="waitForParty" type="checkbox" disabled>等待隊友（多人隊伍自動啟用）</label>
     <label id="wait-position-field">死亡後的行為<select id="waitPosition" required>
@@ -1146,7 +1150,6 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <details id="advanced-route">
   <summary>進階換圖設定</summary>
   <div class="advanced-route-content">
-<label>每份配置最多幾張地圖<input id="groupSize" type="number" min="1" max="10" value="8" required></label>
 <label>離開地圖前<select id="departure">
 <option value="auto">沿用角色設定</option>
 <option value="none">直接換圖</option>
@@ -1207,6 +1210,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </section>
 <section id="preview-section">
 <h2>操作預覽與下載</h2>
+<label class="number-field">每份配置最多幾張地圖<input id="groupSize" type="number" min="1" max="10" value="8" required></label>
 <p id="preview-note" class="section-help">展開每份配置，核對等待、離圖和配置切換順序。下載後按配置名稱在遊戲中儲存，從 01 開始。</p>
 <label class="number-field">單一模式預覽<select id="combatMode">
 <option value="output">帶隊角色</option>
@@ -1214,7 +1218,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <option value="assist">協助角色</option>
 </select></label>
 <div class="actions"><button class="btn primary" type="submit">產生預覽</button><button class="btn" id="download" type="button" disabled>下載 ZIP</button><button class="btn" id="download-all-modes" type="submit">匯出三種模式 ZIP</button></div>
-<p class="section-help">三種模式共用路線和隊伍設定，怪物規則採用各模式的固定值。</p>
+<p class="section-help">三種角色共用路線與隊伍人數，並各自套用自己的進階設定。</p>
 <p id="status" role="status"></p>
 <div id="preview"></div>
 </section>
@@ -1647,7 +1651,7 @@ function monsterEditor(row) {
     label.append(input, ` ${boss.name}（${boss.kind === "mvp" ? "MVP" : "Boss"}） · 重生 ${respawnLabel(boss)}`);
     details.append(label);
   }
-  if (!checked("customCombat") || !monsters.length) return details;
+  if (!["customCombat", "role-support-customCombat", "role-assist-customCombat"].some(checked) || !monsters.length) return details;
 
   const table = element("table", "");
   const header = table.createTHead().insertRow();
@@ -1767,7 +1771,6 @@ let buffJobs = [];
 async function loadBuffJobs() {
   try {
     buffJobs = JSON.parse(document.getElementById("buff-catalog.json").textContent);
-    byId("buffFilter").append(...buffJobs.map(job => new Option(job.name, job.id)));
     populateLeaderBuffs();
   } catch {
     byId("buff-status").textContent = "無法讀取 Buff 清單，請重新載入擴充元件。";
@@ -1780,18 +1783,25 @@ function leaderBuffs() {
 }
 
 function populateLeaderBuffs(selected = "") {
-  const all = leaderBuffs();
-  const buffs = [...(buffJobs.find(job => job.id === value("buffFilter"))?.buffs ?? all)];
-  const current = all.find(([id]) => id === selected);
-  if (current && !buffs.some(([id]) => id === selected)) buffs.unshift(current);
-  byId("buff").replaceChildren(
-    new Option("不使用 Buff 條件", ""),
-    ...buffs.map(([id, name]) => new Option(name, id)),
-  );
-  if (buffs.some(([id]) => id === selected)) byId("buff").value = selected;
+  const choices = buffJobs.flatMap(job => job.buffs.map(([id, name]) => {
+    const option = new Option(`${name} · ${job.name}`, `${name} · ${job.name}`);
+    option.dataset.buff = id;
+    return option;
+  }));
+  byId("buff-options").replaceChildren(...choices);
+  const current = choices.find(option => option.dataset.buff === selected);
+  byId("buff-search").value = current?.value ?? "";
+  byId("buff").value = current?.dataset.buff ?? "";
 }
 
-byId("buffFilter").onchange = () => populateLeaderBuffs(value("buff"));
+byId("buff-search").oninput = () => {
+  const input = byId("buff-search");
+  const query = input.value.trim();
+  const match = [...byId("buff-options").options].find(option => option.value === query);
+  input.setCustomValidity(query && !match ? "請從搜尋結果選擇一個 Buff，或清空欄位。" : "");
+  byId("buff").value = match?.dataset.buff ?? "";
+  applyRouteBuffDefaults();
+};
 
 function applyRouteBuffDefaults() {
   const skill = leaderBuffs().find(([id]) => id === value("buff"));
@@ -2175,8 +2185,10 @@ function renderOrGroups(macro, refresh, save) {
 }
 
 const routeConditionEditor = {cond: {}};
-function renderRouteOr() {
-  byId("route-or").replaceChildren(renderOrGroups(routeConditionEditor, renderRouteOr, clearPreview));
+const roleRouteConditions = {output: routeConditionEditor, support: {cond: {}}, assist: {cond: {}}};
+function renderRouteOr(id = "output") {
+  const field = byId(id === "output" ? "route-or" : `role-${id}-route-or`);
+  field.replaceChildren(renderOrGroups(roleRouteConditions[id], () => renderRouteOr(id), clearPreview));
 }
 renderRouteOr();
 
@@ -2261,12 +2273,13 @@ function routeMode() {
 
 function updateOptions() {
   byId("custom-combat-fields").disabled = !checked("customCombat");
+  for (const id of ["support", "assist"]) {
+    byId(`role-${id}-custom-combat-fields`).disabled = !checked(`role-${id}-customCombat`);
+  }
   updateMacroCount();
-  const leader = routeMode() === "leader";
   byId("guide-route-summary").textContent = `已帶入隊伍總人數 ${value("partySize")} 人及換圖 Buff 設定。`;
-  byId("leader").hidden = !leader;
   const skill = leaderBuffs().find(([id]) => id === value("buff"));
-  const canPrecast = leader && value("buffWhen") === "selfLacks" && skill && skill[2].scope !== "others";
+  const canPrecast = value("buffWhen") === "selfLacks" && skill && skill[2].scope !== "others";
   const routeBuffEnabled = Boolean(canPrecast && checked("buffBeforeMove"));
   byId("route-buff-options").hidden = !canPrecast;
   byId("route-buff-level-label").hidden = !routeBuffEnabled;
@@ -2387,9 +2400,13 @@ const combatRoles = [
 ];
 
 function renderRoleSettings() {
+  const combatTemplate = byId("role-combat-template");
+  const routeAdvanced = byId("advanced-route");
+  const combatSource = combatTemplate.cloneNode(true);
   for (const {id, label, help} of combatRoles) {
     const panel = element("fieldset", "");
     panel.append(element("legend", label), Object.assign(element("p", help), {className: "section-help"}));
+    if (id === "output") panel.append(byId("buff-picker-slot"));
     const fields = element("div", "");
     fields.className = "fields";
     const action = macroSelect([
@@ -2423,7 +2440,41 @@ function renderRoleSettings() {
     };
     action.onchange();
     panel.append(fields);
+    const advanced = id === "output" ? routeAdvanced : element("details", "");
+    if (id !== "output") {
+      advanced.className = "role-advanced";
+      advanced.append(element("summary", "進階換圖設定"));
+      const wait = macroInput("0", "number", 0, 60);
+      wait.id = `role-${id}-routeWait`;
+      const waitLabel = element("label", "換圖前額外等待秒數（0 為不等待）");
+      waitLabel.append(wait);
+      const departure = byId("departure").cloneNode(true);
+      departure.id = `role-${id}-departure`;
+      const departureLabel = element("label", "離開地圖前");
+      departureLabel.append(departure);
+      const or = element("div", "");
+      or.id = `role-${id}-route-or`;
+      const orDetails = element("details", "");
+      orDetails.append(element("summary", "換圖 OR 條件"), or);
+      advanced.append(departureLabel, waitLabel, orDetails);
+    }
+    const combat = id === "output" ? combatTemplate : combatSource.cloneNode(true);
+    combat.querySelector("summary").textContent = "進階選怪條件";
+    if (id !== "output") {
+      combat.id = `role-${id}-combat`;
+      for (const field of combat.querySelectorAll("[id]")) field.id = `role-${id}-${field.id}`;
+      if (id === "support") {
+        combat.querySelector('[id$="-onlyMvp"]').checked = false;
+        for (const input of combat.querySelectorAll('[id$="-minLv"], [id$="-maxLv"]')) input.value = "2";
+        combat.querySelector('[id$="-targetAction"]').value = "defend";
+        combat.querySelector('[id$="-targetEscape"]').value = "sight";
+      }
+      combat.querySelector('[id$="-customCombat"]').onchange = renderRoute;
+    }
+    (id === "output" ? routeAdvanced.querySelector(".advanced-route-content") : advanced).append(combat);
+    panel.append(advanced);
     byId("role-settings").append(panel);
+    if (id !== "output") renderRouteOr(id);
   }
 }
 
@@ -2446,6 +2497,28 @@ function roleDepartureAction(id) {
 
 renderRoleSettings();
 
+function combatOptionsForRole(id) {
+  const field = name => id === "output" ? name : `role-${id}-${name}`;
+  const customCombat = checked(field("customCombat"));
+  const support = id === "support";
+  const minLv = customCombat ? Number(value(field("minLv"))) : 2;
+  const maxLv = customCombat ? Number(value(field("maxLv"))) : support ? 2 : 0;
+  if (maxLv && minLv > maxLv) throw new Error("最低等級不可高於最高等級。");
+  return {
+    customCombat, minLv, maxLv,
+    onlyMvp: customCombat ? checked(field("onlyMvp")) : !support,
+    priority: customCombat ? value(field("priority")) : "loot",
+    avoidAggressive: customCombat && checked(field("avoidAggressive")),
+    targetAction: value(field("targetAction")),
+    targetEscape: value(field("targetEscape")),
+    otherAction: value(field("otherAction")),
+    escape: value(field("escape")),
+    routeCondition: roleRouteConditions[id].cond,
+    routeWait: value(field("routeWait")),
+    departure: value(field("departure")),
+  };
+}
+
 byId("generator").onsubmit = event => {
   event.preventDefault();
   const exportAll = event.submitter?.id === "download-all-modes";
@@ -2463,33 +2536,18 @@ byId("generator").onsubmit = event => {
       throw new Error("每條自訂巨集需要 1～40 字名稱、5～86400 秒冷卻，以及 1～10 個有效步驟。");
     }
     const supportOnly = value("combatMode") === "support";
-    const customCombat = !exportAll && checked("customCombat");
-    if (customCombat && Number(value("maxLv")) && Number(value("minLv")) > Number(value("maxLv"))) {
-      throw new Error("最低等級不可高於最高等級。");
-    }
     const options = {
       macros,
+      ...(!exportAll ? combatOptionsForRole(value("combatMode")) : {}),
       roleAction: exportAll ? undefined : roleDepartureAction(value("combatMode")),
       mode: routeMode(),
       supportOnly,
-      customCombat,
-      onlyMvp: customCombat ? checked("onlyMvp") : !supportOnly,
-      priority: customCombat ? value("priority") : "loot",
-      minLv: customCombat ? value("minLv") : 2,
-      maxLv: customCombat ? value("maxLv") : supportOnly ? 2 : 0,
-      avoidAggressive: customCombat && checked("avoidAggressive"),
-      targetAction: value("targetAction"),
-      targetEscape: value("targetEscape"),
-      otherAction: value("otherAction"),
-      escape: value("escape"),
-      routeCondition: routeConditionEditor.cond,
-      routeWait: value("routeWait"),
       buffBeforeMove: !byId("route-buff-options").hidden && checked("buffBeforeMove"),
       routeBuffLevel: value("routeBuffLevel"),
       partySize: value("partySize"),
       waitPosition: value("waitPosition"),
     };
-    for (const id of ["buff", "buffWhen", "groupSize", "departure"]) {
+    for (const id of ["buff", "buffWhen", "groupSize"]) {
       options[id] = value(id);
     }
     if (exportAll) {
@@ -2499,11 +2557,10 @@ byId("generator").onsubmit = event => {
       const entries = combatRoles.flatMap(({id, label, mode, supportOnly}) =>
         RoConfigBuilder.generate(null, route, {
           ...options,
+          ...combatOptionsForRole(id),
           mode,
           roleAction: roleDepartureAction(id),
           supportOnly,
-          onlyMvp: !supportOnly,
-          maxLv: supportOnly ? 2 : 0,
           buff: mode === "leader" ? options.buff : "",
           buffBeforeMove: mode === "leader" && Boolean(leaderPrecast),
         }).map(({file, profile}) => [`${label}/${file}`, profile]));
@@ -2584,7 +2641,9 @@ byId("guide-next").onclick = () => {
     byId("guide-error").textContent = message;
     byId("guide-error").hidden = false;
   };
-  if (id === "guide-party-section") {
+  if (id === "guide-job-section") {
+    if (!byId("buff-search").reportValidity()) return;
+  } else if (id === "guide-party-section") {
     const total = Number(value("guide-party-size"));
     if (!Number.isInteger(total) || total < 1 || total > 12) return fail("隊伍總人數請填 1～12 人。");
     byId("partySize").value = String(total);
@@ -2644,7 +2703,7 @@ function saveRouteDraft() {
       fields: Object.fromEntries(draftFields().map(field =>
         [field.id, field.type === "checkbox" ? field.checked : field.value])),
       customMacros,
-      routeCondition: routeConditionEditor.cond,
+      roleRouteConditions: Object.fromEntries(combatRoles.map(({id}) => [id, roleRouteConditions[id].cond])),
     }));
   } catch {
     // Storage may be disabled in private browsing or for local files.
@@ -2680,6 +2739,15 @@ function restoreRouteDraft() {
     if (typeof savedBuffLevel === "string") byId("routeBuffLevel").value = savedBuffLevel;
     if (Array.isArray(draft.customMacros)) customMacros = draft.customMacros;
     if (draft.routeCondition) routeConditionEditor.cond = draft.routeCondition;
+    for (const {id} of combatRoles) {
+      if (draft.roleRouteConditions?.[id]) roleRouteConditions[id].cond = draft.roleRouteConditions[id];
+      if (id !== "output" && fields) {
+        for (const name of ["departure", "routeWait"]) {
+          const field = byId(`role-${id}-${name}`);
+          if (fields[field.id] === undefined && typeof fields[name] === "string") field.value = fields[name];
+        }
+      }
+    }
     if (!draft.fields?.combatMode) {
       byId("combatMode").value = draft.preset === "support" ? "support"
         : draft.fields?.mode === "follower" ? "assist" : "output";
@@ -2694,7 +2762,7 @@ Promise.all([loadCatalog(), loadBuffJobs()]).then(() => {
   for (const {id} of combatRoles) byId(`role-${id}-action`).onchange();
   updateOptions();
   renderMacroEditor();
-  renderRouteOr();
+  for (const {id} of combatRoles) renderRouteOr(id);
   renderRoute();
   renderMapChoices();
   routeDraftReady = maps.length > 0;
