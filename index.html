@@ -1100,7 +1100,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <fieldset class="targets">
 <legend>攻擊與逃生</legend>
 <div class="scheme-grid">
-<div class="monster-scheme"><h3>勾選的 MVP／Boss</h3>
+<div class="monster-scheme"><h3>勾選的怪物</h3>
 <label>攻擊方式<select id="targetAction">
 <option value="">依角色用途</option><option value="priority">優先打</option><option value="attack">主動打</option><option value="defend">被打才還手</option>
 </select></label>
@@ -1121,7 +1121,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </fieldset>
 <fieldset class="targets">
 <legend>這份配置會主動找哪些怪</legend>
-<label class="check"><input id="onlyMvp" type="checkbox" checked>只找我在地圖裡勾選的 MVP／Boss</label>
+<label class="check"><input id="onlyMvp" type="checkbox" checked>只找我在地圖裡勾選的怪物</label>
 <p class="section-help">白名單限制主動選怪。被其他怪攻擊時，仍依牠的怪物規則處理。</p>
 <details>
 <summary>進階選怪條件</summary>
@@ -1204,9 +1204,9 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <h2>地圖與巡迴路線</h2>
 <p class="section-help">勾選地圖並加入巡迴。清單由上往下執行，可調整順序或展開地圖修改個別怪物。</p>
 <div class="fields">
-<label>搜尋地圖或 MVP／Boss<input id="map-search" type="search" placeholder="輸入地圖名稱、代碼或怪物名稱"></label>
+<label>搜尋地圖、MVP／Boss 或小怪<input id="map-search" type="search" placeholder="輸入地圖名稱、代碼或怪物名稱"></label>
 <label>按 MVP／Boss 篩選<select id="mvp-filter" disabled>
-<option value="">所有地圖</option><option value="all-mvp" selected>只顯示有 MVP 的地圖</option><option value="all-boss">只顯示有 Boss 的地圖</option>
+<option value="">所有地圖</option><option value="all-mvp">只顯示有 MVP 的地圖</option><option value="all-boss">只顯示有 Boss 的地圖</option>
 </select></label>
 </div>
 <fieldset class="targets">
@@ -1427,7 +1427,7 @@ SOFTWARE.
       const mapIds = segment.map(row => row.map.id);
       const targets = new Set(segment.flatMap(row => row.targets));
       if (options.onlyMvp && !targets.size) {
-        throw new Error(`配置 ${label(index)} 沒有指定 MVP 或 Boss，無法使用只選指定目標。`);
+        throw new Error(`配置 ${label(index)} 沒有勾選怪物，無法只找指定目標。`);
       }
       config.monsterRules = [...rulesById.values()];
       const previousTargets = config.targets ?? {};
@@ -1590,10 +1590,10 @@ function renderMapChoices() {
   const filter = value("mvp-filter");
   const inRoute = new Set(route.map(row => row.map.id));
   const matching = maps.filter(map => {
-    const bosses = map.monsters.filter(monster => monster.kind !== "normal");
-    const matchesFilter = !filter || bosses.some(monster => matchesMonsterFilter(monster, filter));
-    return matchesFilter && [map.name, map.id, map.region, ...bosses.map(monster => monster.name)]
-      .some(text => text.toLowerCase().includes(query));
+    const matchesFilter = !filter || map.monsters.some(monster => matchesMonsterFilter(monster, filter));
+    return matchesFilter && (!query ||
+      [map.name, map.id, map.region].some(text => text.toLowerCase().includes(query)) ||
+      map.monsters.some(monster => monster.name.toLowerCase().includes(query)));
   });
   const regions = new Map();
   for (const map of matching) {
@@ -1604,7 +1604,7 @@ function renderMapChoices() {
   for (const [region, group] of regions) {
     const fieldset = element("fieldset", "");
     fieldset.className = "map-region";
-    fieldset.append(element("legend", region), ...group.map(map => mapOption(map, inRoute, filter)));
+    fieldset.append(element("legend", region), ...group.map(map => mapOption(map, inRoute, filter, query)));
     choices.append(fieldset);
   }
   byId("map-choices").replaceChildren(choices);
@@ -1612,7 +1612,7 @@ function renderMapChoices() {
   updateMapSelection();
 }
 
-function mapOption(map, inRoute, filter) {
+function mapOption(map, inRoute, filter, query) {
   const label = element("label", "");
   label.className = "check map-option";
   const input = document.createElement("input");
@@ -1633,6 +1633,13 @@ function mapOption(map, inRoute, filter) {
     content.append(element("span", `${monster.name}${kind} · 重生 ${respawnLabel(monster)}`));
   }
   if (!targets.length) content.append(element("small", filter === "all-mvp" ? "無 MVP" : "無 MVP／Boss"));
+  if (query) {
+    for (const monster of map.monsters) {
+      if (monster.kind === "normal" && monster.name.toLowerCase().includes(query)) {
+        content.append(element("span", `${monster.name}（小怪）`));
+      }
+    }
+  }
   label.append(input, content);
   return label;
 }
@@ -1679,17 +1686,18 @@ function monsterEditor(row) {
   details.ontoggle = () => { row.editorOpen = details.open; };
   const monsters = row.map.monsters;
   details.append(element("summary", `怪物設定（${monsters.length} 種）`));
-  for (const boss of row.map.monsters.filter(monster => monster.kind !== "normal")) {
+  for (const monster of monsters) {
     const label = element("label", "");
     label.className = "check";
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.checked = row.targets.includes(boss.id);
+    input.checked = row.targets.includes(monster.id);
     input.onchange = () => {
-      row.targets = input.checked ? [...row.targets, boss.id] : row.targets.filter(id => id !== boss.id);
+      row.targets = input.checked ? [...row.targets, monster.id] : row.targets.filter(id => id !== monster.id);
       clearPreview();
     };
-    label.append(input, ` ${boss.name}（${boss.kind === "mvp" ? "MVP" : "Boss"}） · 重生 ${respawnLabel(boss)}`);
+    const kind = {mvp: "MVP", boss: "Boss", normal: "小怪"}[monster.kind];
+    label.append(input, ` ${monster.name}（${kind}） · 重生 ${respawnLabel(monster)}`);
     details.append(label);
   }
   if (!["customCombat", "role-support-customCombat", "role-assist-customCombat"].some(checked) || !monsters.length) return details;
