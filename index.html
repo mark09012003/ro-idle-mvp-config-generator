@@ -1070,8 +1070,8 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
   <p id="guide-error" role="alert" hidden></p>
 </div>
 <section id="guide-job-section" hidden>
-  <h2>哪個職業負責帶隊？</h2>
-  <label class="guide-question">帶隊角色職業<select id="guide-job"></select></label>
+  <h2>用哪個 Buff 判斷換圖？</h2>
+  <div id="guide-buff-slot"></div>
 </section>
 <section id="guide-party-section" hidden>
   <h2>隊伍有幾個人？</h2>
@@ -1127,28 +1127,12 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <p id="guide-route-summary" class="section-help"></p>
 <div class="switch-basics">
   <div class="switch-inputs">
-    <label id="target-job-field">帶隊角色職業
-      <select id="targetJob" required>
-        <option value="">請選擇帶隊角色職業</option>
-        <option value="monk">武僧（含武術宗師）</option>
-        <option value="priest">祭司（含神官）</option>
-        <option value="knight">騎士（含騎士領主）</option>
-        <option value="crusader">十字軍（含聖殿十字軍）</option>
-        <option value="wizard">巫師（含超魔導師）</option>
-        <option value="sage">賢者（含智者）</option>
-        <option value="hunter">獵人（含神射手）</option>
-        <option value="bard">詩人（含搞笑藝人）</option>
-        <option value="dancer">舞孃（含冷豔舞姬）</option>
-        <option value="assassin">刺客（含十字刺客）</option>
-        <option value="rogue">流氓（含太保）</option>
-        <option value="blacksmith">鐵匠（含神工匠）</option>
-        <option value="alchemist">鍊金術師（含創造者）</option>
-        <option value="custom">其他職業 ID</option>
-      </select>
-      <span class="count-help">推薦武術宗師、神射手、鍊金術師等有自帶 Buff 的職業。</span>
-    </label>
-    <label id="lead-buff-field">判斷換圖的 Buff<select id="buff" disabled><option value="">請先選帶隊角色職業</option></select></label>
-    <label id="custom-job-field" hidden>職業 ID<input id="customJob" placeholder="例如 monk" spellcheck="false"></label>
+    <div id="buff-picker-slot">
+      <div id="lead-buff-picker" class="fields">
+        <label>職業篩選<select id="buffFilter"><option value="">全部職業</option></select></label>
+        <label>判斷換圖的 Buff<select id="buff" aria-describedby="buff-status"><option value="">不使用 Buff 條件</option></select></label>
+      </div>
+    </div>
     <label id="party-size-field">隊伍總人數（含自己）<input id="partySize" type="number" min="1" max="12" required></label>
   </div>
   <label class="check switch-wait"><input id="waitForParty" type="checkbox" disabled>等待隊友（多人隊伍自動啟用）</label>
@@ -1269,28 +1253,6 @@ SOFTWARE.
 (() => {
   "use strict";
 
-  const rebirthJobCodes = new Map([
-    ["novice_high", "novice"],
-    ["swordman_high", "swordman"],
-    ["mage_high", "mage"],
-    ["archer_high", "archer"],
-    ["acolyte_high", "acolyte"],
-    ["thief_high", "thief"],
-    ["merchant_high", "merchant"],
-    ["lord_knight", "knight"],
-    ["high_wizard", "wizard"],
-    ["sniper", "hunter"],
-    ["assassin_cross", "assassin"],
-    ["high_priest", "priest"],
-    ["whitesmith", "blacksmith"],
-    ["paladin", "crusader"],
-    ["champion", "monk"],
-    ["stalker", "rogue"],
-    ["professor", "sage"],
-    ["clown", "bard"],
-    ["gypsy", "dancer"],
-    ["creator", "alchemist"],
-  ]);
 
   function validateBase(base) {
     if (base?.format !== "ro-idle-autoconfig" || base.version !== 1 ||
@@ -1353,9 +1315,6 @@ SOFTWARE.
     const waitBelow = teammateThreshold;
     const waitSeconds = 5;
     const waitCooldown = 5;
-    const jobInput = (options.targetJob ?? "").trim().toLowerCase();
-    const targetJob = rebirthJobCodes.get(jobInput) ?? jobInput;
-    if (!/^[a-z_]{1,32}$/.test(targetJob)) throw new Error("請指定有效的帶隊角色職業。");
     if (!["top", "bottom"].includes(options.waitPosition)) throw new Error("請選擇死亡後的行為。");
     const buffBeforeMove = options.mode === "leader" && options.buffBeforeMove;
     const routeBuffLevel = Number(options.routeBuffLevel);
@@ -1490,7 +1449,6 @@ SOFTWARE.
           ...(buffBeforeMove ? {} : {maps: mapIds, inParty: true}),
           engaged: false,
           partyBelow: waitBelow,
-          ...(options.mode === "follower" ? {allyJobs: [targetJob]} : {}),
         },
         steps: [...(buffBeforeMove ? [{do: "skill", skill: buff, lv: routeBuffLevel}] : []), {do: "wait", sec: waitSeconds}],
       }] : [];
@@ -1809,39 +1767,31 @@ let buffJobs = [];
 async function loadBuffJobs() {
   try {
     buffJobs = JSON.parse(document.getElementById("buff-catalog.json").textContent);
+    byId("buffFilter").append(...buffJobs.map(job => new Option(job.name, job.id)));
+    populateLeaderBuffs();
   } catch {
     byId("buff-status").textContent = "無法讀取 Buff 清單，請重新載入擴充元件。";
     byId("buff-status").hidden = false;
   }
 }
 
-function leaderJobValue() {
-  return value("targetJob") === "custom" ? value("customJob").trim().toLowerCase() : value("targetJob");
-}
-
 function leaderBuffs() {
-  return buffJobs.find(job => job.id === leaderJobValue())?.buffs ?? [];
+  return [...new Map(buffJobs.flatMap(job => job.buffs).map(buff => [buff[0], buff])).values()];
 }
 
 function populateLeaderBuffs(selected = "") {
-  const buffs = leaderBuffs();
+  const all = leaderBuffs();
+  const buffs = [...(buffJobs.find(job => job.id === value("buffFilter"))?.buffs ?? all)];
+  const current = all.find(([id]) => id === selected);
+  if (current && !buffs.some(([id]) => id === selected)) buffs.unshift(current);
   byId("buff").replaceChildren(
-    new Option(buffs.length ? "不使用 Buff 條件" : leaderJobValue() ? "此職業無可選 Buff" : "請先選帶隊角色職業", ""),
+    new Option("不使用 Buff 條件", ""),
     ...buffs.map(([id, name]) => new Option(name, id)),
   );
-  byId("buff").disabled = !buffs.length;
   if (buffs.some(([id]) => id === selected)) byId("buff").value = selected;
 }
 
-function updateLeaderJob() {
-  populateLeaderBuffs(recommendedLeaderBuffs.get(leaderJobValue()));
-  applyRouteBuffDefaults();
-  updateOptions();
-  clearPreview();
-}
-
-byId("targetJob").onchange = updateLeaderJob;
-byId("customJob").onchange = updateLeaderJob;
+byId("buffFilter").onchange = () => populateLeaderBuffs(value("buff"));
 
 function applyRouteBuffDefaults() {
   const skill = leaderBuffs().find(([id]) => id === value("buff"));
@@ -2313,8 +2263,7 @@ function updateOptions() {
   byId("custom-combat-fields").disabled = !checked("customCombat");
   updateMacroCount();
   const leader = routeMode() === "leader";
-  const targetJobLabel = byId("targetJob").selectedOptions[0]?.textContent;
-  byId("guide-route-summary").textContent = `已帶入隊伍總人數 ${value("partySize")} 人，帶隊角色職業為 ${targetJobLabel ?? "未選擇"}。`;
+  byId("guide-route-summary").textContent = `已帶入隊伍總人數 ${value("partySize")} 人及換圖 Buff 設定。`;
   byId("leader").hidden = !leader;
   const skill = leaderBuffs().find(([id]) => id === value("buff"));
   const canPrecast = leader && value("buffWhen") === "selfLacks" && skill && skill[2].scope !== "others";
@@ -2327,9 +2276,6 @@ function updateOptions() {
   routeLevel.max = skill?.[2].maxLv ?? 10;
   if (Number(routeLevel.value) > Number(routeLevel.max)) routeLevel.value = routeLevel.max;
   byId("waitForParty").checked = Number(value("partySize")) > 1;
-  const customJob = value("targetJob") === "custom";
-  byId("custom-job-field").hidden = !customJob;
-  byId("customJob").required = customJob;
 }
 
 function download(urlData, filename, type) {
@@ -2352,8 +2298,7 @@ function describeOperation(macro, mapNames, buffNames) {
     if (condition[key]?.length) clauses.push(label + condition[key].map(id => buffNames.get(id) ?? id).join("、"));
   }
   if (condition.allyJobs?.length) {
-    const options = [...byId("targetJob").options];
-    clauses.push("隊伍有 " + condition.allyJobs.map(id => options.find(option => option.value === id)?.text ?? id).join("、"));
+    clauses.push("隊伍有 " + condition.allyJobs.map(id => buffJobs.find(job => job.id === id)?.name ?? id).join("、"));
   }
   if (condition.allyLacks?.length) {
     clauses.push("隊友缺少 " + condition.allyLacks.map(id => buffNames.get(id) ?? id).join("、"));
@@ -2434,12 +2379,6 @@ byId("generator").addEventListener("input", event => {
 
 byId("customCombat").onchange = renderRoute;
 
-const recommendedLeaderBuffs = new Map([
-  ["hunter", "AC_CONCENTRATION"],
-  ["monk", "AL_INCAGI"],
-  ["alchemist", "MC_LOUD"],
-  ["blacksmith", "MC_LOUD"],
-]);
 
 const combatRoles = [
   {id: "output", label: "帶隊角色", mode: "leader", supportOnly: false, help: "優先打勾選的王，負責帶隊換圖。"},
@@ -2547,7 +2486,6 @@ byId("generator").onsubmit = event => {
       routeWait: value("routeWait"),
       buffBeforeMove: !byId("route-buff-options").hidden && checked("buffBeforeMove"),
       routeBuffLevel: value("routeBuffLevel"),
-      targetJob: leaderJobValue(),
       partySize: value("partySize"),
       waitPosition: value("waitPosition"),
     };
@@ -2555,7 +2493,6 @@ byId("generator").onsubmit = event => {
       options[id] = value(id);
     }
     if (exportAll) {
-      const targetJob = options.targetJob;
       const leaderSkill = leaderBuffs().find(([id]) => id === options.buff);
       const leaderPrecast = leaderSkill && leaderSkill[2].scope !== "others" &&
         options.buffWhen === "selfLacks" && checked("buffBeforeMove");
@@ -2565,7 +2502,6 @@ byId("generator").onsubmit = event => {
           mode,
           roleAction: roleDepartureAction(id),
           supportOnly,
-          targetJob,
           onlyMvp: !supportOnly,
           maxLv: supportOnly ? 2 : 0,
           buff: mode === "leader" ? options.buff : "",
@@ -2596,14 +2532,13 @@ byId("download").onclick = () => downloadProfileZip(
   results.map(({file, profile}) => [file, profile]), "RO-idle_MVP_route.zip");
 
 const guideSteps = [
-  ["guide-job-section", "推薦武術宗師、神射手、鍊金術師等有自帶 Buff 的職業。"],
+  ["guide-job-section", "直接選擇 Buff，也可以按職業快速篩選。"],
   ["guide-party-section", "填入隊伍總人數，我會換算等待和換圖用的隊友數。"],
   ["route-section", "想打哪些王？按王名篩選，勾選地圖後按「加入巡迴」。"],
   ["monster-section", "設定三種角色的換圖前行動，以及死亡後的處理方式。"],
   ["preview-section", "按產生預覽，檢查遊戲內執行順序，再下載 JSON 或 ZIP。"],
 ];
 let guideIndex = 0;
-let appliedGuideJob = "";
 
 function setGuide(active) {
   const form = byId("generator");
@@ -2612,6 +2547,8 @@ function setGuide(active) {
   byId("start-guide").hidden = active;
   for (const section of form.querySelectorAll(":scope > section")) section.classList.remove("guide-current");
   byId("guide-job-section").hidden = !active || guideIndex !== 0;
+  byId(active && guideIndex === 0 ? "guide-buff-slot" : "buff-picker-slot").append(byId("lead-buff-picker"));
+  byId("buff-picker-slot").hidden = active;
   byId("guide-party-section").hidden = !active || guideIndex !== 1;
   if (!active) return;
   updateOptions();
@@ -2630,13 +2567,6 @@ function setGuide(active) {
 
 byId("start-guide").onclick = () => {
   guideIndex = 0;
-  appliedGuideJob = "";
-  const jobs = byId("guide-job");
-  jobs.replaceChildren(new Option("請選擇職業", ""));
-  for (const option of byId("targetJob").options) {
-    if (option.value && option.value !== "custom") jobs.append(new Option(option.text, option.value));
-  }
-  jobs.value = value("targetJob");
   byId("guide-party-size").value = value("partySize");
   setGuide(true);
 };
@@ -2654,18 +2584,7 @@ byId("guide-next").onclick = () => {
     byId("guide-error").textContent = message;
     byId("guide-error").hidden = false;
   };
-  if (id === "guide-job-section") {
-    const job = value("guide-job");
-    if (!job) return fail("請先選擇帶隊角色職業。");
-    if (job !== appliedGuideJob) {
-      if (leaderJobValue() !== job) {
-        byId("targetJob").value = job;
-        updateLeaderJob();
-      }
-      appliedGuideJob = job;
-      clearPreview();
-    }
-  } else if (id === "guide-party-section") {
+  if (id === "guide-party-section") {
     const total = Number(value("guide-party-size"));
     if (!Number.isInteger(total) || total < 1 || total > 12) return fail("隊伍總人數請填 1～12 人。");
     byId("partySize").value = String(total);
@@ -2757,7 +2676,6 @@ function restoreRouteDraft() {
       else if (field.type !== "checkbox" && typeof saved === "string" && field.id !== "buff") field.value = saved;
     }
     const savedBuffLevel = draft.fields?.routeBuffLevel;
-    if (!value("targetJob") && typeof draft.fields?.buffJob === "string") byId("targetJob").value = draft.fields.buffJob;
     populateLeaderBuffs(draft.fields?.buff);
     if (typeof savedBuffLevel === "string") byId("routeBuffLevel").value = savedBuffLevel;
     if (Array.isArray(draft.customMacros)) customMacros = draft.customMacros;
