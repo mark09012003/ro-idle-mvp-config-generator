@@ -1140,6 +1140,8 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
     </div>
   </div>
   <label class="check switch-wait"><input id="waitForParty" type="checkbox" disabled>等待隊友（多人隊伍自動啟用）</label>
+</div>
+<div id="leader-death-settings">
     <label id="wait-position-field">死亡後的行為<select id="waitPosition" required>
       <option value="">請選擇死亡後的行為</option>
       <option value="top">回到原圖再次找王</option>
@@ -2406,7 +2408,7 @@ function renderRoleSettings() {
   for (const {id, label, help} of combatRoles) {
     const panel = element("fieldset", "");
     panel.append(element("legend", label), Object.assign(element("p", help), {className: "section-help"}));
-    if (id === "output") panel.append(byId("buff-picker-slot"));
+    if (id === "output") panel.append(byId("buff-picker-slot"), byId("leader-death-settings"));
     const fields = element("div", "");
     fields.className = "fields";
     const action = macroSelect([
