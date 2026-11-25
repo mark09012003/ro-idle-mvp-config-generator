@@ -1176,7 +1176,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <p id="buff-status" role="status" hidden></p>
 </div>
 <label>換圖前等待秒數（0 為不等待，會在補 Buff 前執行）<input id="routeWait" type="number" min="0" max="60" step="1" value="0" required></label>
-<details><summary>進階：換圖 OR 條件</summary><p class="section-help">上方設定是第一組。每個 OR 組請填完整；產生時每組都會包含來源地圖與換圖所需的安全條件。</p><div id="route-or"></div></details>
+<details><summary>額外換圖條件</summary><p class="section-help">上方設定是第一組。每個 OR 組請填完整；產生時每組都會包含來源地圖與換圖所需的安全條件。</p><div id="route-or"></div></details>
   </div>
 </details>
 <div id="role-settings" class="role-settings"></div>
@@ -2585,11 +2585,11 @@ function renderRoleSettings() {
       const or = element("div", "");
       or.id = `role-${id}-route-or`;
       const orDetails = element("details", "");
-      orDetails.append(element("summary", "換圖 OR 條件"), or);
+      orDetails.append(element("summary", "額外換圖條件"), or);
       advanced.append(departureLabel, waitLabel, orDetails);
     }
     const combat = id === "output" ? combatTemplate : combatSource.cloneNode(true);
-    combat.querySelector("summary").textContent = "進階選怪條件";
+    combat.querySelector("summary").textContent = "怪物控制與選怪條件";
     if (id !== "output") {
       combat.id = `role-${id}-combat`;
       for (const field of combat.querySelectorAll("[id]")) field.id = `role-${id}-${field.id}`;
