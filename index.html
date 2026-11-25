@@ -934,6 +934,9 @@ input[type="checkbox"] { accent-color: var(--gold); }
   #generator[data-guided] > .guide-current, #guide-progress, #guide-speaker { animation: none; }
 }
 #generator[data-guided] > section:not(.guide-current) { display: none; }
+#guide-route-summary,
+#generator[data-guided] :is(#party-size-field, #target-job-field) { display: none; }
+#generator[data-guided] #guide-route-summary { display: block; }
 .guide-current > h2:focus { outline: none; }
 
 .map-region { display: grid; gap: 5px; min-width: 0; margin: 0; padding: 4px 0 6px 13px; border: 0; border-left: 2px solid var(--line); }
@@ -1193,6 +1196,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </section>
 <section id="switch-section" class="section-switch">
 <h2>換圖與配置切換</h2>
+<p id="guide-route-summary" class="section-help"></p>
 <p class="section-help">標的角色可用 Buff 決定何時換圖，非標的角色可用隊友人數判斷。路線跨多份配置時會自動接續。</p>
 <div class="fields">
 <div><strong>角色用途</strong><p id="route-role" class="section-help">標的角色</p></div>
@@ -2355,6 +2359,8 @@ function updateOptions() {
   updateMacroCount();
   const leader = routeMode() === "leader";
   byId("route-role").textContent = leader ? "標的角色" : "非標的角色";
+  const targetJobLabel = byId("targetJob").selectedOptions[0]?.textContent;
+  byId("guide-route-summary").textContent = `已帶入隊伍總人數 ${value("partySize")} 人，標的職業為 ${targetJobLabel ?? "未選擇"}。`;
   byId("leader").hidden = !leader;
   byId("buff").required = leader && Boolean(value("buffJob"));
   const skill = buffJobs.find(job => job.id === value("buffJob"))?.buffs.find(([id]) => id === value("buff"));
@@ -2603,6 +2609,7 @@ function setGuide(active) {
   byId("guide-job-section").hidden = !active || guideIndex !== 0;
   byId("guide-party-section").hidden = !active || guideIndex !== 1;
   if (!active) return;
+  updateOptions();
   const [id, instruction] = guideSteps[guideIndex];
   const section = byId(id);
   section.classList.add("guide-current");
@@ -2648,7 +2655,7 @@ byId("guide-next").onclick = () => {
     if (job !== appliedGuideJob) {
       const picker = byId("route-preset");
       const preset = [...picker.options].find(option => option.dataset.job === job);
-      if (preset && routeMode() === "leader") {
+      if (preset && routeMode() === "leader" && value("buffJob") !== job) {
         picker.value = preset.value;
         picker.dispatchEvent(new Event("change", {bubbles: true}));
       }
