@@ -2604,6 +2604,13 @@ function renderRoleSettings() {
     }
     (id === "output" ? routeAdvanced.querySelector(".advanced-route-content") : advanced).append(combat);
     panel.append(advanced);
+    const advancedPrefix = id === "output" ? "" : `role-${id}-`;
+    const departureFields = new Set([`${advancedPrefix}departure`, `${advancedPrefix}routeWait`]);
+    advanced.addEventListener("input", event => {
+      if (!departureFields.has(event.target.id)) return;
+      action.value = "default";
+      action.onchange();
+    });
     byId("role-settings").append(panel);
     if (id !== "output") renderRouteOr(id);
   }
