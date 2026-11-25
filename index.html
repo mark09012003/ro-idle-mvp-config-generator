@@ -1087,7 +1087,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </section>
 <section id="guide-party-section" hidden>
   <h2>隊伍有幾個人？</h2>
-  <label class="guide-question">隊伍總人數（含自己）<input id="guide-party-size" type="number" min="1" max="12" step="1"></label>
+  <label class="guide-question">隊伍總人數（含自己）<select id="guide-party-size"><option value="">請選擇人數</option></select></label>
 </section>
 <section id="monster-section" class="section-monsters">
 <div class="switch-heading"><h2>戰鬥與巡迴設定</h2></div>
@@ -1138,7 +1138,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </details>
 <p id="guide-route-summary" class="section-help"></p>
 <div class="switch-basics">
-    <label id="party-size-field">隊伍總人數（含自己）<input id="partySize" type="number" min="1" max="12" required></label>
+    <label id="party-size-field">隊伍總人數（含自己）<select id="partySize" required><option value="">請選擇人數</option></select></label>
     <label class="check switch-wait"><input id="waitForParty" type="checkbox" disabled>等待隊友（多人隊伍自動啟用）</label>
 </div>
     <div id="buff-picker-slot">
@@ -2686,7 +2686,6 @@ byId("generator").addEventListener("keydown", event => {
       !event.target.matches("input") || !byId("generator").hasAttribute("data-guided")) return;
   if (guideSteps[guideIndex][0] === "preview-section") return;
   event.preventDefault();
-  if (event.target.id === "guide-party-size") byId("guide-next").click();
 });
 
 byId("generator").addEventListener("invalid", event => {
@@ -2780,6 +2779,12 @@ function restoreRouteDraft() {
 }
 
 Promise.all([loadCatalog(), loadBuffJobs()]).then(() => {
+  for (const id of ["partySize", "guide-party-size"]) {
+    byId(id).append(...Array.from({length: 12}, (_, index) => {
+      const total = index + 1;
+      return new Option(`${total} 人`, String(total));
+    }));
+  }
   const defaults = new Map(draftFields().map(field =>
     [field.id, field.type === "checkbox" ? field.checked : field.value]));
   const reset = byId("reset-route");
