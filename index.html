@@ -1194,6 +1194,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <p id="buff-status" role="status" hidden></p>
 </div>
 <label>換圖前等待秒數（0 為不等待，會在補 Buff 前執行）<input id="routeWait" type="number" min="0" max="60" step="1" value="0" required></label>
+<label>等待隊員秒數<input id="partyWaitSeconds" type="number" min="1" max="60" step="1" value="6"></label>
 <details><summary>額外換圖條件</summary><p class="section-help">上方設定是第一組。每個 OR 組請填完整；產生時每組都會包含來源地圖與換圖所需的安全條件。</p><div id="route-or"></div></details>
   </div>
 </details>
@@ -1347,7 +1348,10 @@ SOFTWARE.
     const cooldown = 5;
     const wait = partySize > 1;
     const waitBelow = teammateThreshold;
-    const waitSeconds = 5;
+    const waitSeconds = Number(options.partyWaitSeconds ?? 6);
+    if (wait && (!Number.isInteger(waitSeconds) || waitSeconds < 1 || waitSeconds > 60)) {
+      throw new Error("等待隊員秒數須為 1～60 秒的整數。");
+    }
     const waitCooldown = 5;
     const leaderJob = (options.targetJob ?? "").trim();
     if (options.mode === "follower" && wait && !/^[a-z_]{1,32}$/.test(leaderJob)) {
@@ -2601,6 +2605,8 @@ function renderRoleSettings() {
       wait.id = `role-${id}-routeWait`;
       const waitLabel = element("label", "換圖前額外等待秒數（0 為不等待）");
       waitLabel.append(wait);
+      const partyWaitLabel = byId("partyWaitSeconds").closest("label").cloneNode(true);
+      partyWaitLabel.querySelector("input").id = `role-${id}-partyWaitSeconds`;
       const departure = byId("departure").cloneNode(true);
       departure.id = `role-${id}-departure`;
       const departureLabel = element("label", "離開地圖前");
@@ -2609,7 +2615,7 @@ function renderRoleSettings() {
       or.id = `role-${id}-route-or`;
       const orDetails = element("details", "");
       orDetails.append(element("summary", "額外換圖條件"), or);
-      advanced.append(departureLabel, waitLabel, orDetails);
+      advanced.append(departureLabel, waitLabel, partyWaitLabel, orDetails);
     }
     const combat = id === "output" ? combatTemplate : combatSource.cloneNode(true);
     combat.querySelector("summary").textContent = "怪物控制與選怪條件";
@@ -2681,6 +2687,7 @@ function combatOptionsForRole(id) {
     escape: value(field("escape")),
     routeCondition: roleRouteConditions[id].cond,
     routeWait: value(field("routeWait")),
+    partyWaitSeconds: value(field("partyWaitSeconds")) || undefined,
     departure: value(field("departure")),
   };
 }
