@@ -1012,6 +1012,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 .role-settings > fieldset > .role-description { margin: 0 0 8px; }
 .leader-recommendation { padding: 8px 10px; margin: 0 0 8px; border-left: 3px solid var(--accent); border-radius: 4px; background: var(--using); }
 .leader-recommendation p { margin: 2px 0 0; }
+.leader-recommendation ol { margin: 2px 0 0; padding-inline-start: 1.5em; }
 .role-settings #lead-buff-picker { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .role-settings #leader-death-settings { margin-top: 10px; }
 .role-settings #route-buff-options .check { margin-top: 4px; }
@@ -1203,6 +1204,18 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <section id="route-section" class="section-route">
 <h2>地圖與巡迴路線</h2>
 <p class="section-help">勾選地圖並加入巡迴。清單由上往下執行，可調整順序或展開地圖修改個別怪物。</p>
+<aside class="leader-recommendation">
+  <strong>怪物目標怎麼選</strong>
+  <p>加入地圖時，每張只會預先勾選 MVP。要把 Boss 或小怪加入目標，請展開該地圖的「怪物設定」，勾選想加入的怪物。</p>
+</aside>
+<aside class="leader-recommendation">
+  <strong>刷懷錶範例</strong>
+  <ol>
+    <li>將地圖篩選切到「所有地圖」，在搜尋欄輸入「狂暴大腳熊」。</li>
+    <li>勾選「普隆德拉迷宮森林 2樓」和「龍之城王陵」，再按「加入巡迴」。</li>
+    <li>在巡迴清單中分別展開這兩張地圖的「怪物設定」，各自勾選「狂暴大腳熊」。</li>
+  </ol>
+</aside>
 <div class="fields">
 <label>搜尋地圖、MVP／Boss 或小怪<input id="map-search" type="search" placeholder="輸入地圖名稱、代碼或怪物名稱"></label>
 <label>按 MVP／Boss 篩選<select id="mvp-filter" disabled>
@@ -1801,11 +1814,10 @@ byId("clear-maps").onclick = () => {
   byId("map-search").focus();
 };
 byId("add").onclick = () => {
-  const bossFilter = byId("generator").hasAttribute("data-guided") ? value("mvp-filter") : "";
   for (const id of selectedMaps) {
     const map = maps.find(map => map.id === id);
     route.push({map, targets: map.monsters.filter(monster =>
-      bossFilter ? matchesMonsterFilter(monster, bossFilter) : monster.kind === "mvp").map(monster => monster.id),
+      monster.kind === "mvp").map(monster => monster.id),
       smallRules: {}});
   }
   selectedMaps.clear();
