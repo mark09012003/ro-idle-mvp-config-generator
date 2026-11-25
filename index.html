@@ -1038,6 +1038,15 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 .section-help { margin: 3px 0 8px; color: var(--dim); font-size: 12px; line-height: 1.5; }
 
 .count-help { display: block; margin: 0 0 6px; color: var(--dim); font-size: 12px; font-weight: normal; line-height: 1.45; }
+.switch-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 7px; margin-bottom: 10px; }
+#generator .switch-heading h2 { margin: 0; padding: 0; border: 0; }
+#route-role { padding: 3px 8px; border-radius: 999px; background: var(--using); color: var(--title); font-size: 12px; white-space: nowrap; }
+.switch-basics { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
+.switch-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 6px 12px; }
+.switch-wait { margin: 0 0 10px; color: var(--dim); }
+#advanced-route { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; }
+#advanced-route > summary { padding: 8px 12px; font-weight: 600; }
+.advanced-route-content { padding: 10px 12px; border-top: 1px solid var(--line); }
 
 .header-actions { display: flex; gap: 6px; flex: 0 0 auto; }
 :root[data-theme="dark"] {
@@ -1195,43 +1204,10 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </details>
 </section>
 <section id="switch-section" class="section-switch">
-<h2>換圖與配置切換</h2>
+<div class="switch-heading"><h2>換圖與配置切換</h2><span id="route-role">標的角色</span></div>
 <p id="guide-route-summary" class="section-help"></p>
-<p class="section-help">標的角色可用 Buff 決定何時換圖，非標的角色可用隊友人數判斷。路線跨多份配置時會自動接續。</p>
-<div class="fields">
-<div><strong>角色用途</strong><p id="route-role" class="section-help">標的角色</p></div>
-</div>
-<details id="advanced-route"><summary>進階換圖設定</summary>
-<label>每份配置最多幾張地圖<input id="groupSize" type="number" min="1" max="10" value="8" required></label>
-<label>離開地圖前<select id="departure">
-<option value="auto">沿用角色設定</option>
-<option value="none">直接換圖</option>
-<option value="teleport">瞬間移動 Lv.2</option>
-<option value="fly">蒼蠅翅膀</option>
-<option value="butterfly">蝴蝶翅膀</option>
-</select></label>
-<div id="leader" class="fields">
-<label>提供 Buff 的職業<select id="buffJob" disabled><option value="">不使用 Buff 條件</option></select></label>
-<label>用來判斷換圖的 Buff<select id="buff" disabled><option value="">請先選職業</option></select></label>
-<p id="buff-status" role="status" hidden></p>
-<label>Buff 條件<select id="buffWhen"><option value="selfLacks">缺少 Buff 時換圖</option><option value="selfHas">有 Buff 時換圖</option></select></label>
-</div>
-<label>換圖前等待秒數（0 為不等待，會在補 Buff 前執行）<input id="routeWait" type="number" min="0" max="60" step="1" value="0" required></label>
-<details><summary>進階：換圖 OR 條件</summary><p class="section-help">上方設定是第一組。每個 OR 組請填完整；產生時每組都會包含來源地圖與換圖所需的安全條件。</p><div id="route-or"></div></details>
-<div id="route-buff-options" hidden>
-  <label class="check"><input id="buffBeforeMove" type="checkbox">換圖前先補 Buff</label>
-  <label id="route-buff-level-label" class="number-field" hidden>補放等級<input id="routeBuffLevel" type="number" min="1" max="10" value="1"></label>
-  <p>搜尋中或閒置、未交戰且 SP 大於 10 時，先補上方選定的 Buff，再執行所選的離圖動作。沿用角色設定時會使用瞬間移動 Lv.2。若也開啟等待隊友，會在等待前補同一個 Buff。</p>
-</div>
-</details>
-<label id="party-size-field" class="number-field">隊伍總人數（含自己）<input id="partySize" type="number" min="1" max="12" required></label>
-<label class="check"><input id="waitForParty" type="checkbox" disabled>等待隊友（多人隊伍自動啟用）</label>
-  <div class="fields">
-    <label id="wait-position-field">如果在這張地圖死亡，要怎麼做？<select id="waitPosition" required>
-      <option value="">請選擇死亡後的行為</option>
-      <option value="top">回到原圖再次找王</option>
-      <option value="bottom">跳過並換到下一張圖</option>
-    </select></label>
+<div class="switch-basics">
+  <div class="switch-inputs">
     <label id="target-job-field">輸出角色職業
       <select id="targetJob" required>
         <option value="">請選擇輸出角色職業</option>
@@ -1253,8 +1229,42 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
       <span class="count-help">推薦武術宗師、神射手、鍊金術師等有自帶 Buff 的職業。</span>
     </label>
     <label id="custom-job-field" hidden>職業 ID<input id="customJob" placeholder="例如 monk" spellcheck="false"></label>
+    <label id="party-size-field">隊伍總人數（含自己）<input id="partySize" type="number" min="1" max="12" required></label>
   </div>
-<p class="section-help">死亡後的選擇用於輸出配置的巨集順序。角色回到原圖後，會優先執行符合條件的巨集。</p>
+  <label class="check switch-wait"><input id="waitForParty" type="checkbox" disabled>等待隊友（多人隊伍自動啟用）</label>
+    <label id="wait-position-field">死亡後的行為<select id="waitPosition" required>
+      <option value="">請選擇死亡後的行為</option>
+      <option value="top">回到原圖再次找王</option>
+      <option value="bottom">跳過並換到下一張圖</option>
+    </select></label>
+  <p class="section-help">影響輸出配置回到原圖後，優先執行哪個巨集。</p>
+</div>
+<details id="advanced-route">
+  <summary>進階換圖設定</summary>
+  <div class="advanced-route-content">
+<label>每份配置最多幾張地圖<input id="groupSize" type="number" min="1" max="10" value="8" required></label>
+<label>離開地圖前<select id="departure">
+<option value="auto">沿用角色設定</option>
+<option value="none">直接換圖</option>
+<option value="teleport">瞬間移動 Lv.2</option>
+<option value="fly">蒼蠅翅膀</option>
+<option value="butterfly">蝴蝶翅膀</option>
+</select></label>
+<div id="leader" class="fields">
+<label>提供 Buff 的職業<select id="buffJob" disabled><option value="">不使用 Buff 條件</option></select></label>
+<label>用來判斷換圖的 Buff<select id="buff" disabled><option value="">請先選職業</option></select></label>
+<p id="buff-status" role="status" hidden></p>
+<label>Buff 條件<select id="buffWhen"><option value="selfLacks">缺少 Buff 時換圖</option><option value="selfHas">有 Buff 時換圖</option></select></label>
+</div>
+<label>換圖前等待秒數（0 為不等待，會在補 Buff 前執行）<input id="routeWait" type="number" min="0" max="60" step="1" value="0" required></label>
+<details><summary>進階：換圖 OR 條件</summary><p class="section-help">上方設定是第一組。每個 OR 組請填完整；產生時每組都會包含來源地圖與換圖所需的安全條件。</p><div id="route-or"></div></details>
+<div id="route-buff-options" hidden>
+  <label class="check"><input id="buffBeforeMove" type="checkbox">換圖前先補 Buff</label>
+  <label id="route-buff-level-label" class="number-field" hidden>補放等級<input id="routeBuffLevel" type="number" min="1" max="10" value="1"></label>
+  <p>搜尋中或閒置、未交戰且 SP 大於 10 時，先補上方選定的 Buff，再執行所選的離圖動作。沿用角色設定時會使用瞬間移動 Lv.2。若也開啟等待隊友，會在等待前補同一個 Buff。</p>
+</div>
+  </div>
+</details>
 </section>
 <section id="custom-macro-section">
 <details id="custom-macro-details">
