@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>巡迴配置產生器 · RO 放置仙境帳號櫃</title>
+<script>
+try {
+  if (localStorage.getItem("ro-idle-route-theme") === "dark") {
+    document.documentElement.dataset.theme = "dark";
+  }
+} catch {
+  // The toggle still works when browser storage is unavailable.
+}
+</script>
 <style>
 :root {
   color-scheme: light;
@@ -1015,6 +1024,34 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 
 .count-help { display: block; margin: 0 0 6px; color: var(--dim); font-size: 12px; font-weight: normal; line-height: 1.45; }
 
+.header-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --face: #121923;
+  --paper: #1b2432;
+  --head: #222e3e;
+  --using: #253e55;
+  --line: #3c4c61;
+  --ink: #e1e8f0;
+  --title: #f2f5fa;
+  --dim: #b0bed0;
+  --accent: #8bc1ff;
+  --gold: #e5b757;
+  --danger: #ff9a91;
+}
+:root[data-theme="dark"], [data-theme="dark"] body { background: var(--face); }
+[data-theme="dark"] :is(section, table, .btn) { background: var(--paper); }
+[data-theme="dark"] :is(input:not([type=checkbox]), select, textarea, .btn, .macro-card) { border-color: var(--line); }
+[data-theme="dark"] .macro-card, [data-theme="dark"] .btn:hover { background: var(--head); }
+[data-theme="dark"] .btn.primary:not(:disabled) { background: var(--gold); color: #211803; }
+[data-theme="dark"] .btn:disabled { color: var(--dim); opacity: .65; }
+[data-theme="dark"] .route-index { background: var(--face); }
+[data-theme="dark"] #route > li:first-child .route-index { background: #493817; color: #ffdb88; }
+[data-theme="dark"] .route-start { color: #ffdb88; }
+[data-theme="dark"] .macro-step-index { color: var(--face); }
+[data-theme="dark"] #status[data-error=true] { color: var(--danger); }
+[data-theme="dark"] .map-grid label:has(input:checked) { border-color: var(--accent); }
+
 </style>
 
 
@@ -1024,7 +1061,10 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <main>
 <header class="caption page-header">
   <h1>巡迴配置產生器</h1>
-  <button class="btn tiny" id="start-guide" type="button">開始引導</button>
+  <div class="header-actions">
+    <button class="btn tiny" id="theme-toggle" type="button" aria-pressed="false">深色模式</button>
+    <button class="btn tiny" id="start-guide" type="button">開始引導</button>
+  </div>
 </header>
 <div class="workspace">
 <form id="generator">
@@ -2547,6 +2587,15 @@ byId("generator").addEventListener("invalid", event => {
 }, true);
 
 const routeDraftKey = "ro-idle-route-draft-v1";
+const themeToggle = byId("theme-toggle");
+const pageTheme = document.documentElement.dataset;
+themeToggle.setAttribute("aria-pressed", String(pageTheme.theme === "dark"));
+themeToggle.onclick = () => {
+  const dark = pageTheme.theme !== "dark";
+  pageTheme.theme = dark ? "dark" : "light";
+  themeToggle.setAttribute("aria-pressed", String(dark));
+  try { localStorage.setItem("ro-idle-route-theme", pageTheme.theme); } catch {}
+};
 let routeDraftReady = false;
 
 function draftFields() {
