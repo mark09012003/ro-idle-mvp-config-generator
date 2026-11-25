@@ -1064,6 +1064,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <header class="caption page-header">
   <h1>巡迴配置產生器</h1>
   <div class="header-actions">
+    <button class="btn tiny" id="reset-route" type="button" disabled>回到預設</button>
     <button class="btn tiny" id="theme-toggle" type="button" aria-pressed="false">深色模式</button>
     <button class="btn tiny" id="start-guide" type="button">開始引導</button>
   </div>
@@ -2779,6 +2780,36 @@ function restoreRouteDraft() {
 }
 
 Promise.all([loadCatalog(), loadBuffJobs()]).then(() => {
+  const defaults = new Map(draftFields().map(field =>
+    [field.id, field.type === "checkbox" ? field.checked : field.value]));
+  const reset = byId("reset-route");
+  reset.disabled = false;
+  reset.onclick = () => {
+    if (!window.confirm("回到預設會清除目前的巡迴路線、配置設定和自訂巨集。確定重設？")) return;
+    setGuide(false);
+    route.length = 0;
+    selectedMaps.clear();
+    customMacros = [];
+    for (const field of draftFields()) {
+      if (!defaults.has(field.id)) continue;
+      if (field.type === "checkbox") field.checked = defaults.get(field.id);
+      else field.value = defaults.get(field.id);
+    }
+    populateLeaderBuffs();
+    byId("buff-search").setCustomValidity("");
+    for (const {id} of combatRoles) {
+      roleRouteConditions[id].cond = {};
+      byId(`role-${id}-action`).onchange();
+      renderRouteOr(id);
+    }
+    for (const details of byId("generator").querySelectorAll("details[open]")) details.open = false;
+    updateOptions();
+    renderMacroEditor();
+    renderRoute();
+    renderMapChoices();
+    clearPreview();
+    saveRouteDraft();
+  };
   restoreRouteDraft();
   for (const {id} of combatRoles) byId(`role-${id}-action`).onchange();
   updateOptions();
