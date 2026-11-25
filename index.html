@@ -1132,13 +1132,13 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
     <label id="party-size-field">隊伍總人數（含自己）<input id="partySize" type="number" min="1" max="12" required></label>
     <div id="buff-picker-slot">
       <div id="lead-buff-picker">
-        <label>判斷帶隊角色身上的 Buff<input id="buff-search" type="text" list="buff-options" autocomplete="off" placeholder="輸入 Buff 或職業名稱搜尋"></label>
+        <label>判斷帶隊角色身上的 Buff（必填）<input id="buff-search" type="text" list="buff-options" autocomplete="off" placeholder="輸入 Buff 或職業名稱搜尋" required></label>
         <datalist id="buff-options"></datalist>
         <input id="buff" type="hidden">
-        <p class="section-help">留空即可停用 Buff 判斷。</p>
+        <p class="section-help">帶隊角色身上缺少所選 Buff 時換圖。</p>
         <div id="route-buff-options">
           <label class="check"><input id="buffBeforeMove" type="checkbox" disabled>換圖前自己補 Buff</label>
-          <p id="route-buff-help" class="section-help">選擇可對自己施放的 Buff，並使用「缺少 Buff 時換圖」即可啟用。</p>
+          <p id="route-buff-help" class="section-help">選擇可對自己施放的 Buff 即可啟用。</p>
           <label id="route-buff-level-label" class="number-field" hidden>補放等級<input id="routeBuffLevel" type="number" min="1" max="10" value="1"></label>
         </div>
       </div>
@@ -1166,7 +1166,6 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </select></label>
 <div id="leader" class="fields">
 <p id="buff-status" role="status" hidden></p>
-<label>Buff 條件<select id="buffWhen"><option value="selfLacks">缺少 Buff 時換圖</option><option value="selfHas">有 Buff 時換圖</option></select></label>
 </div>
 <label>換圖前等待秒數（0 為不等待，會在補 Buff 前執行）<input id="routeWait" type="number" min="0" max="60" step="1" value="0" required></label>
 <details><summary>進階：換圖 OR 條件</summary><p class="section-help">上方設定是第一組。每個 OR 組請填完整；產生時每組都會包含來源地圖與換圖所需的安全條件。</p><div id="route-or"></div></details>
@@ -1313,6 +1312,7 @@ SOFTWARE.
     const teammateThreshold = partySize - 1;
     const partyBelow = options.mode === "follower" && partySize > 1 ? teammateThreshold : null;
     const buff = options.buff.trim().toUpperCase();
+    if (options.mode === "leader" && !buff) throw new Error("請選擇用來判斷換圖的 Buff。");
     if (options.mode === "leader" && buff && !/^[A-Z][A-Z0-9_]*$/.test(buff)) {
       throw new Error("請填入遊戲 Buff ID，例如 AL_INCAGI。");
     }
@@ -1324,9 +1324,8 @@ SOFTWARE.
     if (!["top", "bottom"].includes(options.waitPosition)) throw new Error("請選擇死亡後的行為。");
     const buffBeforeMove = options.mode === "leader" && options.buffBeforeMove;
     const routeBuffLevel = Number(options.routeBuffLevel);
-    if (buffBeforeMove && (!buff || options.buffWhen !== "selfLacks" ||
-        !Number.isInteger(routeBuffLevel) || routeBuffLevel < 1 || routeBuffLevel > 10)) {
-      throw new Error("換圖前自補需要選擇「缺少 Buff 時換圖」及有效的技能等級。");
+    if (buffBeforeMove && (!Number.isInteger(routeBuffLevel) || routeBuffLevel < 1 || routeBuffLevel > 10)) {
+      throw new Error("換圖前自補需要有效的技能等級。");
     }
     const capacity = Math.min(Number(options.groupSize), 10 - baseMacros.length - Number(Boolean(wait)));
     if (!Number.isInteger(capacity) || capacity < 1) {
@@ -1441,10 +1440,14 @@ SOFTWARE.
           cond.spAbove = 10;
         }
         if (options.mode === "follower" && partyBelow !== null) cond.partyBelow = partyBelow;
-        if (options.mode === "leader" && buff) cond[options.buffWhen] = [buff];
+        if (options.mode === "leader") cond.selfLacks = [buff];
         if (options.routeCondition?.or?.length) {
           const {selfHas, selfLacks, partyBelow, ...required} = cond;
-          cond.or = options.routeCondition.or.map(group => ({...group, ...required}));
+          cond.or = options.routeCondition.or.map(group => ({
+            ...group,
+            ...required,
+            ...(options.mode === "leader" ? {selfLacks: [...new Set([buff, ...(group.selfLacks ?? [])])]} : {}),
+          }));
         }
         return [{name: routeName(position, row, destination), cooldownSec: cooldown, cond, steps}];
       });
@@ -1800,14 +1803,14 @@ byId("buff-search").oninput = () => {
   const input = byId("buff-search");
   const query = input.value.trim();
   const match = [...byId("buff-options").options].find(option => option.value === query);
-  input.setCustomValidity(query && !match ? "請從搜尋結果選擇一個 Buff，或清空欄位。" : "");
+  input.setCustomValidity(query && !match ? "請從搜尋結果選擇一個 Buff。" : "");
   byId("buff").value = match?.dataset.buff ?? "";
   applyRouteBuffDefaults();
 };
 
 function applyRouteBuffDefaults() {
   const skill = leaderBuffs().find(([id]) => id === value("buff"));
-  if (!skill || value("buffWhen") !== "selfLacks" || skill[2].scope === "others") return;
+  if (!skill || skill[2].scope === "others") return;
   byId("buffBeforeMove").checked = true;
   byId("routeBuffLevel").value = skill[2].maxLv;
   updateOptions();
@@ -1815,7 +1818,6 @@ function applyRouteBuffDefaults() {
 }
 
 byId("buff").addEventListener("change", applyRouteBuffDefaults);
-byId("buffWhen").addEventListener("change", applyRouteBuffDefaults);
 
 let customMacros = [];
 const macroStepLabels = {skill: "放技能", item: "用道具", equip: "換上裝備", unequip: "卸下裝備", wait: "等待", fly: "用蒼蠅翅膀", butterfly: "用蝴蝶翅膀", town: "回城補給後回來", macro: "接著執行巨集", homunFeed: "餵生命體", arrow: "製作箭矢", produce: "製作物品", quiver: "做成箭矢筒", log: "在紀錄顯示", stop: "停止掛機"};
@@ -2281,7 +2283,7 @@ function updateOptions() {
   updateMacroCount();
   byId("guide-route-summary").textContent = `已帶入隊伍總人數 ${value("partySize")} 人及換圖 Buff 設定。`;
   const skill = leaderBuffs().find(([id]) => id === value("buff"));
-  const canPrecast = value("buffWhen") === "selfLacks" && skill && skill[2].scope !== "others";
+  const canPrecast = skill && skill[2].scope !== "others";
   const routeBuffEnabled = Boolean(canPrecast && checked("buffBeforeMove"));
   byId("buffBeforeMove").disabled = !canPrecast;
   byId("route-buff-help").hidden = Boolean(canPrecast);
@@ -2550,13 +2552,12 @@ byId("generator").onsubmit = event => {
       partySize: value("partySize"),
       waitPosition: value("waitPosition"),
     };
-    for (const id of ["buff", "buffWhen", "groupSize"]) {
+    for (const id of ["buff", "groupSize"]) {
       options[id] = value(id);
     }
     if (exportAll) {
       const leaderSkill = leaderBuffs().find(([id]) => id === options.buff);
-      const leaderPrecast = leaderSkill && leaderSkill[2].scope !== "others" &&
-        options.buffWhen === "selfLacks" && checked("buffBeforeMove");
+      const leaderPrecast = leaderSkill && leaderSkill[2].scope !== "others" && checked("buffBeforeMove");
       const entries = combatRoles.flatMap(({id, label, mode, supportOnly}) =>
         RoConfigBuilder.generate(null, route, {
           ...options,
