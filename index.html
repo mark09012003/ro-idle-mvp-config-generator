@@ -1195,7 +1195,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <h2>換圖與配置切換</h2>
 <p class="section-help">標的角色可用 Buff 決定何時換圖，非標的角色可用隊友人數判斷。路線跨多份配置時會自動接續。</p>
 <div class="fields">
-<label>角色用途<select id="mode"><option value="leader">標的角色</option><option value="follower">非標的角色</option></select></label>
+<div><strong>角色用途</strong><p id="route-role" class="section-help">標的角色</p></div>
 <label>每份配置最多幾張地圖<input id="groupSize" type="number" min="1" max="10" value="8" required></label>
 <label>巡迴巨集冷卻（秒）<input id="cooldown" type="number" min="5" max="86400" value="5" required></label>
 </div>
@@ -2342,6 +2342,10 @@ function updateMacroCount() {
   }
 }
 
+function routeMode() {
+  return value("combatMode") === "output" ? "leader" : "follower";
+}
+
 function updateOptions() {
   byId("custom-combat-fields").disabled = !checked("customCombat");
   const support = value("combatMode") === "support";
@@ -2349,7 +2353,8 @@ function updateOptions() {
     ? "所有怪物都設為被打才還手、看到就逃。白名單留空，選怪等級為 2～2。若要對隊友正在打的怪施放天使之怒等技能，請在遊戲內自行開啟「協助隊友打怪」。"
     : "優先打勾選的王，遇到王不逃；其他怪被打才還手，打完當前目標再逃。白名單只收錄勾選的王，並開啟協助隊友打怪與協助時略過逃生設定的怪物。";
   updateMacroCount();
-  const leader = value("mode") === "leader";
+  const leader = routeMode() === "leader";
+  byId("route-role").textContent = leader ? "標的角色" : "非標的角色";
   byId("leader").hidden = !leader;
   byId("buff").required = leader && Boolean(value("buffJob"));
   const skill = buffJobs.find(job => job.id === value("buffJob"))?.buffs.find(([id]) => id === value("buff"));
@@ -2490,7 +2495,6 @@ byId("route-preset").onchange = event => {
     if (!preset) return;
     const support = preset === "support";
     const leader = preset === "leader";
-    byId("mode").value = leader ? "leader" : "follower";
     byId("combatMode").value = support ? "support" : leader ? "output" : "assist";
     byId("customCombat").checked = false;
     renderRoute();
@@ -2527,7 +2531,7 @@ byId("generator").onsubmit = event => {
       macro.steps.some(step => typeof step?.do !== "string"))) {
       throw new Error("每條自訂巨集需要 1～40 字名稱、5～86400 秒冷卻，以及 1～10 個有效步驟。");
     }
-    if (value("mode") === "leader" && value("buffJob") && !value("buff")) {
+    if (routeMode() === "leader" && value("buffJob") && !value("buff")) {
       throw new Error("請選擇用來判斷換圖的 Buff。");
     }
     const supportOnly = value("combatMode") === "support";
@@ -2537,6 +2541,7 @@ byId("generator").onsubmit = event => {
     }
     const options = {
       macros,
+      mode: routeMode(),
       supportOnly,
       customCombat,
       onlyMvp: customCombat ? checked("onlyMvp") : !supportOnly,
@@ -2559,7 +2564,7 @@ byId("generator").onsubmit = event => {
       waitCooldown: value("waitCooldown"),
       waitPosition: value("waitPosition"),
     };
-    for (const id of ["mode", "buff", "buffWhen", "cooldown", "groupSize", "departure"]) {
+    for (const id of ["buff", "buffWhen", "cooldown", "groupSize", "departure"]) {
       options[id] = value(id);
     }
     results = RoConfigBuilder.generate(null, route, options);
@@ -2583,7 +2588,7 @@ const guideSteps = [
   ["guide-party-section", "填入隊伍總人數，我會換算等待和換圖用的隊友數。"],
   ["route-section", "想打哪些王？按王名篩選，勾選地圖後按「加入巡迴」。"],
   ["monster-section", "選擇輸出、輔助或協助找王／打王。"],
-  ["switch-section", "選擇標的或非標的角色，再決定是否等待隊友。"],
+  ["switch-section", "確認換圖條件，再決定是否等待隊友。"],
   ["preview-section", "按產生預覽，檢查遊戲內執行順序，再下載 JSON 或 ZIP。"],
 ];
 let guideIndex = 0;
@@ -2643,7 +2648,7 @@ byId("guide-next").onclick = () => {
     if (job !== appliedGuideJob) {
       const picker = byId("route-preset");
       const preset = [...picker.options].find(option => option.dataset.job === job);
-      if (preset && value("mode") === "leader") {
+      if (preset && routeMode() === "leader") {
         picker.value = preset.value;
         picker.dispatchEvent(new Event("change", {bubbles: true}));
       }
