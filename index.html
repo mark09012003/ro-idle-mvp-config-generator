@@ -1004,13 +1004,23 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 .count-help { display: block; margin: 0 0 6px; color: var(--dim); font-size: 12px; font-weight: normal; line-height: 1.45; }
 .switch-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 7px; margin-bottom: 10px; }
 #generator .switch-heading h2 { margin: 0; padding: 0; border: 0; }
-.role-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); align-items: start; gap: 10px; margin: 12px 0; }
-.role-settings fieldset { min-width: 0; margin: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
-.role-settings legend { color: var(--title); font-weight: 700; padding-inline: 4px; }
+.role-settings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 12px; margin-top: 12px; }
+.role-settings > fieldset { min-width: 0; margin: 0; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--head); }
+.role-settings > fieldset > legend { color: var(--title); font-size: 14px; font-weight: 700; padding-inline: 5px; }
+.role-settings > fieldset > .role-description { min-height: 3em; margin: 0 0 8px; }
+.role-settings > fieldset > .fields { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.role-settings #lead-buff-picker { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.role-settings #leader-death-settings { margin-top: 10px; }
+.role-settings #route-buff-options .check { margin-top: 4px; }
+@media (max-width: 800px) {
+  .role-settings { grid-template-columns: minmax(0, 1fr); }
+  .role-settings > fieldset > .role-description { min-height: 0; }
+}
 .switch-basics { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
 .section-monsters .switch-basics { margin-top: 12px; }
-.switch-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 6px 12px; }
-.switch-wait { margin: 0 0 10px; color: var(--dim); }
+.switch-basics { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 16px; }
+.switch-basics #partySize { margin-bottom: 0; }
+.switch-wait { margin: 0 0 4px; color: var(--dim); }
 #advanced-route { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; }
 #advanced-route > summary { padding: 8px 12px; font-weight: 600; }
 .advanced-route-content { padding: 10px 12px; border-top: 1px solid var(--line); }
@@ -1128,8 +1138,9 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </details>
 <p id="guide-route-summary" class="section-help"></p>
 <div class="switch-basics">
-  <div class="switch-inputs">
     <label id="party-size-field">隊伍總人數（含自己）<input id="partySize" type="number" min="1" max="12" required></label>
+    <label class="check switch-wait"><input id="waitForParty" type="checkbox" disabled>等待隊友（多人隊伍自動啟用）</label>
+</div>
     <div id="buff-picker-slot">
       <div id="lead-buff-picker">
         <label>判斷帶隊角色身上的 Buff（必填）<input id="buff-search" type="text" list="buff-options" autocomplete="off" placeholder="輸入 Buff 或職業名稱搜尋" required></label>
@@ -1143,9 +1154,6 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
         </div>
       </div>
     </div>
-  </div>
-  <label class="check switch-wait"><input id="waitForParty" type="checkbox" disabled>等待隊友（多人隊伍自動啟用）</label>
-</div>
 <div id="leader-death-settings">
     <label id="wait-position-field">死亡後的行為<select id="waitPosition" required>
       <option value="">請選擇死亡後的行為</option>
@@ -2410,8 +2418,7 @@ function renderRoleSettings() {
   const combatSource = combatTemplate.cloneNode(true);
   for (const {id, label, help} of combatRoles) {
     const panel = element("fieldset", "");
-    panel.append(element("legend", label), Object.assign(element("p", help), {className: "section-help"}));
-    if (id === "output") panel.append(byId("buff-picker-slot"), byId("leader-death-settings"));
+    panel.append(element("legend", label), Object.assign(element("p", help), {className: "section-help role-description"}));
     const fields = element("div", "");
     fields.className = "fields";
     const action = macroSelect([
@@ -2445,6 +2452,7 @@ function renderRoleSettings() {
     };
     action.onchange();
     panel.append(fields);
+    if (id === "output") panel.append(byId("buff-picker-slot"), byId("leader-death-settings"));
     const advanced = id === "output" ? routeAdvanced : element("details", "");
     if (id !== "output") {
       advanced.className = "role-advanced";
