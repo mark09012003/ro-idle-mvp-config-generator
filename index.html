@@ -954,42 +954,8 @@ input[type="checkbox"] { accent-color: var(--gold); }
 #guide-controls { width: min(100%, 960px); margin-inline: auto; }
 
 @media (min-width: 900px) {
-  #generator:not([data-guided]) {
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-    grid-template-areas: "route settings" "custom custom" "preview preview";
-    grid-template-rows: auto auto auto;
-    gap: 12px;
-    align-items: start;
-  }
-  #generator:not([data-guided]) .section-route { grid-area: route; }
-  #generator:not([data-guided]) .section-monsters { grid-area: settings; }
-  #generator:not([data-guided]) #custom-macro-section { grid-area: custom; }
-  #generator:not([data-guided]) #preview-section { grid-area: preview; }
-  #generator:not([data-guided]) .section-route {
-    align-self: stretch;
-    contain: size;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  #generator:not([data-guided]) .section-route > .targets {
-    flex: 1 1 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  #generator:not([data-guided]) .section-route .map-grid {
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: none;
-    align-content: start;
-  }
-  #generator:not([data-guided]) #route {
-    flex: 0 1 auto;
-    max-height: 40%;
-    min-height: 0;
-    overflow: auto;
-    scrollbar-gutter: stable;
+  #generator:not([data-guided]) .map-grid {
+    max-height: clamp(360px, 55vh, 640px);
   }
 }
 
@@ -1109,29 +1075,6 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
   <h2>隊伍有幾個人？</h2>
   <label class="guide-question">隊伍總人數（含自己）<input id="guide-party-size" type="number" min="1" max="12" step="1"></label>
 </section>
-<section id="route-section" class="section-route">
-<h2>地圖與巡迴路線</h2>
-<p class="section-help">勾選地圖並加入巡迴。清單由上往下執行，可調整順序或展開地圖修改個別怪物。</p>
-<div class="fields">
-<label>搜尋地圖或 MVP／Boss<input id="map-search" type="search" placeholder="輸入地圖名稱、代碼或怪物名稱"></label>
-<label>按 MVP／Boss 篩選<select id="mvp-filter" disabled>
-<option value="">所有地圖</option><option value="all-mvp">只顯示有 MVP 的地圖</option><option value="all-boss">只顯示有 Boss 的地圖</option>
-</select></label>
-</div>
-<fieldset class="targets">
-<legend>勾選要巡迴的地圖</legend>
-<div id="map-choices" class="map-grid"></div>
-</fieldset>
-<div class="map-actions">
-  <button class="btn primary" id="add" type="button" disabled>加入巡迴</button>
-  <span id="map-selection" role="status">已勾選 0 張</span>
-  <button class="btn" id="clear-maps" type="button" hidden>清除勾選</button>
-</div>
-<div class="route-heading"><h3 id="route-title">巡迴順序（由上至下）</h3><span id="route-count" aria-live="polite">0 張地圖</span><a id="go-preview" href="#preview-section" hidden>前往預覽</a></div>
-<p id="empty-route">勾選地圖後，按「加入巡迴」。</p>
-<ol id="route" role="list" aria-labelledby="route-title"></ol>
-<p id="catalog-status" role="status"></p>
-</section>
 <section id="monster-section" class="section-monsters">
 <div class="switch-heading"><h2>戰鬥與巡迴設定</h2><span id="route-role">帶隊角色</span></div>
 <label>戰鬥模式<select id="combatMode" aria-describedby="combat-mode-help">
@@ -1245,6 +1188,29 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </div>
   </div>
 </details>
+</section>
+<section id="route-section" class="section-route">
+<h2>地圖與巡迴路線</h2>
+<p class="section-help">勾選地圖並加入巡迴。清單由上往下執行，可調整順序或展開地圖修改個別怪物。</p>
+<div class="fields">
+<label>搜尋地圖或 MVP／Boss<input id="map-search" type="search" placeholder="輸入地圖名稱、代碼或怪物名稱"></label>
+<label>按 MVP／Boss 篩選<select id="mvp-filter" disabled>
+<option value="">所有地圖</option><option value="all-mvp">只顯示有 MVP 的地圖</option><option value="all-boss">只顯示有 Boss 的地圖</option>
+</select></label>
+</div>
+<fieldset class="targets">
+<legend>勾選要巡迴的地圖</legend>
+<div id="map-choices" class="map-grid"></div>
+</fieldset>
+<div class="map-actions">
+  <button class="btn primary" id="add" type="button" disabled>加入巡迴</button>
+  <span id="map-selection" role="status">已勾選 0 張</span>
+  <button class="btn" id="clear-maps" type="button" hidden>清除勾選</button>
+</div>
+<div class="route-heading"><h3 id="route-title">巡迴順序（由上至下）</h3><span id="route-count" aria-live="polite">0 張地圖</span><a id="go-preview" href="#preview-section" hidden>前往預覽</a></div>
+<p id="empty-route">勾選地圖後，按「加入巡迴」。</p>
+<ol id="route" role="list" aria-labelledby="route-title"></ol>
+<p id="catalog-status" role="status"></p>
 </section>
 <section id="custom-macro-section">
 <details id="custom-macro-details">
