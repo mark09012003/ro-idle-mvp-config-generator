@@ -1163,7 +1163,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
   <p class="section-help">影響輸出配置回到原圖後，優先執行哪個巨集。</p>
 </div>
 <details id="advanced-route">
-  <summary>進階換圖設定</summary>
+  <summary>進階設定</summary>
   <div class="advanced-route-content">
 <label>離開地圖前<select id="departure">
 <option value="auto">沿用角色設定</option>
@@ -2526,7 +2526,7 @@ function renderRoleSettings() {
     const fields = element("div", "");
     fields.className = "fields";
     const action = macroSelect([
-      ["default", "沿用進階換圖設定"], ["none", "直接換圖"], ["wait", "等待"],
+      ["default", "沿用進階設定"], ["none", "直接換圖"], ["wait", "等待"],
       ["fly", "使用蒼蠅翅膀"], ["butterfly", "使用蝴蝶翅膀"],
       ["item", "使用其他道具"], ["skill", "施放技能"],
     ], "fly");
@@ -2573,7 +2573,7 @@ function renderRoleSettings() {
     const advanced = id === "output" ? routeAdvanced : element("details", "");
     if (id !== "output") {
       advanced.className = "role-advanced";
-      advanced.append(element("summary", "進階換圖設定"));
+      advanced.append(element("summary", "進階設定"));
       const wait = macroInput("0", "number", 0, 60);
       wait.id = `role-${id}-routeWait`;
       const waitLabel = element("label", "換圖前額外等待秒數（0 為不等待）");
