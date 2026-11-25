@@ -2725,30 +2725,33 @@ byId("download").onclick = () => downloadProfileZip(
   results.map(({file, profile}) => [file, profile]), "RO-idle_MVP_route.zip");
 
 const guideSteps = [
-  ["guide-job-section", "直接選擇 Buff，也可以按職業快速篩選。"],
-  ["guide-party-section", "填入隊伍總人數，我會換算等待和換圖用的隊友數。"],
-  ["route-section", "想打哪些王？按王名篩選，勾選地圖後按「加入巡迴」。"],
-  ["monster-section", "設定三種角色的換圖前行動，以及死亡後的處理方式。"],
-  ["preview-section", "按產生預覽，檢查遊戲內執行順序，再下載 JSON 或 ZIP。"],
+  ["guide-party-section", "選擇含自己的隊伍人數。兩人以上會自動啟用等待隊友。"],
+  ["guide-job-section", "搜尋並選擇帶隊角色用來判斷換圖的 Buff。"],
+  ["monster-section", "設定帶隊角色死亡後的行為，並確認三種角色換圖前的行動。"],
+  ["route-section", "按 MVP 或王名篩選，勾選地圖後按「加入巡迴」，再確認巡迴順序。"],
+  ["custom-macro-section", "需要額外動作時可新增自訂巨集，也可以直接下一步。"],
+  ["preview-section", "確認每份配置的地圖上限。可預覽單一角色，或一次匯出三種角色的 ZIP。"],
 ];
 let guideIndex = 0;
 
 function setGuide(active) {
   const form = byId("generator");
+  const [id, instruction] = active ? guideSteps[guideIndex] : [];
   form.toggleAttribute("data-guided", active);
   byId("guide-controls").hidden = !active;
   byId("start-guide").hidden = active;
   for (const section of form.querySelectorAll(":scope > section")) section.classList.remove("guide-current");
-  byId("guide-job-section").hidden = !active || guideIndex !== 0;
-  byId(active && guideIndex === 0 ? "guide-buff-slot" : "buff-picker-slot").append(byId("lead-buff-picker"));
+  const choosingBuff = id === "guide-job-section";
+  byId("guide-job-section").hidden = !choosingBuff;
+  byId(choosingBuff ? "guide-buff-slot" : "buff-picker-slot").append(byId("lead-buff-picker"));
   byId("buff-picker-slot").hidden = active;
-  byId("guide-party-section").hidden = !active || guideIndex !== 1;
+  byId("guide-party-section").hidden = id !== "guide-party-section";
   if (!active) return;
   updateOptions();
-  const [id, instruction] = guideSteps[guideIndex];
   const section = byId(id);
   section.classList.add("guide-current");
-  const title = section.querySelector("h2");
+  const title = section.querySelector("h2, summary");
+  if (id === "custom-macro-section") byId("custom-macro-details").open = true;
   byId("guide-progress").textContent = `第 ${guideIndex + 1} 步／共 ${guideSteps.length} 步 · ${title.textContent}：${instruction}`;
   byId("guide-error").hidden = true;
   byId("guide-back").disabled = guideIndex === 0;
