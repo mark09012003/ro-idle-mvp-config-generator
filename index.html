@@ -2413,7 +2413,104 @@ const combatRoles = [
   {id: "assist", label: "協助角色", mode: "follower", supportOnly: false, help: "適用十字軍、騎士領主、神射手或其他輸出。"},
 ];
 
+const routeSkillNames = {
+  "TF_DOUBLE": "二刀連擊", "AC_DOUBLE": "二連矢", "PR_MAGNUS": "十字驅魔攻擊", "BS_HAMMERFALL": "大地之擊",
+  "MC_LOUD": "大聲吶喊", "DC_FORTUNEKISS": "女神之吻", "MO_BODYRELOCATION": "弓身彈影", "BD_SIEGFRIED": "不死神齊格弗里德",
+  "BA_DISSONANCE": "不諧和音", "MO_TRIPLEATTACK": "六合拳", "BS_OVERTHRUST": "凶砍", "WS_OVERTHRUSTMAX": "凶砍最大值",
+  "DC_DONTFORGETME": "勿忘我", "AM_CP_WEAPON": "化學武器保護", "AM_CP_SHIELD": "化學盾牌保護", "AM_CP_HELM": "化學頭盔保護",
+  "AM_CP_ARMOR": "化學鎧甲保護", "CR_REFLECTSHIELD": "反射盾", "KN_AUTOCOUNTER": "反擊", "AL_CRUCIS": "天使之光",
+  "PR_LEXAETERNA": "天使之怒", "AL_HOLYWATER": "天使之淚", "AL_ANGELUS": "天使之障壁", "AL_BLESSING": "天使之賜福",
+  "AL_DEMONBANE": "天使之擊", "AL_DP": "天使之護", "PF_SOULCHANGE": "心神互換", "AC_CONCENTRATION": "心神凝聚",
+  "ASC_BREAKER": "心靈震波", "MG_NAPALMBEAT": "心靈爆破", "WS_CARTBOOST": "手推車加速", "MC_CARTREVOLUTION": "手推車攻擊",
+  "MC_PUSHCART": "手推車使用", "WS_CARTTERMINATION": "手推車終結技", "HFLI_MOON": "月光", "SA_DELUGE": "水元素領域",
+  "WZ_WATERBALL": "水球術", "SA_FROSTWEAPON": "水屬性附加", "WZ_SIGHTRASHER": "火之獵殺", "SA_VOLCANO": "火元素領域",
+  "WZ_FIREPILLAR": "火柱攻擊", "MG_SIGHT": "火狩", "MG_FIREBALL": "火球術", "MG_FIREWALL": "火焰之壁",
+  "AM_DEMONSTRATION": "火煙瓶投擲", "MG_FIREBOLT": "火箭術", "SA_FLAMELAUNCHER": "火屬性附加", "AL_INCAGI": "加速術",
+  "AS_RIGHT": "右手修練", "BD_RINGNIBELUNGEN": "尼貝隆根之戒指", "AS_LEFT": "左手修練", "LK_JOINTBEAT": "巧打",
+  "BA_POEMBRAGI": "布萊奇之詩", "BD_ETERNALCHAOS": "永遠的混沌", "AM_BIOETHICS": "生命倫理", "AM_CALLHOMUN": "生命體召喚",
+  "AM_CANNIBALIZE": "生物調撥", "MG_STONECURSE": "石化術", "BA_APPLEIDUN": "伊登的蘋果", "CH_TIGERFIST": "伏虎拳",
+  "CR_DEFENDER": "光之盾", "AL_PNEUMA": "光之障壁", "AL_RUWACH": "光獵", "PR_SANCTUARY": "光耀之堂",
+  "WZ_ICEWALL": "冰刃之牆", "MG_FROSTDIVER": "冰凍術", "MG_COLDBOLT": "冰箭術", "SA_LANDPROTECTOR": "地元素領域",
+  "HT_LANDMINE": "地雷陷阱", "WZ_EARTHSPIKE": "地震術", "NPC_EARTHQUAKE": "地震連繫", "SA_SEISMICWEAPON": "地屬性附加",
+  "BD_ENCORE": "安可", "AM_REST": "安息", "ST_PRESERVE": "自由保護", "SA_FREECAST": "自由施法",
+  "CR_AUTOGUARD": "自動防禦", "SA_AUTOSPELL": "自動念咒", "HAMI_CASTLE": "位置互換", "MC_DISCOUNT": "低價買進",
+  "BA_FROSTJOKER": "冷笑話", "MO_ABSORBSPIRITS": "吸氣", "HW_SOULDRAIN": "吸魂術", "BA_WHISTLE": "吹口哨",
+  "SM_RECOVERY": "快速恢復", "RG_PLAGIARISM": "抄襲", "TF_THROWSTONE": "投擲石頭", "KN_SPEARBOOMERANG": "投擲長矛攻擊",
+  "MC_CHANGECART": "改裝手推車", "SM_FATALBLOW": "攻擊弱點", "PR_LEXDIVINA": "沉默之術", "LK_BERSERK": "狂怒之槍",
+  "CH_SOULCOLLECT": "狂蓄氣", "SM_AUTOBERSERK": "狂暴狀態", "SM_BASH": "狂擊", "HAMI_DEFENCE": "防禦力",
+  "BA_ASSASSINCROSS": "刺客的黃昏", "RG_STRIPWEAPON": "卸除武器", "RG_STRIPSHIELD": "卸除盾牌", "RG_STRIPHELM": "卸除頭盔",
+  "RG_STRIPARMOR": "卸除鎧甲", "SA_CASTCANCEL": "取消施法", "CG_TAROTCARD": "命運的塔羅牌", "HW_GANBANTEIN": "咖般塔音",
+  "HT_ANKLESNARE": "定位陷阱", "HT_BLASTMINE": "定時爆炸陷阱", "PR_GLORIA": "幸運之頌歌", "HW_NAPALMVULCAN": "念力連擊",
+  "SA_SPELLBREAKER": "念咒拆除", "KN_BOWLINGBASH": "怪物互擊", "WZ_ESTIMATION": "怪物情報", "CR_FULLPROTECTION": "所有化學武器保護",
+  "ST_FULLSTRIP": "所有卸除", "AM_AXEMASTERY": "斧頭使用熟練度", "BS_AXE": "斧頭製作", "PF_SPIDERWEB": "易燃之網",
+  "BS_HILTBINDING": "武器保有", "BS_WEAPONRESEARCH": "武器研究", "BS_REPAIRWEAPON": "武器修理", "BS_MAXIMIZE": "武器值最大化",
+  "WS_WEAPONREFINE": "武器精練", "AL_CURE": "治療術", "HLIF_HEAL": "治癒之手", "AL_HEAL": "治癒術",
+  "WZ_QUAGMIRE": "泥沼地", "MC_IDENTIFY": "物品鑑定", "SN_SIGHT": "狙殺瞄準", "AM_LEARNINGPOTION": "知識藥水",
+  "MO_STEELBODY": "金剛不壞", "MC_MAMMONITE": "金錢攻擊", "CR_SPEARQUICKEN": "長矛加速術", "KN_SPEARMASTERY": "長矛使用熟練度",
+  "KN_SPEARSTAB": "長矛刺擊", "BS_SPEAR": "長矛製作", "MO_EXTREMITYFIST": "阿修羅霸凰拳", "CR_TRUST": "信任",
+  "TF_BACKSLIDING": "後退迴避", "WZ_VERMILION": "怒雷強擊", "SM_MAGNUM": "怒爆", "SM_PROVOKE": "挑釁",
+  "TF_POISON": "施毒", "AS_POISONREACT": "毒性反彈", "AS_SPLASHER": "毒性感染", "ASC_CDP": "毒液製作",
+  "BD_ROKISWEIL": "洛奇的悲鳴", "HAMI_SKIN": "活命之膚", "RG_GANGSTER": "流氓天國", "DC_SERVICEFORYOU": "為您服務",
+  "CR_SHIELDCHARGE": "盾擊", "RG_BACKSTAP": "背刺", "ASC_EDP": "致命塗毒", "MC_INCCARRY": "負重量上升",
+  "HW_GRAVITATION": "重力原野", "AS_SONICBLOW": "音速投擲", "NJ_HUUJIN": "風刃", "SN_WINDWALK": "風之步",
+  "SA_VIOLENTGALE": "風元素領域", "SA_LIGHTNINGLOADER": "風屬性附加", "HP_MEDITATIO": "冥想", "DC_HUMMING": "哼唱之音",
+  "AS_KATAR": "拳刃修練", "BS_KNUCKLE": "拳套製作", "AM_SPHEREMINE": "氣泡蟲召喚", "CH_CHAINCRUSH": "氣絕崩擊",
+  "CG_HERMODE": "海羅默德的手杖", "MO_INVESTIGATE": "浸透勁", "AS_VENOMDUST": "病毒散撥", "MO_BLADESTOP": "真劍百破道",
+  "DC_WINKCHARM": "眨眼之誘", "BS_ORIDEOCON": "神之金屬研究", "PA_PRESSURE": "神之威壓", "PR_IMPOSITIO": "神威祈福",
+  "CR_PROVIDENCE": "神祐之光", "AL_HOLYLIGHT": "神聖之光", "HP_BASILICA": "神聖殿堂", "MG_ENERGYCOAT": "能量外套",
+  "RG_INTIMIDATE": "脅持", "NPC_PULSESTRIKE": "脈震衝撞", "CR_SHIELDBOOMERANG": "迴旋盾擊", "AM_PHARMACY": "配藥",
+  "HT_BLITZBEAT": "閃電衝擊", "ASC_KATAR": "高階拳刃修練", "MC_OVERCHARGE": "高價賣出", "RG_STEALCOIN": "偷錢",
+  "TF_STEAL": "偷竊", "AS_CLOAKING": "偽裝", "HT_BEASTBANE": "動物殺手", "NV_BASIC": "基本技能",
+  "WZ_HEAVENDRIVE": "崩裂術", "BS_SKINTEMPER": "強化火屬性", "HT_FLASHER": "強光陷阱", "RG_COMPULSION": "強制減價",
+  "RG_SNATCHER": "強奪", "CR_ACIDDEMONSTRATION": "強酸火煙瓶投擲", "AM_ACIDTERROR": "強酸攻擊", "PA_SACRIFICE": "捨命攻擊",
+  "HVAN_CHAOTIC": "混亂的祈福", "RG_CLEANER": "清洗", "CH_PALMSTRIKE": "猛虎硬爬山", "MO_COMBOFINISH": "猛龍誇強",
+  "PR_STRECOVERY": "痊癒術", "MO_DODGE": "移花接木", "SM_MOVINGRECOVERY": "移動時恢復HP", "BS_ADRENALINE": "速度激發",
+  "PF_MEMORIZE": "速讀術", "KN_PIERCE": "連刺攻擊", "MO_CHAINCOMBO": "連環全身掌", "PA_SHIELDCHAIN": "連續盾擊",
+  "WS_MELTDOWN": "野蠻凶砍", "HT_TALKIEBOX": "陷阱探查", "HT_REMOVETRAP": "陷阱移除", "CG_MARIONETTE": "傀儡師的把戲",
+  "HVAN_CAPRICE": "善變", "SM_SWORD": "單手劍使用熟練度", "BS_FINDINGORE": "尋找礦石", "AM_RESURRECTHOMUN": "復活生命體",
+  "ALL_RESURRECTION": "復活術", "CR_CULTIVATION": "植物栽培", "TF_MISS": "殘影", "BS_WEAPONPERFECT": "無視體型攻擊",
+  "AS_GRIMTOOTH": "無影之牙", "BS_DAGGER": "短劍製作", "SA_ADVANCEDBOOK": "進化之書", "LK_CONCENTRATION": "集中攻擊",
+  "ASC_METEORASSAULT": "黑暗瞬間", "AL_WARP": "傳送之陣", "LK_HEADCRUSH": "傷害增壓", "AS_ENCHANTPOISON": "塗毒",
+  "RG_GRAFFITI": "塗鴉", "CG_ARROWVULCAN": "奧義箭亂舞", "BD_LULLABY": "搖籃曲", "MG_SAFETYWALL": "暗之障壁",
+  "ST_CHASEWALK": "暗影追蹤", "LK_TENSIONRELAX": "極速回復", "HT_SKIDTRAP": "滑動陷阱", "HT_SANDMAN": "睡魔陷阱",
+  "BD_RICHMANKIM": "經驗值倍增", "CR_HOLYCROSS": "聖十字攻擊", "CR_GRANDCROSS": "聖十字審判", "PR_BENEDICTIO": "聖之祈福",
+  "HP_ASSUMPTIO": "聖母之祈福", "PR_MAGNIFICAT": "聖母之頌歌", "PA_GOSPEL": "聖音", "MG_SOULSTRIKE": "聖靈召喚",
+  "HLIF_BRAIN": "腦手術", "CG_MOONLIT": "落花伴著月光下的水車小屋", "TF_DETOXIFY": "解毒", "MO_SPIRITSRECOVERY": "運氣調息",
+  "WZ_METEOR": "隕石術", "WZ_JUPITEL": "雷鳴術", "MG_LIGHTNINGBOLT": "雷擊術", "MG_THUNDERSTORM": "雷爆術",
+  "HT_FALCON": "馴鷹術", "RG_FLAGGRAFFITI": "旗幟塗鴉", "PF_SOULBURN": "精神耗弱術", "PF_MINDBREAKER": "精神撼動",
+  "NV_FIRSTAID": "緊急治療", "HFLI_SPEED": "緊急迴避", "AC_VULTURE": "蒼鷹之眼", "MO_CALLSPIRITS": "蓄氣",
+  "AC_MAKINGARROW": "製作箭", "HLIF_AVOID": "輕捷移動", "BS_SWORD": "劍製作", "TF_SPRINKLESAND": "噴砂",
+  "NPC_WIDESILENCE": "廣範圍沉默", "MO_FINGEROFFENSIVE": "彈指神通", "PR_ASPERSIO": "撒水祈福", "WZ_STORMGUST": "暴風雪",
+  "BA_MUSICALSTRIKE": "樂器攻擊", "RG_TUNNELDRIVE": "潛遁", "RG_RAID": "潛擊", "AC_SHOWER": "箭雨",
+  "PR_SLOWPOISON": "緩毒術", "AL_DECAGI": "緩速術", "DC_DANCINGLESSON": "練習舞蹈", "AC_CHARGEARROW": "衝鋒箭",
+  "SN_SHARPSHOOTING": "銳利射擊", "BD_DRUMBATTLEFIELD": "戰鼓震天", "TF_PICKSTONE": "撿石頭", "BA_MUSICALLESSON": "操控樂器",
+  "HFLI_FLEET": "橫越速度", "NPC_STONESKIN": "鋼筋鐵骨", "BS_STEEL": "鋼製造", "HT_STEELCROW": "鋼製喙",
+  "SA_ABRACADABRA": "隨機技能", "SA_DRAGONOLOGY": "龍知識", "AL_TELEPORT": "瞬間移動", "MG_SRECOVERY": "禪心",
+  "BD_ADAPTATION": "臨機應變", "PF_FOGWALL": "薄霧牆", "LK_SPIRALPIERCE": "螺旋擊刺", "DC_UGLYDANCE": "醜陋之舞",
+  "TF_HIDING": "隱匿", "WZ_FROSTNOVA": "霜凍之術", "HT_FREEZINGTRAP": "霜凍陷阱", "SN_FALCONASSAULT": "獵鷹突擊",
+  "HT_DETECTING": "獵鷹尋敵", "PR_TURNUNDEAD": "轉生術", "KN_TWOHANDQUICKEN": "雙手劍攻擊速度增加", "SM_TWOHAND": "雙手劍使用熟練度",
+  "BS_TWOHANDSWORD": "雙手劍製作", "PF_DOUBLECASTING": "雙倍投擲", "LK_PARRYING": "雙劍挌擋", "KN_CAVALIERMASTERY": "騎兵修練",
+  "KN_BRANDISHSPEAR": "騎乘攻擊", "KN_RIDING": "騎乘術", "MO_EXPLOSIONSPIRITS": "爆氣", "HT_SPRINGTRAP": "爆破陷阱",
+  "HT_CLAYMORETRAP": "爆散陷阱", "AM_POTIONPITCHER": "藥水投擲", "CR_DEVOTION": "犧牲", "PR_SUFFRAGIUM": "犧牲祈福",
+  "BD_INTOABYSS": "觸媒之所", "AC_OWL": "鶚梟之眼", "BS_ENCHANTEDSTONE": "屬性石製造", "DC_THROWARROW": "纏箭投擲",
+  "MO_IRONHAND": "鐵沙掌", "BS_IRON": "鐵製造", "MC_VENDING": "露天商店", "ST_REJECTSWORD": "霸王魂",
+  "PR_KYRIE": "霸邪之陣", "SM_ENDURE": "霸體", "HP_MANARECHARGE": "魔力減免", "HW_MAGICPOWER": "魔力增幅",
+  "SA_DISPELL": "魔法效果解除", "SA_MAGICROD": "魔法懲罰", "HT_SHOCKWAVE": "魔耗陷阱", "HW_MAGICCRASHER": "魔擊術",
+  "PR_MACEMASTERY": "權杖使用熟練度", "BS_MACE": "權杖製作", "CR_SLIMPITCHER": "纖細藥水投擲", "HVAN_INSTRUCT": "變更指示",
+  "DC_SCREAM": "驚聲尖叫", "LK_AURABLADE": "靈氣劍", "PF_HPCONVERSION": "HP轉換",
+};
+const routeSkillChoices = new Map();
+const skillNameCounts = new Map();
+for (const name of Object.values(routeSkillNames)) skillNameCounts.set(name, (skillNameCounts.get(name) ?? 0) + 1);
+for (const [id, name] of Object.entries(routeSkillNames)) {
+  routeSkillChoices.set(skillNameCounts.get(name) > 1 ? `${name}（${id}）` : name, id);
+}
+
 function renderRoleSettings() {
+  const skillList = element("datalist", "");
+  skillList.id = "route-skill-options";
+  for (const name of routeSkillChoices.keys()) skillList.append(new Option(name, name));
+  byId("role-settings").append(skillList);
   const combatTemplate = byId("role-combat-template");
   const routeAdvanced = byId("advanced-route");
   const combatSource = combatTemplate.cloneNode(true);
@@ -2434,11 +2531,16 @@ function renderRoleSettings() {
     const inputs = [
       ["wait", "seconds", "等待秒數", macroInput("5", "number", 1, 60)],
       ["item", "item", "道具 ID", macroInput("", "number", 1)],
-      ["skill", "skill", "技能 ID（例如 AL_TELEPORT）", macroInput("")],
+      ["skill", "skill", "技能名稱", macroInput("")],
       ["skill", "level", "技能等級", macroInput("1", "number", 1, 10)],
     ].map(([type, key, title, input]) => {
       const field = element("label", title);
       input.id = `role-${id}-${key}`;
+      if (key === "skill") {
+        input.setAttribute("list", skillList.id);
+        input.autocomplete = "off";
+        input.placeholder = "輸入名稱搜尋，例如瞬間移動";
+      }
       field.append(input);
       fields.append(field);
       return {type, input, field};
@@ -2509,8 +2611,9 @@ function roleDepartureAction(id) {
     case "butterfly": return {do: "item", itemId: 602};
     case "item": return {do: "item", itemId: Number(setting("item"))};
     case "skill": {
-      const skill = setting("skill").trim().toUpperCase();
-      if (!/^[A-Z][A-Z0-9_]*$/.test(skill)) throw new Error("請輸入有效的換圖技能 ID。");
+      const selected = setting("skill").trim();
+      const skill = routeSkillChoices.get(selected) ?? selected.toUpperCase();
+      if (!/^[A-Z][A-Z0-9_]*$/.test(skill)) throw new Error("請從搜尋結果選擇換圖技能。");
       return {do: "skill", skill, lv: Number(setting("level"))};
     }
     default: return undefined;
@@ -2815,7 +2918,13 @@ Promise.all([loadCatalog(), loadBuffJobs()]).then(() => {
     saveRouteDraft();
   };
   restoreRouteDraft();
-  for (const {id} of combatRoles) byId(`role-${id}-action`).onchange();
+  for (const {id} of combatRoles) {
+    const field = byId(`role-${id}-skill`);
+    const savedCode = field.value.trim().toUpperCase();
+    const known = [...routeSkillChoices].find(([, code]) => code === savedCode);
+    if (known) field.value = known[0];
+    byId(`role-${id}-action`).onchange();
+  }
   updateOptions();
   renderMacroEditor();
   for (const {id} of combatRoles) renderRouteOr(id);
