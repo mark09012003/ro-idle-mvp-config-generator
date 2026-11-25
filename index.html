@@ -1147,6 +1147,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
       </select>
       <span class="count-help">推薦武術宗師、神射手、鍊金術師等有自帶 Buff 的職業。</span>
     </label>
+    <label id="lead-buff-field">判斷換圖的 Buff<select id="buff" disabled><option value="">請先選帶隊角色職業</option></select></label>
     <label id="custom-job-field" hidden>職業 ID<input id="customJob" placeholder="例如 monk" spellcheck="false"></label>
     <label id="party-size-field">隊伍總人數（含自己）<input id="partySize" type="number" min="1" max="12" required></label>
   </div>
@@ -1170,8 +1171,6 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <option value="butterfly">蝴蝶翅膀</option>
 </select></label>
 <div id="leader" class="fields">
-<label>提供 Buff 的職業<select id="buffJob" disabled><option value="">不使用 Buff 條件</option></select></label>
-<label>用來判斷換圖的 Buff<select id="buff" disabled><option value="">請先選職業</option></select></label>
 <p id="buff-status" role="status" hidden></p>
 <label>Buff 條件<select id="buffWhen"><option value="selfLacks">缺少 Buff 時換圖</option><option value="selfHas">有 Buff 時換圖</option></select></label>
 </div>
@@ -1810,27 +1809,42 @@ let buffJobs = [];
 async function loadBuffJobs() {
   try {
     buffJobs = JSON.parse(document.getElementById("buff-catalog.json").textContent);
-    byId("buffJob").append(...buffJobs.map(job => new Option(job.name, job.id)));
-    byId("buffJob").disabled = false;
   } catch {
     byId("buff-status").textContent = "無法讀取 Buff 清單，請重新載入擴充元件。";
     byId("buff-status").hidden = false;
   }
 }
 
-byId("buffJob").onchange = () => {
-  const job = buffJobs.find(job => job.id === value("buffJob"));
+function leaderJobValue() {
+  return value("targetJob") === "custom" ? value("customJob").trim().toLowerCase() : value("targetJob");
+}
+
+function leaderBuffs() {
+  return buffJobs.find(job => job.id === leaderJobValue())?.buffs ?? [];
+}
+
+function populateLeaderBuffs(selected = "") {
+  const buffs = leaderBuffs();
   byId("buff").replaceChildren(
-    new Option(job ? "請選擇 Buff" : "請先選職業", ""),
-    ...(job?.buffs ?? []).map(([id, name]) => new Option(name, id)),
+    new Option(buffs.length ? "不使用 Buff 條件" : leaderJobValue() ? "此職業無可選 Buff" : "請先選帶隊角色職業", ""),
+    ...buffs.map(([id, name]) => new Option(name, id)),
   );
-  byId("buff").disabled = !job;
+  byId("buff").disabled = !buffs.length;
+  if (buffs.some(([id]) => id === selected)) byId("buff").value = selected;
+}
+
+function updateLeaderJob() {
+  populateLeaderBuffs(recommendedLeaderBuffs.get(leaderJobValue()));
+  applyRouteBuffDefaults();
   updateOptions();
   clearPreview();
-};
+}
+
+byId("targetJob").onchange = updateLeaderJob;
+byId("customJob").onchange = updateLeaderJob;
 
 function applyRouteBuffDefaults() {
-  const skill = buffJobs.find(job => job.id === value("buffJob"))?.buffs.find(([id]) => id === value("buff"));
+  const skill = leaderBuffs().find(([id]) => id === value("buff"));
   if (!skill || value("buffWhen") !== "selfLacks" || skill[2].scope === "others") return;
   byId("buffBeforeMove").checked = true;
   byId("routeBuffLevel").value = skill[2].maxLv;
@@ -2302,8 +2316,7 @@ function updateOptions() {
   const targetJobLabel = byId("targetJob").selectedOptions[0]?.textContent;
   byId("guide-route-summary").textContent = `已帶入隊伍總人數 ${value("partySize")} 人，帶隊角色職業為 ${targetJobLabel ?? "未選擇"}。`;
   byId("leader").hidden = !leader;
-  byId("buff").required = leader && Boolean(value("buffJob"));
-  const skill = buffJobs.find(job => job.id === value("buffJob"))?.buffs.find(([id]) => id === value("buff"));
+  const skill = leaderBuffs().find(([id]) => id === value("buff"));
   const canPrecast = leader && value("buffWhen") === "selfLacks" && skill && skill[2].scope !== "others";
   const routeBuffEnabled = Boolean(canPrecast && checked("buffBeforeMove"));
   byId("route-buff-options").hidden = !canPrecast;
@@ -2510,9 +2523,6 @@ byId("generator").onsubmit = event => {
       macro.steps.some(step => typeof step?.do !== "string"))) {
       throw new Error("每條自訂巨集需要 1～40 字名稱、5～86400 秒冷卻，以及 1～10 個有效步驟。");
     }
-    if (!exportAll && routeMode() === "leader" && value("buffJob") && !value("buff")) {
-      throw new Error("請選擇用來判斷換圖的 Buff。");
-    }
     const supportOnly = value("combatMode") === "support";
     const customCombat = !exportAll && checked("customCombat");
     if (customCombat && Number(value("maxLv")) && Number(value("minLv")) > Number(value("maxLv"))) {
@@ -2537,7 +2547,7 @@ byId("generator").onsubmit = event => {
       routeWait: value("routeWait"),
       buffBeforeMove: !byId("route-buff-options").hidden && checked("buffBeforeMove"),
       routeBuffLevel: value("routeBuffLevel"),
-      targetJob: value("targetJob") === "custom" ? value("customJob") : value("targetJob"),
+      targetJob: leaderJobValue(),
       partySize: value("partySize"),
       waitPosition: value("waitPosition"),
     };
@@ -2546,14 +2556,9 @@ byId("generator").onsubmit = event => {
     }
     if (exportAll) {
       const targetJob = options.targetJob;
-      const presetBuff = recommendedLeaderBuffs.get(targetJob);
-      const presetBuffLevel = buffJobs.find(job => job.id === targetJob)?.buffs
-        .find(([id]) => id === presetBuff)?.[2].maxLv;
-      const leaderBuff = options.buff || (presetBuffLevel ? presetBuff : "");
-      const leaderBuffWhen = options.buff ? options.buffWhen : "selfLacks";
-      const leaderBuffLevel = options.buff ? options.routeBuffLevel : presetBuffLevel;
-      const leaderPrecast = Boolean(leaderBuff) && leaderBuffWhen === "selfLacks" &&
-        (options.buff ? checked("buffBeforeMove") : Boolean(presetBuffLevel));
+      const leaderSkill = leaderBuffs().find(([id]) => id === options.buff);
+      const leaderPrecast = leaderSkill && leaderSkill[2].scope !== "others" &&
+        options.buffWhen === "selfLacks" && checked("buffBeforeMove");
       const entries = combatRoles.flatMap(({id, label, mode, supportOnly}) =>
         RoConfigBuilder.generate(null, route, {
           ...options,
@@ -2563,10 +2568,8 @@ byId("generator").onsubmit = event => {
           targetJob,
           onlyMvp: !supportOnly,
           maxLv: supportOnly ? 2 : 0,
-          buff: mode === "leader" ? leaderBuff : "",
-          buffWhen: leaderBuffWhen,
-          routeBuffLevel: leaderBuffLevel,
-          buffBeforeMove: mode === "leader" && leaderPrecast,
+          buff: mode === "leader" ? options.buff : "",
+          buffBeforeMove: mode === "leader" && Boolean(leaderPrecast),
         }).map(({file, profile}) => [`${label}/${file}`, profile]));
       downloadProfileZip(entries, "RO-idle_MVP_route_三種模式.zip");
       status(`已匯出三種模式，共 ${entries.length} 份配置。請依角色用途選擇資料夾。`);
@@ -2655,14 +2658,10 @@ byId("guide-next").onclick = () => {
     const job = value("guide-job");
     if (!job) return fail("請先選擇帶隊角色職業。");
     if (job !== appliedGuideJob) {
-      const buff = recommendedLeaderBuffs.get(job);
-      if (buff && routeMode() === "leader" && value("buffJob") !== job) {
-        byId("buffJob").value = job;
-        byId("buffJob").onchange();
-        byId("buff").value = buff;
-        applyRouteBuffDefaults();
+      if (leaderJobValue() !== job) {
+        byId("targetJob").value = job;
+        updateLeaderJob();
       }
-      byId("targetJob").value = job;
       appliedGuideJob = job;
       clearPreview();
     }
@@ -2758,8 +2757,8 @@ function restoreRouteDraft() {
       else if (field.type !== "checkbox" && typeof saved === "string" && field.id !== "buff") field.value = saved;
     }
     const savedBuffLevel = draft.fields?.routeBuffLevel;
-    byId("buffJob").onchange();
-    if (typeof draft.fields?.buff === "string") byId("buff").value = draft.fields.buff;
+    if (!value("targetJob") && typeof draft.fields?.buffJob === "string") byId("targetJob").value = draft.fields.buffJob;
+    populateLeaderBuffs(draft.fields?.buff);
     if (typeof savedBuffLevel === "string") byId("routeBuffLevel").value = savedBuffLevel;
     if (Array.isArray(draft.customMacros)) customMacros = draft.customMacros;
     if (draft.routeCondition) routeConditionEditor.cond = draft.routeCondition;
