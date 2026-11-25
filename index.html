@@ -1136,6 +1136,11 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
         <datalist id="buff-options"></datalist>
         <input id="buff" type="hidden">
         <p class="section-help">留空即可停用 Buff 判斷。</p>
+        <div id="route-buff-options">
+          <label class="check"><input id="buffBeforeMove" type="checkbox" disabled>換圖前自己補 Buff</label>
+          <p id="route-buff-help" class="section-help">選擇可對自己施放的 Buff，並使用「缺少 Buff 時換圖」即可啟用。</p>
+          <label id="route-buff-level-label" class="number-field" hidden>補放等級<input id="routeBuffLevel" type="number" min="1" max="10" value="1"></label>
+        </div>
       </div>
     </div>
   </div>
@@ -1165,11 +1170,6 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </div>
 <label>換圖前等待秒數（0 為不等待，會在補 Buff 前執行）<input id="routeWait" type="number" min="0" max="60" step="1" value="0" required></label>
 <details><summary>進階：換圖 OR 條件</summary><p class="section-help">上方設定是第一組。每個 OR 組請填完整；產生時每組都會包含來源地圖與換圖所需的安全條件。</p><div id="route-or"></div></details>
-<div id="route-buff-options" hidden>
-  <label class="check"><input id="buffBeforeMove" type="checkbox">換圖前先補 Buff</label>
-  <label id="route-buff-level-label" class="number-field" hidden>補放等級<input id="routeBuffLevel" type="number" min="1" max="10" value="1"></label>
-  <p>搜尋中或閒置、未交戰且 SP 大於 10 時，先補上方選定的 Buff，再執行所選的離圖動作。沿用角色設定時會使用瞬間移動 Lv.2。若也開啟等待隊友，會在等待前補同一個 Buff。</p>
-</div>
   </div>
 </details>
 <div id="role-settings" class="role-settings"></div>
@@ -2283,7 +2283,8 @@ function updateOptions() {
   const skill = leaderBuffs().find(([id]) => id === value("buff"));
   const canPrecast = value("buffWhen") === "selfLacks" && skill && skill[2].scope !== "others";
   const routeBuffEnabled = Boolean(canPrecast && checked("buffBeforeMove"));
-  byId("route-buff-options").hidden = !canPrecast;
+  byId("buffBeforeMove").disabled = !canPrecast;
+  byId("route-buff-help").hidden = Boolean(canPrecast);
   byId("route-buff-level-label").hidden = !routeBuffEnabled;
   const routeLevel = byId("routeBuffLevel");
   routeLevel.disabled = !routeBuffEnabled;
@@ -2544,7 +2545,7 @@ byId("generator").onsubmit = event => {
       roleAction: exportAll ? undefined : roleDepartureAction(value("combatMode")),
       mode: routeMode(),
       supportOnly,
-      buffBeforeMove: !byId("route-buff-options").hidden && checked("buffBeforeMove"),
+      buffBeforeMove: !byId("buffBeforeMove").disabled && checked("buffBeforeMove"),
       routeBuffLevel: value("routeBuffLevel"),
       partySize: value("partySize"),
       waitPosition: value("waitPosition"),
