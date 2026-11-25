@@ -1099,7 +1099,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </section>
 <section id="guide-party-section" hidden>
   <h2>隊伍有幾個人？</h2>
-  <label class="guide-question">隊伍總人數（含自己）<input id="guide-party-size" type="number" min="2" max="12" step="1"></label>
+  <label class="guide-question">隊伍總人數（含自己）<input id="guide-party-size" type="number" min="1" max="12" step="1"></label>
 </section>
 <section id="route-section" class="section-route">
 <h2>地圖與巡迴路線</h2>
@@ -1200,9 +1200,9 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <p class="section-help">標的角色可用 Buff 決定何時換圖，非標的角色可用隊友人數判斷。路線跨多份配置時會自動接續。</p>
 <div class="fields">
 <div><strong>角色用途</strong><p id="route-role" class="section-help">標的角色</p></div>
-<label>每份配置最多幾張地圖<input id="groupSize" type="number" min="1" max="10" value="8" required></label>
-<label>巡迴巨集冷卻（秒）<input id="cooldown" type="number" min="5" max="86400" value="5" required></label>
 </div>
+<details id="advanced-route"><summary>進階換圖設定</summary>
+<label>每份配置最多幾張地圖<input id="groupSize" type="number" min="1" max="10" value="8" required></label>
 <label>離開地圖前<select id="departure">
 <option value="auto">沿用角色設定</option>
 <option value="none">直接換圖</option>
@@ -1223,22 +1223,18 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
   <label id="route-buff-level-label" class="number-field" hidden>補放等級<input id="routeBuffLevel" type="number" min="1" max="10" value="1"></label>
   <p>搜尋中或閒置、未交戰且 SP 大於 10 時，先補上方選定的 Buff，再執行所選的離圖動作。沿用角色設定時會使用瞬間移動 Lv.2。若也開啟等待隊友，會在等待前補同一個 Buff。</p>
 </div>
-<div id="follower" hidden>
-</div>
-<label id="party-size-field" class="number-field">隊伍總人數（含自己）<input id="partySize" type="number" min="2" max="12" value="12" aria-describedby="party-size-help"><span id="party-size-help" class="count-help">換圖與等待隊友共用此人數。</span></label>
-<label class="check"><input id="waitForParty" type="checkbox" checked>等待隊友</label>
-<div id="wait-options" hidden>
-<p class="section-help">角色死亡並自動回到原圖後，會執行優先且符合條件的巨集。等待期間會暫停攻擊。</p>
+</details>
+<label id="party-size-field" class="number-field">隊伍總人數（含自己）<input id="partySize" type="number" min="1" max="12" required></label>
+<label class="check"><input id="waitForParty" type="checkbox" disabled>等待隊友（多人隊伍自動啟用）</label>
   <div class="fields">
-    <label>等待秒數<input id="waitSeconds" type="number" min="1" max="60" value="5"></label>
-    <label id="wait-position-field">死亡後的行為<select id="waitPosition">
-      <option value="top">死亡後回原圖繼續打</option>
-      <option value="bottom" selected>死亡後換到下一張圖</option>
+    <label id="wait-position-field">如果在這張地圖死亡，要怎麼做？<select id="waitPosition" required>
+      <option value="">請選擇死亡後的行為</option>
+      <option value="top">回到原圖再次找王</option>
+      <option value="bottom">跳過並換到下一張圖</option>
     </select></label>
-    <label>等待巨集冷卻（秒）<input id="waitCooldown" type="number" min="5" max="86400" value="5"></label>
-    <label id="target-job-field">標的角色職業
-      <select id="targetJob">
-        <option value="">請選擇標的角色職業</option>
+    <label id="target-job-field">輸出角色職業
+      <select id="targetJob" required>
+        <option value="">請選擇輸出角色職業</option>
         <option value="monk">武僧（含武術宗師）</option>
         <option value="priest">祭司（含神官）</option>
         <option value="knight">騎士（含騎士領主）</option>
@@ -1254,10 +1250,11 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
         <option value="alchemist">鍊金術師（含創造者）</option>
         <option value="custom">其他職業 ID</option>
       </select>
+      <span class="count-help">推薦武術宗師、神射手、鍊金術師等有自帶 Buff 的職業。</span>
     </label>
     <label id="custom-job-field" hidden>職業 ID<input id="customJob" placeholder="例如 monk" spellcheck="false"></label>
   </div>
-</div>
+<p class="section-help">死亡後的選擇用於輸出配置的巨集順序。角色回到原圖後，會優先執行符合條件的巨集。</p>
 </section>
 <section id="custom-macro-section">
 <details id="custom-macro-details">
@@ -1386,36 +1383,23 @@ SOFTWARE.
     const firstMacros = retainedMacros.filter(macro => macro._generatorPosition === "first").map(cleanMacro);
     const lastMacros = retainedMacros.filter(macro => macro._generatorPosition !== "first").map(cleanMacro);
     const baseMacros = [...firstMacros, ...lastMacros];
-    const teammateThreshold = Number(options.partySize) - 1;
-    const partyBelow = options.mode === "follower" && options.partySize ? teammateThreshold : null;
-    if (partyBelow !== null && (!Number.isInteger(partyBelow) || partyBelow < 1 || partyBelow > 11)) {
-      throw new Error("換圖的隊伍總人數請填 2～12，或留空。");
-    }
+    const partySize = Number(options.partySize);
+    if (!Number.isInteger(partySize) || partySize < 1 || partySize > 12) throw new Error("隊伍總人數請填 1～12 人。");
+    const teammateThreshold = partySize - 1;
+    const partyBelow = options.mode === "follower" && partySize > 1 ? teammateThreshold : null;
     const buff = options.buff.trim().toUpperCase();
     if (options.mode === "leader" && buff && !/^[A-Z][A-Z0-9_]*$/.test(buff)) {
       throw new Error("請填入遊戲 Buff ID，例如 AL_INCAGI。");
     }
-    const cooldown = Number(options.cooldown);
-    if (!Number.isInteger(cooldown) || cooldown < 5 || cooldown > 86400) {
-      throw new Error("換圖冷卻請填 5～86400 秒。");
-    }
-    const wait = options.waitForParty;
+    const cooldown = 5;
+    const wait = partySize > 1;
     const waitBelow = teammateThreshold;
-    const waitSeconds = Number(options.waitSeconds);
-    const waitCooldown = Number(options.waitCooldown);
-    const jobInput = options.mode === "follower" ? (options.targetJob ?? "").trim().toLowerCase() : "";
+    const waitSeconds = 5;
+    const waitCooldown = 5;
+    const jobInput = (options.targetJob ?? "").trim().toLowerCase();
     const targetJob = rebirthJobCodes.get(jobInput) ?? jobInput;
-    if (wait && (!Number.isInteger(waitBelow) || waitBelow < 1 || waitBelow > 11 ||
-                 !Number.isInteger(waitSeconds) || waitSeconds < 1 || waitSeconds > 60 ||
-                 !Number.isInteger(waitCooldown) || waitCooldown < 5 || waitCooldown > 86400)) {
-      throw new Error("等待條件請填隊伍總人數 2～12 人、等待 1～60 秒、冷卻 5～86400 秒。");
-    }
-    if (wait && options.mode === "follower" && !targetJob) {
-      throw new Error("非標的角色開啟等待隊友時，請指定標的角色職業。");
-    }
-    if (wait && targetJob && !/^[a-z_]{1,32}$/.test(targetJob)) {
-      throw new Error("標的角色職業 ID 格式有誤。");
-    }
+    if (!/^[a-z_]{1,32}$/.test(targetJob)) throw new Error("請指定有效的輸出角色職業。");
+    if (!["top", "bottom"].includes(options.waitPosition)) throw new Error("請選擇死亡後的行為。");
     const buffBeforeMove = options.mode === "leader" && options.buffBeforeMove;
     const routeBuffLevel = Number(options.routeBuffLevel);
     if (buffBeforeMove && (!buff || options.buffWhen !== "selfLacks" ||
@@ -1547,7 +1531,7 @@ SOFTWARE.
           ...(buffBeforeMove ? {} : {maps: mapIds, inParty: true}),
           engaged: false,
           partyBelow: waitBelow,
-          ...(targetJob ? {allyJobs: [targetJob]} : {}),
+          ...(options.mode === "follower" ? {allyJobs: [targetJob]} : {}),
         },
         steps: [...(buffBeforeMove ? [{do: "skill", skill: buff, lv: routeBuffLevel}] : []), {do: "wait", sec: waitSeconds}],
       }] : [];
@@ -2374,24 +2358,10 @@ function updateOptions() {
   routeLevel.required = routeBuffEnabled;
   routeLevel.max = skill?.[2].maxLv ?? 10;
   if (Number(routeLevel.value) > Number(routeLevel.max)) routeLevel.value = routeLevel.max;
-  byId("follower").hidden = leader;
-  const wait = checked("waitForParty");
-  byId("wait-options").hidden = !wait;
-  byId("party-size-field").hidden = leader && !wait;
-  byId("partySize").disabled = leader && !wait;
-  byId("partySize").required = wait;
-  byId("target-job-field").hidden = leader;
-  byId("wait-position-field").hidden = !leader;
-  byId("waitPosition").disabled = !wait || !leader;
-  byId("targetJob").required = wait && !leader;
-  byId("targetJob").disabled = !wait || leader;
-  const customJob = wait && !leader && value("targetJob") === "custom";
+  byId("waitForParty").checked = Number(value("partySize")) > 1;
+  const customJob = value("targetJob") === "custom";
   byId("custom-job-field").hidden = !customJob;
   byId("customJob").required = customJob;
-  for (const id of ["waitSeconds", "waitCooldown"]) {
-    byId(id).disabled = !wait;
-    byId(id).required = wait;
-  }
 }
 
 function download(urlData, filename, type) {
@@ -2507,14 +2477,12 @@ byId("route-preset").onchange = event => {
     renderRoute();
     byId("departure").value = "fly";
     byId("routeWait").value = "0";
-    byId("waitForParty").checked = true;
-    byId("partySize").value = "12";
-    byId("waitPosition").value = "bottom";
     byId("buffBeforeMove").checked = false;
     byId("buffWhen").value = "selfLacks";
     byId("buffJob").value = job ?? "";
     byId("buffJob").onchange();
     if (leader) {
+      byId("targetJob").value = job;
       byId("buff").value = buff;
       applyRouteBuffDefaults();
     }
@@ -2565,21 +2533,15 @@ byId("generator").onsubmit = event => {
       routeWait: value("routeWait"),
       buffBeforeMove: !byId("route-buff-options").hidden && checked("buffBeforeMove"),
       routeBuffLevel: value("routeBuffLevel"),
-      waitForParty: checked("waitForParty"),
       targetJob: value("targetJob") === "custom" ? value("customJob") : value("targetJob"),
       partySize: value("partySize"),
-      waitSeconds: value("waitSeconds"),
-      waitCooldown: value("waitCooldown"),
       waitPosition: value("waitPosition"),
     };
-    for (const id of ["buff", "buffWhen", "cooldown", "groupSize", "departure"]) {
+    for (const id of ["buff", "buffWhen", "groupSize", "departure"]) {
       options[id] = value(id);
     }
     if (exportAll) {
-      const targetJob = options.targetJob || value("buffJob");
-      if (options.waitForParty && !targetJob) {
-        throw new Error("請先用引導指定標的職業，或在換圖設定選擇提供 Buff 的職業，再匯出三種模式。");
-      }
+      const targetJob = options.targetJob;
       const leaderPreset = [...byId("route-preset").options].find(option =>
         option.dataset.preset === "leader" && option.dataset.job === targetJob);
       const presetBuff = leaderPreset?.dataset.buff;
@@ -2633,7 +2595,7 @@ byId("download").onclick = () => downloadProfileZip(
   results.map(({file, profile}) => [file, profile]), "RO-idle_MVP_route.zip");
 
 const guideSteps = [
-  ["guide-job-section", "先決定隊伍要跟著哪個職業。"],
+  ["guide-job-section", "推薦武術宗師、神射手、鍊金術師等有自帶 Buff 的職業。"],
   ["guide-party-section", "填入隊伍總人數，我會換算等待和換圖用的隊友數。"],
   ["route-section", "想打哪些王？按王名篩選，勾選地圖後按「加入巡迴」。"],
   ["monster-section", "選擇輸出、輔助或協助找王／打王。"],
@@ -2675,7 +2637,7 @@ byId("start-guide").onclick = () => {
     if (option.value && option.value !== "custom") jobs.append(new Option(option.text, option.value));
   }
   jobs.value = value("targetJob");
-  byId("guide-party-size").value = value("partySize") || "12";
+  byId("guide-party-size").value = value("partySize");
   setGuide(true);
 };
 byId("exit-guide").onclick = () => {
@@ -2708,7 +2670,7 @@ byId("guide-next").onclick = () => {
     }
   } else if (id === "guide-party-section") {
     const total = Number(value("guide-party-size"));
-    if (!Number.isInteger(total) || total < 2 || total > 12) return fail("隊伍總人數請填 2～12 人。");
+    if (!Number.isInteger(total) || total < 1 || total > 12) return fail("隊伍總人數請填 1～12 人。");
     byId("partySize").value = String(total);
     clearPreview();
   } else if (id === "route-section" && !route.length) {
