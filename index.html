@@ -1082,7 +1082,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
   <p id="guide-error" role="alert" hidden></p>
 </div>
 <section id="guide-job-section" hidden>
-  <h2>用哪個 Buff 判斷換圖？</h2>
+  <h2>設定帶隊職業與換圖 Buff</h2>
   <div id="guide-buff-slot"></div>
 </section>
 <section id="guide-party-section" hidden>
@@ -1143,6 +1143,24 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </div>
     <div id="buff-picker-slot">
       <div id="lead-buff-picker">
+    <label id="target-job-field">帶隊角色職業
+      <select id="targetJob" required>
+        <option value="">請選擇帶隊角色職業</option>
+        <option value="monk">武僧（含武術宗師）</option>
+        <option value="priest">祭司（含神官）</option>
+        <option value="knight">騎士（含騎士領主）</option>
+        <option value="crusader">十字軍（含聖殿十字軍）</option>
+        <option value="wizard">巫師（含超魔導師）</option>
+        <option value="sage">賢者（含智者）</option>
+        <option value="hunter">獵人（含神射手）</option>
+        <option value="bard">詩人（含搞笑藝人）</option>
+        <option value="dancer">舞孃（含冷豔舞姬）</option>
+        <option value="assassin">刺客（含十字刺客）</option>
+        <option value="rogue">流氓（含太保）</option>
+        <option value="blacksmith">鐵匠（含神工匠）</option>
+        <option value="alchemist">鍊金術師（含創造者）</option>
+      </select>
+    </label>
         <label>判斷帶隊角色身上的 Buff（必填）<input id="buff-search" type="text" list="buff-options" autocomplete="off" placeholder="輸入 Buff 或職業名稱搜尋" required></label>
         <datalist id="buff-options"></datalist>
         <input id="buff" type="hidden">
@@ -1331,6 +1349,10 @@ SOFTWARE.
     const waitBelow = teammateThreshold;
     const waitSeconds = 5;
     const waitCooldown = 5;
+    const leaderJob = (options.targetJob ?? "").trim();
+    if (options.mode === "follower" && wait && !/^[a-z_]{1,32}$/.test(leaderJob)) {
+      throw new Error("請選擇帶隊角色職業，供輔助與協助判斷是否等待。");
+    }
     if (!["top", "bottom"].includes(options.waitPosition)) throw new Error("請選擇死亡後的行為。");
     const buffBeforeMove = options.mode === "leader" && options.buffBeforeMove;
     const routeBuffLevel = Number(options.routeBuffLevel);
@@ -1467,6 +1489,7 @@ SOFTWARE.
         cond: {
           ...(buffBeforeMove ? {} : {maps: mapIds, inParty: true}),
           partyBelow: waitBelow,
+          ...(options.mode === "follower" ? {allyJobs: [leaderJob]} : {}),
         },
         steps: [...(buffBeforeMove ? [{do: "skill", skill: buff, lv: routeBuffLevel}] : []), {do: "wait", sec: waitSeconds}],
       }] : [];
@@ -2565,7 +2588,7 @@ function renderRoleSettings() {
       recommendation.append(
         element("strong", "推薦帶隊職業"),
         element("p", "鐵匠、鍊金術師、神射手、武術宗師。這些職業能自行補 Buff，方便用來判斷換圖。"),
-        element("p", "預設以帶隊角色身上的 Buff 判斷換圖，等待則按同圖隊友人數判斷。若自訂巨集用職業辨認帶隊角色，請避免安排多名同職業的隊員：職業條件只能確認有沒有該職業的隊友，無法辨認哪一位才是帶隊角色。"),
+        element("p", "輔助與協助會在同圖有帶隊職業、隊友人數不足時等待。請讓帶隊職業在隊伍中只有一人，因為遊戲的職業條件無法區分同職業的不同隊友。"),
       );
       panel.append(recommendation, byId("buff-picker-slot"), byId("leader-death-settings"));
     }
@@ -2681,6 +2704,7 @@ byId("generator").onsubmit = event => {
     const supportOnly = value("combatMode") === "support";
     const options = {
       macros,
+      targetJob: value("targetJob"),
       ...(!exportAll ? combatOptionsForRole(value("combatMode")) : {}),
       roleAction: exportAll ? undefined : roleDepartureAction(value("combatMode")),
       mode: routeMode(),
@@ -2732,7 +2756,7 @@ byId("download").onclick = () => downloadProfileZip(
 
 const guideSteps = [
   ["guide-party-section", "選擇含自己的隊伍人數。兩人以上會自動啟用等待隊友。"],
-  ["guide-job-section", "搜尋並選擇帶隊角色用來判斷換圖的 Buff。"],
+  ["guide-job-section", "選擇帶隊職業和換圖用的 Buff。輔助與協助會用帶隊職業判斷是否等待。"],
   ["monster-section", "設定帶隊角色死亡後的行為，並確認三種角色換圖前的行動。"],
   ["route-section", "按 MVP 或王名篩選，勾選地圖後按「加入巡迴」，再確認巡迴順序。"],
   ["custom-macro-section", "需要額外動作時可新增自訂巨集，也可以直接下一步。"],
@@ -2787,6 +2811,7 @@ byId("guide-next").onclick = () => {
     byId("guide-error").hidden = false;
   };
   if (id === "guide-job-section") {
+    if (!byId("targetJob").reportValidity()) return;
     if (!byId("buff-search").reportValidity()) return;
   } else if (id === "guide-party-section") {
     const total = Number(value("guide-party-size"));
