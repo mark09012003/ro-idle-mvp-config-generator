@@ -920,8 +920,20 @@ input[type="checkbox"] { accent-color: var(--gold); }
 #guide-progress { margin: 0 0 6px; font-weight: 700; }
 .guide-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
 #guide-error { color: var(--danger); margin-bottom: 0; }
+#guide-controls { border-top: 2px solid var(--gold); }
+#guide-speaker { margin: 0 0 3px; color: var(--dim); font-size: 12px; }
+.guide-question { max-width: 360px; }
+#generator[data-guided] > .guide-current, #guide-progress, #guide-speaker {
+  animation: guide-appear 280ms ease-out both;
+}
+@keyframes guide-appear {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #generator[data-guided] > .guide-current, #guide-progress, #guide-speaker { animation: none; }
+}
 #generator[data-guided] > section:not(.guide-current) { display: none; }
-#generator[data-guided]:has(#monster-section.guide-current) > .section-presets { display: block; }
 .guide-current > h2:focus { outline: none; }
 
 .map-region { display: grid; gap: 5px; min-width: 0; margin: 0; padding: 4px 0 6px 13px; border: 0; border-left: 2px solid var(--line); }
@@ -1069,6 +1081,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <div class="workspace">
 <form id="generator">
 <div id="guide-controls" hidden>
+  <p id="guide-speaker">巡迴嚮導</p>
   <p id="guide-progress" role="status"></p>
   <div class="guide-buttons">
     <button class="btn" id="exit-guide" type="button">退出引導</button>
@@ -1077,6 +1090,14 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
   </div>
   <p id="guide-error" role="alert" hidden></p>
 </div>
+<section id="guide-job-section" hidden>
+  <h2>隊伍想以哪個職業當標的？</h2>
+  <label class="guide-question">標的職業<select id="guide-job"></select></label>
+</section>
+<section id="guide-party-section" hidden>
+  <h2>隊伍有幾個人？</h2>
+  <label class="guide-question">隊伍總人數（含自己）<input id="guide-party-size" type="number" min="2" max="12" step="1"></label>
+</section>
 <section id="route-section" class="section-route">
 <h2>地圖與巡迴路線</h2>
 <p class="section-help">勾選地圖並加入巡迴。清單由上往下執行，可調整順序或展開地圖修改個別怪物。</p>
@@ -1802,9 +1823,11 @@ byId("clear-maps").onclick = () => {
   byId("map-search").focus();
 };
 byId("add").onclick = () => {
+  const bossFilter = byId("generator").hasAttribute("data-guided") ? value("mvp-filter") : "";
   for (const id of selectedMaps) {
     const map = maps.find(map => map.id === id);
-    route.push({map, targets: map.monsters.filter(monster => monster.kind === "mvp").map(monster => monster.id),
+    route.push({map, targets: map.monsters.filter(monster =>
+      bossFilter ? matchesMonsterFilter(monster, bossFilter) : monster.kind === "mvp").map(monster => monster.id),
       smallRules: {}});
   }
   selectedMaps.clear();
@@ -2526,12 +2549,15 @@ byId("download").onclick = () => {
 };
 
 const guideSteps = [
-  ["route-section", "勾選地圖，按加入巡迴，再用上移／下移排順序。"],
+  ["guide-job-section", "先決定隊伍要跟著哪個職業。"],
+  ["guide-party-section", "填入隊伍總人數，我會換算等待和換圖用的隊友數。"],
+  ["route-section", "想打哪些王？按王名篩選，勾選地圖後按「加入巡迴」。"],
   ["monster-section", "分別設定勾選的王和其他怪物怎麼逃。只想主動找指定的王時，可開啟白名單。"],
   ["switch-section", "選擇標的或非標的角色，再決定是否等待隊友。"],
   ["preview-section", "按產生預覽，檢查遊戲內執行順序，再下載 JSON 或 ZIP。"],
 ];
 let guideIndex = 0;
+let appliedGuideJob = "";
 
 function setGuide(active) {
   const form = byId("generator");
@@ -2539,6 +2565,8 @@ function setGuide(active) {
   byId("guide-controls").hidden = !active;
   byId("start-guide").hidden = active;
   for (const section of form.querySelectorAll(":scope > section")) section.classList.remove("guide-current");
+  byId("guide-job-section").hidden = !active || guideIndex !== 0;
+  byId("guide-party-section").hidden = !active || guideIndex !== 1;
   if (!active) return;
   const [id, instruction] = guideSteps[guideIndex];
   const section = byId(id);
@@ -2555,6 +2583,14 @@ function setGuide(active) {
 
 byId("start-guide").onclick = () => {
   guideIndex = 0;
+  appliedGuideJob = "";
+  const jobs = byId("guide-job");
+  jobs.replaceChildren(new Option("請選擇職業", ""));
+  for (const option of byId("targetJob").options) {
+    if (option.value && option.value !== "custom") jobs.append(new Option(option.text, option.value));
+  }
+  jobs.value = value("targetJob");
+  byId("guide-party-size").value = value("partySize") || "12";
   setGuide(true);
 };
 byId("exit-guide").onclick = () => {
@@ -2566,15 +2602,48 @@ byId("guide-back").onclick = () => {
   setGuide(true);
 };
 byId("guide-next").onclick = () => {
-  if (guideIndex === 0 && !route.length) {
-    const error = byId("guide-error");
-    error.textContent = "請先將至少一張地圖加入巡迴。";
-    error.hidden = false;
-    return;
+  const [id] = guideSteps[guideIndex];
+  const fail = message => {
+    byId("guide-error").textContent = message;
+    byId("guide-error").hidden = false;
+  };
+  if (id === "guide-job-section") {
+    const job = value("guide-job");
+    if (!job) return fail("請先選擇標的職業。");
+    if (job !== appliedGuideJob) {
+      const picker = byId("route-preset");
+      const preset = [...picker.options].find(option => option.dataset.job === job);
+      if (preset && value("mode") === "leader") {
+        picker.value = preset.value;
+        picker.dispatchEvent(new Event("change", {bubbles: true}));
+      }
+      byId("targetJob").value = job;
+      appliedGuideJob = job;
+      clearPreview();
+    }
+  } else if (id === "guide-party-section") {
+    const total = Number(value("guide-party-size"));
+    if (!Number.isInteger(total) || total < 2 || total > 12) return fail("隊伍總人數請填 2～12 人。");
+    byId("partySize").value = String(total);
+    clearPreview();
+  } else if (id === "route-section" && !route.length) {
+    return fail("請先將至少一張地圖加入巡迴。");
+  } else if (id === "switch-section") {
+    for (const field of byId(id).querySelectorAll("input, select")) {
+      if (!field.reportValidity()) return;
+    }
   }
   guideIndex++;
   setGuide(true);
 };
+
+byId("generator").addEventListener("keydown", event => {
+  if (event.isComposing || event.defaultPrevented || event.key !== "Enter" ||
+      !event.target.matches("input") || !byId("generator").hasAttribute("data-guided")) return;
+  if (guideSteps[guideIndex][0] === "preview-section") return;
+  event.preventDefault();
+  if (event.target.id === "guide-party-size") byId("guide-next").click();
+});
 
 byId("generator").addEventListener("invalid", event => {
   if (!byId("generator").hasAttribute("data-guided")) return;
@@ -2600,7 +2669,7 @@ let routeDraftReady = false;
 
 function draftFields() {
   return [...byId("generator").querySelectorAll("input[id], select[id], textarea[id]")]
-    .filter(field => field.type !== "file" && field.id !== "route-preset");
+    .filter(field => field.type !== "file" && field.id !== "route-preset" && !field.id.startsWith("guide-"));
 }
 
 function saveRouteDraft() {
