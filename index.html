@@ -1466,7 +1466,6 @@ SOFTWARE.
         cooldownSec: waitCooldown,
         cond: {
           ...(buffBeforeMove ? {} : {maps: mapIds, inParty: true}),
-          engaged: false,
           partyBelow: waitBelow,
         },
         steps: [...(buffBeforeMove ? [{do: "skill", skill: buff, lv: routeBuffLevel}] : []), {do: "wait", sec: waitSeconds}],
