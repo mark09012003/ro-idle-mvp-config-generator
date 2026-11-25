@@ -956,15 +956,13 @@ input[type="checkbox"] { accent-color: var(--gold); }
 @media (min-width: 900px) {
   #generator:not([data-guided]) {
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-    grid-template-areas: "route presets" "route monsters" "route switches" "custom custom" "preview preview";
-    grid-template-rows: min-content min-content auto auto auto;
+    grid-template-areas: "route settings" "custom custom" "preview preview";
+    grid-template-rows: auto auto auto;
     gap: 12px;
     align-items: start;
   }
   #generator:not([data-guided]) .section-route { grid-area: route; }
-  #generator:not([data-guided]) .section-presets { grid-area: presets; }
-  #generator:not([data-guided]) .section-monsters { grid-area: monsters; }
-  #generator:not([data-guided]) .section-switch { grid-area: switches; }
+  #generator:not([data-guided]) .section-monsters { grid-area: settings; }
   #generator:not([data-guided]) #custom-macro-section { grid-area: custom; }
   #generator:not([data-guided]) #preview-section { grid-area: preview; }
   #generator:not([data-guided]) .section-route {
@@ -1042,6 +1040,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 #generator .switch-heading h2 { margin: 0; padding: 0; border: 0; }
 #route-role { padding: 3px 8px; border-radius: 999px; background: var(--using); color: var(--title); font-size: 12px; white-space: nowrap; }
 .switch-basics { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
+.section-monsters .switch-basics { margin-top: 12px; }
 .switch-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 6px 12px; }
 .switch-wait { margin: 0 0 10px; color: var(--dim); }
 #advanced-route { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; }
@@ -1103,8 +1102,8 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
   <p id="guide-error" role="alert" hidden></p>
 </div>
 <section id="guide-job-section" hidden>
-  <h2>隊伍想以哪個職業當標的？</h2>
-  <label class="guide-question">標的職業<select id="guide-job"></select></label>
+  <h2>哪個職業負責帶隊？</h2>
+  <label class="guide-question">帶隊角色職業<select id="guide-job"></select></label>
 </section>
 <section id="guide-party-section" hidden>
   <h2>隊伍有幾個人？</h2>
@@ -1133,24 +1132,8 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <ol id="route" role="list" aria-labelledby="route-title"></ol>
 <p id="catalog-status" role="status"></p>
 </section>
-<section id="preset-section" class="section-presets" aria-labelledby="preset-title">
-<h2 id="preset-title">快速範本</h2>
-<select id="route-preset" aria-labelledby="preset-title">
-<option value="">選擇角色範本…</option>
-<optgroup label="標的角色">
-<option value="leader-hunter" data-preset="leader" data-job="hunter" data-buff="AC_CONCENTRATION">神射手 · 心神凝聚</option>
-<option value="leader-monk" data-preset="leader" data-job="monk" data-buff="AL_INCAGI">武術宗師 · 加速術</option>
-<option value="leader-alchemist" data-preset="leader" data-job="alchemist" data-buff="MC_LOUD">創造者 · 大聲吶喊</option>
-<option value="leader-blacksmith" data-preset="leader" data-job="blacksmith" data-buff="MC_LOUD">神工匠 · 大聲吶喊</option>
-</optgroup>
-<optgroup label="非標的角色">
-<option value="support" data-preset="support">純輔助 · 看到怪就飛</option>
-<option value="hunter" data-preset="hunter">主動找怪</option>
-</optgroup>
-</select>
-</section>
 <section id="monster-section" class="section-monsters">
-<h2>怪物控制與選怪</h2>
+<div class="switch-heading"><h2>戰鬥與巡迴設定</h2><span id="route-role">帶隊角色</span></div>
 <label>戰鬥模式<select id="combatMode" aria-describedby="combat-mode-help">
 <option value="output">輸出</option>
 <option value="support">輔助</option>
@@ -1202,15 +1185,12 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 </fieldset>
 </fieldset>
 </details>
-</section>
-<section id="switch-section" class="section-switch">
-<div class="switch-heading"><h2>換圖與配置切換</h2><span id="route-role">標的角色</span></div>
 <p id="guide-route-summary" class="section-help"></p>
 <div class="switch-basics">
   <div class="switch-inputs">
-    <label id="target-job-field">輸出角色職業
+    <label id="target-job-field">帶隊角色職業
       <select id="targetJob" required>
-        <option value="">請選擇輸出角色職業</option>
+        <option value="">請選擇帶隊角色職業</option>
         <option value="monk">武僧（含武術宗師）</option>
         <option value="priest">祭司（含神官）</option>
         <option value="knight">騎士（含騎士領主）</option>
@@ -1408,7 +1388,7 @@ SOFTWARE.
     const waitCooldown = 5;
     const jobInput = (options.targetJob ?? "").trim().toLowerCase();
     const targetJob = rebirthJobCodes.get(jobInput) ?? jobInput;
-    if (!/^[a-z_]{1,32}$/.test(targetJob)) throw new Error("請指定有效的輸出角色職業。");
+    if (!/^[a-z_]{1,32}$/.test(targetJob)) throw new Error("請指定有效的帶隊角色職業。");
     if (!["top", "bottom"].includes(options.waitPosition)) throw new Error("請選擇死亡後的行為。");
     const buffBeforeMove = options.mode === "leader" && options.buffBeforeMove;
     const routeBuffLevel = Number(options.routeBuffLevel);
@@ -2353,9 +2333,9 @@ function updateOptions() {
     : "優先打勾選的王，遇到王不逃；其他怪被打才還手，打完當前目標再逃。白名單只收錄勾選的王，並開啟協助隊友打怪與協助時略過逃生設定的怪物。";
   updateMacroCount();
   const leader = routeMode() === "leader";
-  byId("route-role").textContent = leader ? "標的角色" : "非標的角色";
+  byId("route-role").textContent = leader ? "帶隊角色" : "非帶隊角色";
   const targetJobLabel = byId("targetJob").selectedOptions[0]?.textContent;
-  byId("guide-route-summary").textContent = `已帶入隊伍總人數 ${value("partySize")} 人，標的職業為 ${targetJobLabel ?? "未選擇"}。`;
+  byId("guide-route-summary").textContent = `已帶入隊伍總人數 ${value("partySize")} 人，帶隊角色職業為 ${targetJobLabel ?? "未選擇"}。`;
   byId("leader").hidden = !leader;
   byId("buff").required = leader && Boolean(value("buffJob"));
   const skill = buffJobs.find(job => job.id === value("buffJob"))?.buffs.find(([id]) => id === value("buff"));
@@ -2476,30 +2456,12 @@ byId("generator").addEventListener("input", event => {
 
 byId("customCombat").onchange = renderRoute;
 
-byId("route-preset").onchange = event => {
-    const picker = event.currentTarget;
-    const {preset, job, buff} = picker.selectedOptions[0].dataset;
-    if (!preset) return;
-    const support = preset === "support";
-    const leader = preset === "leader";
-    byId("combatMode").value = support ? "support" : leader ? "output" : "assist";
-    byId("customCombat").checked = false;
-    renderRoute();
-    byId("departure").value = "fly";
-    byId("routeWait").value = "0";
-    byId("buffBeforeMove").checked = false;
-    byId("buffWhen").value = "selfLacks";
-    byId("buffJob").value = job ?? "";
-    byId("buffJob").onchange();
-    if (leader) {
-      byId("targetJob").value = job;
-      byId("buff").value = buff;
-      applyRouteBuffDefaults();
-    }
-    picker.selectedIndex = 0;
-    updateOptions();
-    clearPreview();
-};
+const recommendedLeaderBuffs = new Map([
+  ["hunter", "AC_CONCENTRATION"],
+  ["monk", "AL_INCAGI"],
+  ["alchemist", "MC_LOUD"],
+  ["blacksmith", "MC_LOUD"],
+]);
 
 byId("generator").onsubmit = event => {
   event.preventDefault();
@@ -2552,9 +2514,7 @@ byId("generator").onsubmit = event => {
     }
     if (exportAll) {
       const targetJob = options.targetJob;
-      const leaderPreset = [...byId("route-preset").options].find(option =>
-        option.dataset.preset === "leader" && option.dataset.job === targetJob);
-      const presetBuff = leaderPreset?.dataset.buff;
+      const presetBuff = recommendedLeaderBuffs.get(targetJob);
       const presetBuffLevel = buffJobs.find(job => job.id === targetJob)?.buffs
         .find(([id]) => id === presetBuff)?.[2].maxLv;
       const leaderBuff = options.buff || (presetBuffLevel ? presetBuff : "");
@@ -2608,8 +2568,7 @@ const guideSteps = [
   ["guide-job-section", "推薦武術宗師、神射手、鍊金術師等有自帶 Buff 的職業。"],
   ["guide-party-section", "填入隊伍總人數，我會換算等待和換圖用的隊友數。"],
   ["route-section", "想打哪些王？按王名篩選，勾選地圖後按「加入巡迴」。"],
-  ["monster-section", "選擇輸出、輔助或協助找王／打王。"],
-  ["switch-section", "確認換圖條件，再決定是否等待隊友。"],
+  ["monster-section", "選擇戰鬥模式與死亡後的行為。"],
   ["preview-section", "按產生預覽，檢查遊戲內執行順序，再下載 JSON 或 ZIP。"],
 ];
 let guideIndex = 0;
@@ -2666,13 +2625,14 @@ byId("guide-next").onclick = () => {
   };
   if (id === "guide-job-section") {
     const job = value("guide-job");
-    if (!job) return fail("請先選擇標的職業。");
+    if (!job) return fail("請先選擇帶隊角色職業。");
     if (job !== appliedGuideJob) {
-      const picker = byId("route-preset");
-      const preset = [...picker.options].find(option => option.dataset.job === job);
-      if (preset && routeMode() === "leader" && value("buffJob") !== job) {
-        picker.value = preset.value;
-        picker.dispatchEvent(new Event("change", {bubbles: true}));
+      const buff = recommendedLeaderBuffs.get(job);
+      if (buff && routeMode() === "leader" && value("buffJob") !== job) {
+        byId("buffJob").value = job;
+        byId("buffJob").onchange();
+        byId("buff").value = buff;
+        applyRouteBuffDefaults();
       }
       byId("targetJob").value = job;
       appliedGuideJob = job;
@@ -2685,7 +2645,7 @@ byId("guide-next").onclick = () => {
     clearPreview();
   } else if (id === "route-section" && !route.length) {
     return fail("請先將至少一張地圖加入巡迴。");
-  } else if (id === "switch-section") {
+  } else if (id === "monster-section") {
     for (const field of byId(id).querySelectorAll("input, select")) {
       if (!field.reportValidity()) return;
     }
@@ -2726,7 +2686,7 @@ let routeDraftReady = false;
 
 function draftFields() {
   return [...byId("generator").querySelectorAll("input[id], select[id], textarea[id]")]
-    .filter(field => field.type !== "file" && field.id !== "route-preset" && !field.id.startsWith("guide-"));
+    .filter(field => field.type !== "file" && !field.id.startsWith("guide-"));
 }
 
 function saveRouteDraft() {
