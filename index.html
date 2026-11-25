@@ -1010,6 +1010,8 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 .role-settings > fieldset { min-width: 0; margin: 0; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--head); }
 .role-settings > fieldset > legend { color: var(--title); font-size: 14px; font-weight: 700; padding-inline: 5px; }
 .role-settings > fieldset > .role-description { margin: 0 0 8px; }
+.leader-recommendation { padding: 8px 10px; margin: 0 0 8px; border-left: 3px solid var(--accent); border-radius: 4px; background: var(--using); }
+.leader-recommendation p { margin: 2px 0 0; }
 .role-settings #lead-buff-picker { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .role-settings #leader-death-settings { margin-top: 10px; }
 .role-settings #route-buff-options .check { margin-top: 4px; }
@@ -2450,7 +2452,15 @@ function renderRoleSettings() {
       }
     };
     action.onchange();
-    if (id === "output") panel.append(byId("buff-picker-slot"), byId("leader-death-settings"));
+    if (id === "output") {
+      const recommendation = element("aside", "");
+      recommendation.className = "leader-recommendation";
+      recommendation.append(
+        element("strong", "推薦帶隊職業"),
+        element("p", "鐵匠、鍊金術師、神射手、武術宗師。這些職業能自行補 Buff，方便用來判斷換圖。"),
+      );
+      panel.append(recommendation, byId("buff-picker-slot"), byId("leader-death-settings"));
+    }
     panel.append(fields);
     const advanced = id === "output" ? routeAdvanced : element("details", "");
     if (id !== "output") {
