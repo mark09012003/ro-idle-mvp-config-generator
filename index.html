@@ -1139,7 +1139,7 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 <p id="guide-route-summary" class="section-help"></p>
 <div class="switch-basics">
     <label id="party-size-field">隊伍總人數（含自己）<select id="partySize" required><option value="">請選擇人數</option></select></label>
-    <label class="check switch-wait"><input id="waitForParty" type="checkbox" disabled>等待隊友（多人隊伍自動啟用）</label>
+    <p class="section-help switch-wait">選擇 2 人以上時，會自動啟用等待隊友。</p>
 </div>
     <div id="buff-picker-slot">
       <div id="lead-buff-picker">
@@ -2303,7 +2303,6 @@ function updateOptions() {
   routeLevel.required = routeBuffEnabled;
   routeLevel.max = skill?.[2].maxLv ?? 10;
   if (Number(routeLevel.value) > Number(routeLevel.max)) routeLevel.value = routeLevel.max;
-  byId("waitForParty").checked = Number(value("partySize")) > 1;
 }
 
 function download(urlData, filename, type) {
