@@ -1,3 +1,4 @@
+import {destinationConfig, handoffItems, matchMoved, profileName} from "./handoff.mjs";
 import {itemFingerprint, remapRules, ruleReferences, suitableItem} from "./rebind.mjs";
 import {marketPlan} from "./market.mjs";
 import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, refineOutcome, restoreEquipment, skillLevel, equipmentPlan} from "./refine.mjs";
@@ -24,6 +25,7 @@ let catalog, marketSlots, marketTowns, rebindItems, tabId, view, storage, active
 let marketPreview;
 let rebindPreview;
 const rebindKey = "equipment-rebind-reference";
+const handoffKey = "archer-equipment-handoff-v1";
 let loadVersion = 0;
 let plans = [];
 let busy = false;
@@ -156,6 +158,7 @@ async function loadGear(preserve = false) {
   clearMarketPreview();
   clearRebind();
   $("rebind-capture").disabled = $("rebind-preview").disabled = true;
+  $("handoff-send").disabled = $("handoff-receive").disabled = true;
   const showStorage = storageMaterials.checked || storageWeapons.checked;
   needsRefresh = true;
   mode.disabled = target.disabled = gear.disabled = start.disabled = true;
@@ -187,6 +190,7 @@ async function loadGear(preserve = false) {
     needsRefresh = false;
     updateMode(preserve);
     $("rebind-capture").disabled = $("rebind-preview").disabled = false;
+    updateHandoff();
     void archerMonitor("status");
   } catch (error) {
     if (version !== loadVersion) return;
@@ -582,6 +586,161 @@ async function applyRebind() {
 $("rebind-capture").onclick = captureRebind;
 $("rebind-preview").onclick = previewRebind;
 $("rebind-apply").onclick = applyRebind;
+
+function readHandoff() {
+  try { return JSON.parse(localStorage.getItem(handoffKey)); }
+  catch { return null; }
+}
+
+function saveHandoff(record, stage) {
+  record.stage = stage;
+  localStorage.setItem(handoffKey, JSON.stringify(record));
+}
+
+function handoffStatus(text) { $("handoff-status").textContent = text; }
+
+function updateHandoff() {
+  const record = readHandoff();
+  const id = activeRole?.id;
+  $("handoff-clear").hidden = !record;
+  $("handoff-send").disabled = !id || (record && (record.stage !== "preparing" || record.source !== id));
+  $("handoff-receive").disabled = !id || !record || record.source === id ||
+    !(record.stage === "stored" || (record.stage === "received" && record.target === id));
+  if (record?.stage === "stored") handoffStatus(`已存好 ${record.items.length} 件裝備。請切到同帳號的新角色領取。`);
+  if (record?.stage === "received") handoffStatus("裝備已領出，可繼續建立並套用配置。");
+  if (record?.stage.endsWith("Pending")) handoffStatus("上一筆存取結果待確認，請直接檢查背包及倉庫，避免重複操作。");
+}
+
+async function handoffAccount() {
+  const me = await gameRequest("/api/auth/me");
+  const account = me.user ?? me.account ?? me;
+  const id = account.accountId ?? account.userId ?? account.uid ?? account.id;
+  if (id == null || String(id) === "") throw new Error("無法確認目前登入帳號。");
+  return String(id);
+}
+
+function handoffFee(current, box) {
+  const fee = box.fees?.[current.snapshot.mapId];
+  if (!Number.isFinite(fee)) throw new Error("請到有卡普拉服務的城鎮。");
+  if (current.snapshot.character.zeny < fee) throw new Error(`倉庫費需要 ${fee} Zeny。`);
+  return fee;
+}
+
+async function handoffCommand(current, command) {
+  const result = await gameRequest(`/api/characters/${current.characterId}/commands`, guardedCommand(current, command));
+  return {...result, view: checkView(result.view, current.characterId)};
+}
+
+async function sendHandoff(current, account, record) {
+  const box = await getStorage();
+  const fee = handoffFee(current, box);
+  if (record && (record.account !== account || record.source !== current.characterId || record.stage !== "preparing")) {
+    throw new Error("目前已有一筆裝備交接。");
+  }
+  if (!record) {
+    const config = current.snapshot.profiles?.find(profile => profile.name === profileName)?.config;
+    if (!config) throw new Error(`原角色找不到已儲存的「${profileName}」配置。`);
+    const items = handoffItems(current.snapshot, config, rebindItems);
+    if (!items.length || items.length > 100) throw new Error("請確認交接裝備清單介於 1 到 100 件。");
+    if (box.items.length + items.length > box.capacity) throw new Error("倉庫空間不足。");
+    const ammo = Object.fromEntries(current.snapshot.inventory.map(({uid, itemId}) => [uid, itemId]));
+    record = {account, source: current.characterId, config, items, ammo};
+  }
+  if (!window.confirm(`卸下並存入以下裝備？倉庫費 ${fee} Zeny。\n${record.items.map(equipmentName).join("\n")}`)) return;
+  const inventory = current.snapshot.inventory;
+  if (record.items.some(item => !inventory.some(candidate => candidate.uid === item.uid &&
+      itemFingerprint(candidate) === itemFingerprint(item)))) throw new Error("原角色背包的交接裝備已變更。");
+  if (box.items.length + record.items.length > box.capacity) throw new Error("倉庫空間不足。");
+  saveHandoff(record, "preparing");
+  const uids = new Set(record.items.map(item => item.uid));
+  for (const [slot, uid] of Object.entries(current.snapshot.equipment)) {
+    if (!uids.has(uid)) continue;
+    const reply = await handoffCommand(current, {type:"unequip", slot});
+    current = reply.view;
+    if (current.snapshot.equipment[slot] != null) throw new Error("伺服器未確認裝備已卸下。");
+  }
+  const before = await getStorage();
+  saveHandoff(record, "depositPending");
+  const reply = await handoffCommand(current, {type:"storageDeposit", items:record.items.map(({uid}) => ({uid,qty:1}))});
+  const deposited = matchMoved(before.items, (reply.storage ?? await getStorage()).items, record.items, "sid");
+  record.sids = deposited.map(item => item.sid);
+  saveHandoff(record, "stored");
+}
+
+async function receiveHandoff(current, account, record) {
+  if (!record || record.account !== account || record.source === current.characterId ||
+      !(record.stage === "stored" || (record.stage === "received" && record.target === current.characterId))) {
+    throw new Error("找不到這個角色可領取的交接裝備。");
+  }
+  const sameName = current.snapshot.profiles?.some(profile => profile.name === profileName);
+  const box = record.stage === "stored" ? await getStorage() : null;
+  const fee = box ? handoffFee(current, box) : 0;
+  const note = sameName ? "會覆蓋目前角色的同名配置。" : "";
+  if (!window.confirm(`領取交接裝備並套用「${profileName}」？倉庫費 ${fee} Zeny。${note}`)) return;
+  if (box) {
+    const items = record.sids.map((sid, index) => {
+      const stored = box.items.find(item => item.sid === sid);
+      if (!stored || stored.qty !== 1 || itemFingerprint(stored) !== itemFingerprint(record.items[index])) {
+        throw new Error("倉庫中的交接裝備已變更。");
+      }
+      return {sid, qty:1};
+    });
+    record.target = current.characterId;
+    saveHandoff(record, "withdrawPending");
+    const before = current.snapshot.inventory;
+    const reply = await handoffCommand(current, {type:"storageWithdraw", items});
+    current = reply.view;
+    record.newUids = matchMoved(before, current.snapshot.inventory, record.items, "uid").map(item => item.uid);
+    saveHandoff(record, "received");
+  }
+  if (record.items.some((item, index) => !current.snapshot.inventory.some(candidate =>
+      candidate.uid === record.newUids[index] && itemFingerprint(candidate) === itemFingerprint(item)))) {
+    throw new Error("領出的裝備已變更，請檢查背包。");
+  }
+  const config = destinationConfig(record, current.snapshot);
+  const saved = await handoffCommand(current, {type:"profileSave", name:profileName, config});
+  if (!saved.view.snapshot.profiles?.some(profile => profile.name === profileName)) throw new Error("未確認配置已儲存。");
+  const applied = await handoffCommand(saved.view, {type:"profileApply", name:profileName});
+  if (applied.view.snapshot.activeProfile !== profileName) {
+    throw new Error("未確認配置已套用，請檢查遊戲目前配置。");
+  }
+  localStorage.removeItem(handoffKey);
+  handoffStatus(`已領裝、重綁並套用「${profileName}」。`);
+}
+
+async function runHandoff(direction) {
+  if (busy || !activeRole) return;
+  busy = true;
+  $("handoff-send").disabled = $("handoff-receive").disabled = true;
+  let problem;
+  try {
+    await navigator.locks.request(handoffKey, {ifAvailable: true}, async lock => {
+      if (!lock) throw new Error("另一個視窗正在處理交接。");
+      const [current, account] = await Promise.all([rebindView(), handoffAccount()]);
+      if (current.running !== false) throw new Error("請先停止角色掛機。");
+      const record = readHandoff();
+      await (direction === "send" ? sendHandoff(current, account, record) : receiveHandoff(current, account, record));
+    });
+  } catch (error) {
+    problem = error.message;
+  } finally {
+    busy = false;
+    await loadGear(true);
+    if (problem) handoffStatus(`交接暫停。${problem}`);
+  }
+}
+
+$("handoff-clear").onclick = async () => {
+  if (busy || !window.confirm("已檢查背包與倉庫？清除只會刪除本機交接紀錄，已移動的裝備會留在原處。")) return;
+  await navigator.locks.request(handoffKey, {ifAvailable: true}, lock => {
+    if (!lock) { handoffStatus("另一個視窗正在處理交接。"); return; }
+    localStorage.removeItem(handoffKey);
+    updateHandoff();
+    handoffStatus("已清除本機交接紀錄。");
+  });
+};
+$("handoff-send").onclick = () => runHandoff("send");
+$("handoff-receive").onclick = () => runHandoff("receive");
 
 async function archerMonitor(action) {
   if (!tabId) return;

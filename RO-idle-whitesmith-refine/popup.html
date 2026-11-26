@@ -10,6 +10,14 @@
 <body>
   <h1>批次裝備精練</h1>
   <p id="character">讀取目前角色中…</p>
+  <details id="handoff">
+    <summary>神射11轉裝備交接</summary>
+    <p>原角色記錄配置並存倉。換到同帳號的新角色後，領裝、重綁並建立同名配置。</p>
+    <button id="handoff-send" type="button" disabled>記錄並存倉</button>
+    <button id="handoff-receive" type="button" disabled>領裝並套用配置</button>
+    <button id="handoff-clear" type="button" hidden>清除本機交接紀錄</button>
+    <p id="handoff-status" role="status"></p>
+  </details>
   <details id="rebind">
     <summary>跨角色換裝重綁</summary>
     <p>在原角色搬裝備前記錄對照。新角色匯入原配置並取出裝備後，即可預覽重綁。已經搬完也可以手動選新裝備。</p>
