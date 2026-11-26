@@ -9,7 +9,7 @@ export function marketPlan(response, slots, buyer, criteria) {
 
   const definitions = new Map((response.heldItems ?? []).map(def => [def.id, def]));
   const lines = response.shops.flatMap(shop => {
-    if (shop.vendorId === buyer.id || shop.mapId !== buyer.mapId ||
+    if (shop.vendorId === buyer.id || typeof shop.mapId !== "string" ||
         !Number.isSafeInteger(shop.vendorId)) return [];
     return shop.items.filter(item => {
       const def = definitions.get(item.itemId);
@@ -17,14 +17,15 @@ export function marketPlan(response, slots, buyer, criteria) {
       return cardSlots === holes && item.name.toLowerCase().includes(term) &&
         Number.isSafeInteger(item.price) && item.price > 0 && item.price <= ceiling &&
         Number.isSafeInteger(item.qty) && item.qty > 0 && Number.isSafeInteger(item.cartUid);
-    }).map(item => ({vendorId: shop.vendorId, seller: shop.vendorName, openedAt: shop.openedAt, item}));
+    }).map(item => ({vendorId: shop.vendorId, seller: shop.vendorName, openedAt: shop.openedAt, mapId: shop.mapId, item}));
   }).sort((a, b) => a.item.price - b.item.price);
 
   const orders = [];
   const seen = new Set();
   let count = 0;
   let total = 0;
-  for (const line of lines) {
+  const local = lines.filter(line => line.mapId === buyer.mapId);
+  for (const line of local) {
     const key = `${line.vendorId}:${line.item.cartUid}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -34,5 +35,5 @@ export function marketPlan(response, slots, buyer, criteria) {
     count += qty;
     total += line.item.price * qty;
   }
-  return {orders, count, total, matches: lines.length};
+  return {orders, count, total, localMatches: local.length, remote: lines.filter(line => line.mapId !== buyer.mapId)};
 }

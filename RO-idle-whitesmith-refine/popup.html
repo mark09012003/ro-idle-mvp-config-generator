@@ -29,8 +29,12 @@
       <button id="market-search" type="button">搜尋並預覽</button>
       <button id="market-buy" type="button" disabled>確認批次購買</button>
     </fieldset>
-    <p id="market-status" role="status">依單價由低到高買入目前城鎮的符合項目，每次購買前需確認。</p>
+    <p id="market-status" role="status">搜尋各城鎮的攤位，確認後從目前城鎮的最低價開始買。</p>
     <ul id="market-preview" hidden></ul>
+    <div id="market-other" hidden>
+      <p>其他城鎮 · 到當地後重新搜尋即可購買</p>
+      <ul id="market-remote-list"></ul>
+    </div>
   </details>
   <label for="mode">精練方式</label>
   <select id="mode" disabled>

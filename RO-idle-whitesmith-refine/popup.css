@@ -24,4 +24,4 @@ button, select { font: inherit; padding: 5px 8px; }
 #market-fields input, #market-fields select { box-sizing: border-box; width: 100%; margin: 4px 0 8px; }
 #market-fields input { font: inherit; padding: 5px 8px; }
 .market-limits { display: grid; grid-template-columns: 75px minmax(0, 1fr) 90px; gap: 8px; }
-#market-preview { max-height: 160px; overflow: auto; padding-left: 20px; }
+#market-preview, #market-remote-list { max-height: 160px; overflow: auto; padding-left: 20px; }

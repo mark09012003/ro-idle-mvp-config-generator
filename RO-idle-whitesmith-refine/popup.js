@@ -19,7 +19,7 @@ const storageMaterials = $("storage-materials");
 const storageWeapons = $("storage-weapons");
 const results = $("results");
 const status = message => { $("status").textContent = message; };
-let catalog, marketSlots, tabId, view, storage, activeRole;
+let catalog, marketSlots, marketTowns, tabId, view, storage, activeRole;
 let marketPreview;
 let loadVersion = 0;
 let plans = [];
@@ -334,6 +334,8 @@ function clearMarketPreview() {
   $("market-preview").hidden = true;
   $("market-preview").replaceChildren();
   $("market-buy").disabled = true;
+  $("market-other").hidden = true;
+  $("market-remote-list").replaceChildren();
 }
 
 async function searchMarket(role, criteria) {
@@ -358,6 +360,16 @@ function lockMarket(locked) {
   else if (view) updateMode(true);
 }
 
+function marketRow({seller, item}, holes, qty, town) {
+  const row = document.createElement("li");
+  const refine = item.refine ? `+${item.refine} ` : "";
+  const flags = [item.unidentified && "未鑑定", item.broken && "損壞", item.cards?.some(Boolean) && "已插卡"].filter(Boolean);
+  const state = flags.length ? `（${flags.join("、")}）` : "";
+  row.textContent = `${refine}${item.name}［${holes} 洞］${state} · ${item.price.toLocaleString()} Zeny ×${qty} · ${seller}` +
+    (town ? ` · ${town}` : "");
+  return row;
+}
+
 async function previewMarket() {
   if (busy || !activeRole) return;
   const criteria = {
@@ -376,18 +388,18 @@ async function previewMarket() {
   lockMarket(true);
   try {
     const plan = await searchMarket(activeRole, criteria);
-    $("market-status").textContent = plan.count
-      ? `預計購買 ${plan.count} 件，合計 ${plan.total.toLocaleString()} Zeny。`
-      : plan.matches ? "目前 Zeny 不足。" : "目前城鎮沒有符合條件的攤位裝備。";
+    const localStatus = plan.count
+      ? `目前城鎮預計購買 ${plan.count} 件，合計 ${plan.total.toLocaleString()} Zeny。`
+      : plan.localMatches ? "目前 Zeny 不足。" : "目前城鎮沒有符合條件的裝備。";
+    $("market-status").textContent = localStatus +
+      (plan.remote.length ? `其他城鎮有 ${plan.remote.length} 筆符合商品。` : "");
+    $("market-remote-list").replaceChildren(...plan.remote.map(line =>
+      marketRow(line, criteria.holes, line.item.qty, marketTowns[line.mapId] ?? line.mapId)));
+    $("market-other").hidden = !plan.remote.length;
     if (!plan.count) return;
     marketPreview = {criteria, plan};
-    $("market-preview").replaceChildren(...plan.orders.map(({seller, item, qty}) => {
-      const line = document.createElement("li");
-      const refine = item.refine ? `+${item.refine} ` : "";
-      const state = [item.unidentified && "未鑑定", item.broken && "損壞", item.cards?.some(Boolean) && "已插卡"].filter(Boolean);
-      line.textContent = `${refine}${item.name}［${criteria.holes} 洞］${state.length ? `（${state.join("、")}）` : ""} · ${item.price.toLocaleString()} Zeny ×${qty} · ${seller}`;
-      return line;
-    }));
+    $("market-preview").replaceChildren(...plan.orders.map(line =>
+      marketRow(line, criteria.holes, line.qty)));
     $("market-preview").hidden = false;
     $("market-buy").disabled = false;
   } catch (error) {
@@ -456,7 +468,7 @@ try {
     throw new Error("請先開啟並登入 ro-idle.app 遊戲，再點這個擴充功能。");
   }
   tabId = tab.id;
-  [catalog, marketSlots] = await Promise.all(["catalog.json", "market-slots.json"]
+  [catalog, marketSlots, marketTowns] = await Promise.all(["catalog.json", "market-slots.json", "market-towns.json"]
     .map(path => fetch(path).then(response => response.json())));
   refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = false;
   await loadGear();
