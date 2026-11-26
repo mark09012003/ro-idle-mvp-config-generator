@@ -1321,6 +1321,8 @@ SOFTWARE.
     return prefix + shorten(start, capacity - endLimit) + separator + shorten(end, endLimit);
   }
 
+  const monsterActions = new Set(["attack", "priority", "defend", "lure"]);
+
   function generate(base, route, options) {
     if (base) validateBase(base);
     if (!route.length) throw new Error("請先加入至少一張地圖。");
@@ -1395,13 +1397,15 @@ SOFTWARE.
         const sourceId = useTransformedTarget && id === 1874 ? 1873 : id;
         const selected = row.targets.includes(sourceId);
         const override = options.customCombat ? row.smallRules?.[sourceId] : undefined;
-        const customAction = selected ? options.targetAction || (options.mode === "leader" ? "priority" : "defend") : options.otherAction;
+        const defaultAction = !options.supportOnly && selected ? "priority" : "defend";
+        const schemeAction = selected ? options.targetAction : options.otherAction;
+        const schemeDefault = options.mode === "leader" && selected ? "priority" : "defend";
+        const customAction = monsterActions.has(override?.action) ? override.action
+          : monsterActions.has(schemeAction) ? schemeAction : schemeDefault;
         const escape = options.customCombat
           ? override?.escape ?? (selected ? options.targetEscape : options.escape)
           : options.supportOnly ? "sight" : selected ? "" : "afterTarget";
-        const action = options.customCombat
-          ? override?.action ?? customAction
-          : !options.supportOnly && selected ? "priority" : "defend";
+        const action = options.customCombat ? customAction : defaultAction;
         return [id, {monsterId: id, action, ...(escape ? {escape} : {})}, selected];
       });
       const conflicts = rowRules.some(([id, rule, selected]) => {
@@ -2961,7 +2965,10 @@ function restoreRouteDraft() {
     for (const field of draftFields()) {
       const saved = draft.fields?.[field.id];
       if (field.type === "checkbox" && typeof saved === "boolean") field.checked = saved;
-      else if (field.type !== "checkbox" && typeof saved === "string" && field.id !== "buff") field.value = saved;
+      else if (field.type !== "checkbox" && typeof saved === "string" && field.id !== "buff") {
+        const isMonsterAction = /(?:^|-)(?:targetAction|otherAction)$/.test(field.id);
+        if (!isMonsterAction || Array.from(field.options).some(option => option.value === saved)) field.value = saved;
+      }
     }
     const savedBuffLevel = draft.fields?.routeBuffLevel;
     populateLeaderBuffs(draft.fields?.buff);
