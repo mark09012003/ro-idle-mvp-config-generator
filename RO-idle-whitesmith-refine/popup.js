@@ -1,10 +1,11 @@
-import {associateWithdrawnWeapons, batchPlan, guardedCommand, nextRefineCommand, refineOutcome, skillLevel, weaponPlan} from "./refine.mjs";
+import {associateWithdrawnEquipment, batchPlan, guardedCommand, nextRefineCommand, refineOutcome, skillLevel, equipmentPlan} from "./refine.mjs";
 
 const $ = id => document.getElementById(id);
 const host = "https://ro-idle.app";
 const character = $("character");
 const gear = $("gear");
-const selection = $("weapons");
+const selection = $("equipment");
+const mode = $("mode");
 const start = $("start");
 const stop = $("stop");
 const refresh = $("refresh");
@@ -14,7 +15,7 @@ const storageMaterials = $("storage-materials");
 const storageWeapons = $("storage-weapons");
 const results = $("results");
 const status = message => { $("status").textContent = message; };
-let catalog, tabId, view, storage;
+let catalog, tabId, view, storage, activeRole;
 let loadVersion = 0;
 let plans = [];
 let busy = false;
@@ -24,11 +25,22 @@ let needsRefresh = false;
 async function gameRequest(path, payload) {
   const [reply] = await chrome.scripting.executeScript({
     target: {tabId},
-    args: [host, path, payload ?? null],
-    func: async (origin, requestPath, body) => {
+    args: [host, path, payload ?? null, activeRole?.name ?? null],
+    func: async (origin, requestPath, body, expectedName) => {
       if (location.origin !== origin || location.pathname.startsWith("/info")) {
         throw new Error("請回到原本的遊戲分頁。");
       }
+      const classicName = [...document.querySelectorAll(".xp-title .caption")]
+        .map(caption => caption.textContent.trim().match(/^RO放置仙境 - \[(.+)\] .+ Lv\.\d+ \/ Job \d+$/)?.[1])
+        .find(Boolean);
+      const nameNode = document.querySelector(
+        '.ui2-avatar + div > b:first-child, .ui2-mstatus button[aria-label="打開完整狀態"] > b:first-child',
+      );
+      const modernName = nameNode && [...nameNode.childNodes]
+        .filter(node => node.nodeType === Node.TEXT_NODE)
+        .map(node => node.textContent).join("").trim();
+      const name = classicName || modernName;
+      if (body && (!expectedName || name !== expectedName)) return {error: "遊戲分頁已切換角色。"};
       const response = await fetch(requestPath, {
         method: body ? "POST" : "GET",
         credentials: "same-origin",
@@ -40,10 +52,11 @@ async function gameRequest(path, payload) {
       });
       const data = await response.json();
       if (!response.ok) return {error: data.error?.message ?? data.message ?? (typeof data.error === "string" ? data.error : `HTTP ${response.status}`)};
-      return {data};
+      return {data, name};
     },
   });
   if (!reply?.result?.data) throw new Error(reply?.result?.error ?? "遊戲未傳回完整結果。");
+  if (path === "/api/characters") return {...reply.result.data, activeName: reply.result.name};
   return reply.result.data;
 }
 
@@ -56,14 +69,14 @@ function planSummary(chosen, batch) {
     `${name} ×${qty}${missing ? `（倉庫補 ${missing}）` : ""}`);
   const stored = chosen.filter(plan => plan.source === "storage").length;
   const withdrawals = [];
-  if (stored) withdrawals.push(`${stored} 件武器`);
+  if (stored) withdrawals.push(`${stored} 件裝備`);
   if (batch.materials.some(material => material.missing)) withdrawals.push("上列缺少的材料");
   return [
-    `${chosen.length} 件武器，最多 ${batch.steps} 次精練，${batch.steps * 5} SP`,
+    `${chosen.length} 件裝備，最多 ${batch.steps} 次精練，${mode.value === "armor" ? `精練費 ${batch.zeny} Zeny` : `${batch.steps * 5} SP`}`,
     materials.join("、"),
     ...(withdrawals.length ? [`從倉庫取出 ${withdrawals.join("及")}，倉庫費 ${batch.fee} Zeny。`] : []),
     ...(chosen.some(plan => plan.rates.some(rate => rate < 100))
-      ? ["有精練步驟低於 100% 成功率。失敗時武器和已插入的卡片會消失。"] : []),
+      ? ["有精練步驟低於 100% 成功率。失敗時裝備和已插入的卡片會消失。"] : []),
   ].join("\n");
 }
 
@@ -84,24 +97,24 @@ function updatePlan() {
 }
 
 function planKey(plan) {
-  return plan.source === "bag" ? `bag:${plan.weapon.uid}` : `storage:${plan.weapon.sid}`;
+  return plan.source === "bag" ? `bag:${plan.item.uid}` : `storage:${plan.item.sid}`;
 }
 
-function renderWeapons(preserve = false) {
+function renderEquipment(preserve = false) {
   const checked = new Set(preserve ? selectedPlans().map(planKey) : []);
   const level = Number(target.value);
   plans = [
-    ...(view?.snapshot?.inventory ?? []).map(item => weaponPlan(view, catalog, item, level)),
-    ...(storageWeapons.checked ? storage?.items ?? [] : []).map(item => weaponPlan(view, catalog, item, level, "storage")),
+    ...(view?.snapshot?.inventory ?? []).map(item => equipmentPlan(view, catalog, item, level, "bag", mode.value)),
+    ...(storageWeapons.checked ? storage?.items ?? [] : []).map(item => equipmentPlan(view, catalog, item, level, "storage", mode.value)),
   ].filter(Boolean);
   selection.replaceChildren(...plans.map(plan => {
     const label = document.createElement("label");
     const input = document.createElement("input");
     input.type = "checkbox";
     input.checked = checked.has(planKey(plan));
-    const source = plan.source === "storage" ? "倉庫" : "背包";
+    const source = plan.source === "storage" ? "倉庫" : plan.method === "npc" ? "已穿戴" : "背包";
     const lowest = Math.min(...plan.rates);
-    label.append(input, `[${source}] ${plan.name} +${plan.from} → +${plan.target}（#${plan.weapon.uid ?? plan.weapon.sid}${lowest < 100 ? `，最低單步 ${lowest}%` : ""}）`);
+    label.append(input, `[${source}] ${plan.name} +${plan.from} → +${plan.target}（#${plan.item.uid ?? plan.item.sid}${lowest < 100 ? `，最低單步 ${lowest}%` : ""}）`);
     return label;
   }));
   gear.disabled = busy || needsRefresh || !plans.length;
@@ -115,51 +128,66 @@ async function getStorage() {
 }
 
 async function loadGear(preserve = false) {
-  const id = Number(character.value);
   const version = ++loadVersion;
   const showStorage = storageMaterials.checked || storageWeapons.checked;
   needsRefresh = true;
-  target.disabled = true;
-  gear.disabled = start.disabled = true;
+  mode.disabled = target.disabled = gear.disabled = start.disabled = true;
   status("讀取物品中…");
-  if (!id) {
-    view = storage = null;
-    renderWeapons();
-    status("請選擇神工匠角色。");
-    return;
-  }
   try {
+    const {characters, activeName} = await gameRequest("/api/characters");
+    if (version !== loadVersion) return;
+    const matches = (characters ?? []).filter(entry => activeName && entry.name === activeName);
+    if (matches.length !== 1) throw new Error("請先在遊戲分頁進入角色，再更新物品。");
+    const role = matches[0];
     const [current, box] = await Promise.all([
-      gameRequest(`/api/characters/${id}?deferCatchup=1`),
+      gameRequest(`/api/characters/${role.id}?deferCatchup=1`),
       showStorage ? getStorage() : null,
     ]);
     if (version !== loadVersion) return;
-    if (current.characterId !== id || current.snapshot?.character?.job !== "whitesmith" ||
-        !Array.isArray(current.snapshot.inventory) || !current.snapshot.equipment) {
-      throw new Error("無法讀取這位神工匠的背包。");
-    }
+    checkView(current, role.id);
+    const sameRole = activeRole?.id === role.id;
+    preserve &&= sameRole;
+    if (!sameRole) results.hidden = true;
     view = current;
     storage = box;
-    const previousLevel = preserve ? Number(target.value) : 0;
-    const cap = skillLevel(view);
-    target.replaceChildren(new Option("安全值（100% 成功）", "0"));
-    for (let level = 1; level <= cap; level++) target.add(new Option(`+${level}`, level));
-    target.value = String(previousLevel <= cap ? previousLevel : 0);
-    target.disabled = cap < 1 || view.running;
+    activeRole = role;
+    character.textContent = `目前角色：${role.name}`;
+    const canUseSkill = skillLevel(view) > 0;
+    mode.options[0].disabled = !canUseSkill;
+    if (!preserve) mode.value = canUseSkill ? "weapon" : "armor";
+    if (mode.value === "weapon" && !canUseSkill) mode.value = "armor";
+    mode.disabled = false;
     needsRefresh = false;
-    renderWeapons(preserve);
-    status(view.running ? "請先停止角色掛機。" : plans.length
-      ? "請勾選要精練的武器。" : "沒有符合目前目標的武器，請確認技能、精練等級及上鎖狀態。");
+    updateMode(preserve);
   } catch (error) {
     if (version !== loadVersion) return;
-    view = storage = null;
-    renderWeapons();
+    view = storage = activeRole = null;
+    character.textContent = "尚未辨識目前角色";
+    renderEquipment();
     status(error.message);
   }
 }
 
+function updateMode(preserve) {
+  const armor = mode.value === "armor";
+  const previousLevel = preserve ? Number(target.value) : 0;
+  const cap = armor ? 10 : skillLevel(view);
+  const hasNpc = armor && catalog.refineTowns.includes(view.snapshot.mapId);
+  $("mode-help").textContent = armor
+    ? "防具須在有精練師的城鎮精練。未穿戴的防具只能直接精練到安全值。"
+    : "使用神工匠的武器精練技能，每級消耗 1 份材料和 5 SP。";
+  target.replaceChildren(new Option("安全值（100% 成功）", "0"));
+  for (let level = 1; level <= cap; level++) target.add(new Option(`+${level}`, level));
+  target.value = String(previousLevel <= cap ? previousLevel : 0);
+  target.disabled = needsRefresh || view.running || (armor && !hasNpc);
+  renderEquipment(preserve);
+  status(view.running ? "請先停止角色掛機。" : armor && !hasNpc
+    ? "請先到有精練師的城鎮。" : plans.length
+      ? "請勾選要精練的裝備。" : "沒有符合目前目標的裝備。");
+}
+
 function checkView(next, id) {
-  if (next?.characterId !== id || !Array.isArray(next.snapshot?.inventory)) {
+  if (next?.characterId !== id || !Array.isArray(next.snapshot?.inventory) || !next.snapshot.equipment || !next.snapshot.character) {
     throw new Error("伺服器未回傳完整的角色背包。");
   }
   return next;
@@ -169,11 +197,10 @@ async function runBatch() {
   if (busy || needsRefresh) return;
   let chosen = selectedPlans();
   if (!chosen.length) return;
-  const id = Number(character.value);
-  const roleName = character.selectedOptions[0].text;
+  const {id, name: roleName} = activeRole;
   busy = true;
   cancelled = false;
-  character.disabled = refresh.disabled = gear.disabled = start.disabled = target.disabled = storageMaterials.disabled = storageWeapons.disabled = true;
+  mode.disabled = refresh.disabled = gear.disabled = start.disabled = target.disabled = storageMaterials.disabled = storageWeapons.disabled = true;
   let success = 0;
   let failure = 0;
   let uncertain = 0;
@@ -183,14 +210,14 @@ async function runBatch() {
     if (storage) {
       storage = await getStorage();
       for (const plan of chosen.filter(plan => plan.source === "storage")) {
-        const item = storage.items.find(({sid}) => sid === plan.weapon.sid);
-        if (JSON.stringify(item) !== JSON.stringify(plan.weapon)) throw new Error("選取的倉庫武器已變更。");
+        const item = storage.items.find(({sid}) => sid === plan.item.sid);
+        if (JSON.stringify(item) !== JSON.stringify(plan.item)) throw new Error("選取的倉庫裝備已變更。");
       }
     }
     const batch = batchPlan(view, storage, chosen, storageMaterials.checked);
-    const weapons = chosen.map(plan =>
+    const items = chosen.map(plan =>
       `${plan.source === "storage" ? "倉庫" : "背包"} · ${plan.name} +${plan.from} → +${plan.target}`);
-    if (!window.confirm(`確定由 ${roleName} 執行神工匠武器精練？\n${planSummary(chosen, batch)}\n\n${weapons.join("\n")}`)) return;
+    if (!window.confirm(`確定由 ${roleName} 執行批次精練？\n${planSummary(chosen, batch)}\n\n${items.join("\n")}`)) return;
     started = true;
     results.hidden = true;
     stop.disabled = false;
@@ -199,17 +226,18 @@ async function runBatch() {
       const payload = guardedCommand(view, {type: "storageWithdraw", items: batch.withdraw});
       const reply = await gameRequest(`/api/characters/${id}/commands`, payload);
       const next = checkView(reply.view, id);
-      chosen = associateWithdrawnWeapons(view, next, chosen);
+      chosen = associateWithdrawnEquipment(view, next, chosen);
       view = next;
     } else {
-      chosen = chosen.map(plan => ({...plan, uid: plan.weapon.uid}));
+      chosen = chosen.map(plan => ({...plan, uid: plan.item.uid}));
     }
 
     for (const plan of chosen) {
       if (cancelled) break;
-      for (let level = plan.from; level < plan.target; level++) {
-        if (cancelled) break;
-        status(`精練 ${plan.name} +${level} → +${level + 1}…`);
+      let level = plan.from;
+      while (!cancelled && level < plan.target) {
+        const nextLevel = plan.method === "safe" ? plan.target : level + 1;
+        status(`精練 ${plan.name} +${level} → +${nextLevel}…`);
         const payload = nextRefineCommand(view, catalog, plan, plan.uid, level);
         awaitingRefine = true;
         const reply = await gameRequest(`/api/characters/${id}/commands`, payload);
@@ -221,7 +249,8 @@ async function runBatch() {
           failure++;
           break;
         }
-        if (level + 1 === plan.target) success++;
+        if (nextLevel === plan.target) success++;
+        level = nextLevel;
         await new Promise(resolve => setTimeout(resolve, 450));
       }
     }
@@ -232,9 +261,10 @@ async function runBatch() {
     status(`批次停止。${error.message} 請更新物品確認結果。`);
   } finally {
     busy = false;
-    character.disabled = refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = false;
+    refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = false;
     stop.disabled = true;
-    target.disabled = needsRefresh || skillLevel(view) < 1;
+    mode.disabled = needsRefresh;
+    target.disabled = needsRefresh;
     if (started) {
       results.hidden = false;
       results.textContent = `成功 ${success} 件 · 失敗 ${failure} 件 · 未完成 ${chosen.length - success - failure - uncertain} 件${uncertain ? ` · 結果待確認 ${uncertain} 件` : ""}`;
@@ -243,7 +273,7 @@ async function runBatch() {
         target.disabled = true;
       }
     }
-    renderWeapons(!started);
+    renderEquipment(!started);
   }
 }
 
@@ -252,12 +282,9 @@ all.onchange = () => {
   updatePlan();
 };
 selection.onchange = updatePlan;
-character.onchange = () => {
-  results.hidden = true;
-  loadGear();
-};
+mode.onchange = () => updateMode(false);
 refresh.onclick = storageMaterials.onchange = storageWeapons.onchange = () => loadGear(true);
-target.onchange = () => renderWeapons(true);
+target.onchange = () => renderEquipment(true);
 start.onclick = runBatch;
 stop.onclick = () => { cancelled = true; stop.disabled = true; };
 
@@ -267,15 +294,9 @@ try {
     throw new Error("請先開啟並登入 ro-idle.app 遊戲，再點這個擴充功能。");
   }
   tabId = tab.id;
-  const [items, roster] = await Promise.all([
-    fetch("catalog.json").then(response => response.json()),
-    gameRequest("/api/characters"),
-  ]);
-  catalog = items;
-  const smiths = (roster.characters ?? []).filter(entry => entry.job === "whitesmith");
-  for (const entry of smiths) character.append(new Option(entry.name, String(entry.id)));
-  character.disabled = refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = !smiths.length;
-  status(smiths.length ? "請選擇神工匠角色。" : "目前帳號找不到神工匠角色。");
+  catalog = await fetch("catalog.json").then(response => response.json());
+  refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = false;
+  await loadGear();
 } catch (error) {
   status(error.message);
 }

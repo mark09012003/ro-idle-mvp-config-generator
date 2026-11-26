@@ -3,23 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>神工匠批次精練</title>
+  <title>批次裝備精練</title>
   <link rel="stylesheet" href="popup.css">
   <script type="module" src="popup.js"></script>
 </head>
 <body>
-  <h1>神工匠批次精練</h1>
-  <p>使用「武器精練」技能，每級消耗 1 份材料和 5 SP。</p>
-  <label for="character">神工匠角色</label>
-  <select id="character" disabled><option value="">請選擇角色</option></select>
+  <h1>批次裝備精練</h1>
+  <p id="character">讀取目前角色中…</p>
+  <label for="mode">裝備類型</label>
+  <select id="mode" disabled>
+    <option value="weapon">武器（神工匠技能）</option>
+    <option value="armor">防具（城鎮精練師）</option>
+  </select>
+  <p id="mode-help"></p>
   <label for="target">目標精練等級</label>
   <select id="target" disabled><option value="0">安全值（100% 成功）</option></select>
   <label class="storage"><input id="storage-materials" type="checkbox" disabled> 從倉庫補足材料</label>
-  <label class="storage"><input id="storage-weapons" type="checkbox" disabled> 從倉庫挑選武器</label>
+  <label class="storage"><input id="storage-weapons" type="checkbox" disabled> 從倉庫挑選裝備</label>
   <fieldset id="gear" disabled>
-    <legend>選擇武器</legend>
-    <label><input id="select-all" type="checkbox">全選可精練武器</label>
-    <div id="weapons"></div>
+    <legend>選擇裝備</legend>
+    <label><input id="select-all" type="checkbox">全選可精練裝備</label>
+    <div id="equipment"></div>
   </fieldset>
   <p id="plan"></p>
   <p id="results" aria-live="polite" hidden></p>
