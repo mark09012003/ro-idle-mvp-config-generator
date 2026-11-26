@@ -35,7 +35,10 @@
     };
     if (!round.end) {
       add(`job:${character.job}`, `${jobs[character.job]} · Base ${character.baseLv}／Job ${character.jobLv}`);
-      if (character.job === "sniper" && character.baseLv >= 75) add("base75", "神射手達 Base 75");
+      if (character.job === "sniper" && !round.events.some(event => event.key === "base75")) {
+        const threshold = globalThis.roArcherWindwalkBase(character.rebirth);
+        if (character.baseLv >= threshold) add("windwalkBase", `神射手達風之步門檻 Base ${threshold}`);
+      }
       if (character.job === "sniper" && (character.skills?.SN_WINDWALK ?? 0) >= 10) add("windwalk", "風之步 10");
       const target = {hunter: 50, sniper: 70}[character.job];
       if (target && character.jobLv >= target) add("jobCap", `達 Job ${target}`);

@@ -5,6 +5,8 @@ import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedComman
 
 const $ = id => document.getElementById(id);
 const host = "https://ro-idle.app";
+const floatingTab = new URL(location.href).searchParams.get("gameTab");
+const floating = floatingTab !== null;
 const character = $("character");
 const gear = $("gear");
 const selection = $("equipment");
@@ -31,6 +33,27 @@ let plans = [];
 let busy = false;
 let cancelled = false;
 let needsRefresh = false;
+
+$("open-floating").onclick = async () => {
+  if (!tabId || busy) return;
+  $("open-floating").disabled = true;
+  try {
+    const url = new URL(chrome.runtime.getURL("popup.html"));
+    url.searchParams.set("gameTab", tabId);
+    const windows = await chrome.windows.getAll({populate: true, windowTypes: ["popup"]});
+    const existing = windows.find(candidate => candidate.tabs?.some(tab => tab.url === url.href));
+    if (existing) {
+      await chrome.windows.update(existing.id, {focused: true, state: "normal"});
+    } else {
+      await chrome.windows.create({url: url.href, type: "popup", width: 410, height: 690, focused: true});
+    }
+    window.close();
+  } catch (error) {
+    status(`無法開啟浮動視窗：${error.message}`);
+  } finally {
+    $("open-floating").disabled = false;
+  }
+};
 
 async function gameRequest(path, payload) {
   let timeout;
@@ -912,11 +935,15 @@ async function initialize() {
     if (!chrome.tabs?.query || !chrome.scripting?.executeScript) {
       throw new Error("擴充權限尚未載入，請在 chrome://extensions 重新載入。");
     }
-    const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+    if (floating && !/^\d+$/.test(floatingTab)) throw new Error("浮動視窗找不到原本的遊戲分頁。");
+    const tab = floating ? await chrome.tabs.get(Number(floatingTab)) :
+      (await chrome.tabs.query({active: true, currentWindow: true}))[0];
     if (!tab?.url || new URL(tab.url).origin !== host || new URL(tab.url).pathname.startsWith("/info")) {
       throw new Error("請先在 ro-idle.app 進入角色，再從 Chrome 工具列開啟擴充。");
     }
     tabId = tab.id;
+    document.body.classList.toggle("floating", floating);
+    $("open-floating").hidden = floating;
     [catalog, marketSlots, marketTowns, rebindItems] = await Promise.all(
       ["catalog.json", "market-slots.json", "market-towns.json", "rebind-items.json"].map(async path => {
         const response = await fetch(path, {signal: AbortSignal.timeout(10000)});

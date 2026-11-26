@@ -1,5 +1,7 @@
 :root { color-scheme: light dark; font: 14px system-ui, sans-serif; }
 body { width: 360px; margin: 0; padding: 16px; }
+body.floating { width: auto; box-sizing: border-box; padding: 12px; }
+.tool-header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 h1 { font-size: 18px; margin: 0 0 8px; }
 p { line-height: 1.5; margin: 8px 0; }
 select { display: block; width: 100%; margin: 4px 0 12px; }

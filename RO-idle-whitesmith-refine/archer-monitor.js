@@ -9,6 +9,8 @@
   let lastSignal = "";
   let timer;
   let fallback;
+  let backgroundStream;
+  let backgroundSignal = "";
   let message = "尚未啟用。";
   const observer = new MutationObserver(() => {
     if (timer !== undefined) return;
@@ -36,10 +38,51 @@
     observing = false;
     pending = false;
     observer.disconnect();
+    document.removeEventListener("visibilitychange", syncBackgroundStream);
+    closeBackgroundStream();
     clearInterval(fallback);
     clearTimeout(timer);
     timer = undefined;
     message = text;
+  }
+
+  function closeBackgroundStream() {
+    backgroundStream?.close();
+    backgroundStream = undefined;
+    backgroundSignal = "";
+  }
+
+  function syncBackgroundStream() {
+    if (!observing || !document.hidden) {
+      closeBackgroundStream();
+      if (observing) inspect(true);
+      return;
+    }
+    if (backgroundStream) return;
+    // Use the game's non-watching stream without taking over its foreground connection.
+    const stream = new EventSource(`/api/characters/${role.id}/stream?partial=1&watch=0`);
+    backgroundStream = stream;
+    stream.addEventListener("snapshot", event => {
+      if (backgroundStream !== stream || !observing) return;
+      let snapshot;
+      try {
+        ({snapshot} = JSON.parse(event.data));
+      } catch {
+        return;
+      }
+      const character = snapshot?.character;
+      if (!character || !Number.isInteger(character.baseLv) || !Number.isInteger(character.jobLv)) return;
+      const signal = JSON.stringify([character.job, character.baseLv, character.jobLv, snapshot.activity === "dead"]);
+      if (signal === backgroundSignal) return;
+      backgroundSignal = signal;
+      inspect(true);
+    });
+    for (const event of ["idle", "superseded"]) {
+      stream.addEventListener(event, () => {
+        if (backgroundStream === stream) closeBackgroundStream();
+      });
+    }
+    inspect(true);
   }
 
   async function request(path, body) {
@@ -158,9 +201,9 @@
         role = input.role;
         observing = true;
         observer.observe(document.documentElement, {subtree:true, childList:true, characterData:true});
-        // A paused game stream may not render new levels while the tab is in the background.
+        document.addEventListener("visibilitychange", syncBackgroundStream);
         fallback = setInterval(() => inspect(true), 60000);
-        inspect(true);
+        syncBackgroundStream();
       }
     }
     respond({running: observing || inFlight, message});

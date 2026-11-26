@@ -2,10 +2,16 @@
   "use strict";
   const jobs = globalThis.roArcherTree;
   const firstJob = [["AC_DOUBLE",5],["AC_SHOWER",10],["AC_OWL",10],["AC_VULTURE",1],
-    ["AC_CONCENTRATION",10],["AC_VULTURE",10],["AC_DOUBLE",9]];
-  const sniper = [["SN_SHARPSHOOTING",5],["HT_BEASTBANE",1],["HT_FALCON",1],["SN_SIGHT",10]];
+    ["AC_CONCENTRATION",10],["AC_VULTURE",4]];
+  const sniper = [["SN_SHARPSHOOTING",5],["AC_VULTURE",10],["HT_BEASTBANE",1],["HT_FALCON",1],["SN_SIGHT",10]];
   const destinations = {novice:"archer", novice_high:"archer_high", archer:"hunter", archer_high:"sniper"};
   const fee = 1285000;
+
+  // The first rebirth has no count; count records subsequent rebirths.
+  function windwalkBase(rebirth) {
+    const count = rebirth?.count;
+    return Number.isInteger(count) && count > 0 ? Math.max(1, 75 - count) : 75;
+  }
 
   function planArcher(character) {
     const {job, baseLv, jobLv, rebirth} = character;
@@ -63,13 +69,14 @@
     } else if (job === "hunter") {
       fillRemaining();
     } else {
+      const windwalkLevel = windwalkBase(rebirth);
       ready = applyOrder(sniper);
-      if (ready && baseLv >= 75) {
+      if (ready && baseLv >= windwalkLevel) {
         ready = applyOrder([["SN_WINDWALK",10]]);
         if (ready) fillRemaining();
       } else if (ready) {
         ready = false;
-        waiting = "保留技能點，等待 Base 75 再學風之步。";
+        waiting = `保留技能點，等待 Base ${windwalkLevel} 再學風之步。`;
       }
     }
 
@@ -94,4 +101,5 @@
   }
 
   globalThis.roPlanArcher = planArcher;
+  globalThis.roArcherWindwalkBase = windwalkBase;
 })();
