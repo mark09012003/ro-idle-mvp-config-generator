@@ -28,3 +28,10 @@ button, select { font: inherit; padding: 5px 8px; }
 
 #rebind-rows { max-height: 220px; overflow: auto; margin-top: 8px; }
 #rebind-rows label { display: block; }
+.tool-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 12px 0 14px; }
+.tool-tabs button { border: 1px solid transparent; border-radius: 6px; background: transparent; color: CanvasText; padding: 7px 3px; white-space: nowrap; }
+.tool-tabs button:hover, .tool-tabs button[aria-selected="true"] { background: color-mix(in srgb, Highlight 13%, Canvas); }
+.tool-tabs button[aria-selected="true"] { border-color: Highlight; font-weight: 600; }
+.tool-panel h2 { margin: 0 0 8px; font-size: 15px; }
+.utility { margin-top: 12px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, GrayText 35%, Canvas); }
+.utility p { margin: 0 0 6px; }

@@ -764,10 +764,39 @@ async function archerMonitor(action) {
 
 $("archer-start").onclick = () => archerMonitor("start");
 $("archer-stop").onclick = () => archerMonitor("stop");
-$("archer-growth").ontoggle = () => archerMonitor("status");
+
 setInterval(() => {
-  if ($("archer-growth").open) void archerMonitor("status");
+  if (!$("panel-growth").hidden) void archerMonitor("status");
 }, 1500);
+
+const tabs = [...$("tool-tabs").querySelectorAll('[role="tab"]')];
+
+function activateToolTab(active, focus = false) {
+  for (const tab of tabs) {
+    const selected = tab === active;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    $(tab.getAttribute("aria-controls")).hidden = !selected;
+  }
+  if (focus) active.focus();
+  if (active.id === "tab-growth") void archerMonitor("status");
+}
+
+for (const tab of tabs) {
+  tab.onclick = () => activateToolTab(tab);
+  tab.onkeydown = event => {
+    const index = tabs.indexOf(tab);
+    const next = {
+      ArrowLeft: (index + tabs.length - 1) % tabs.length,
+      ArrowRight: (index + 1) % tabs.length,
+      Home: 0,
+      End: tabs.length - 1,
+    }[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    activateToolTab(tabs[next], true);
+  };
+}
 
 all.onchange = () => {
   for (const row of selection.children) {

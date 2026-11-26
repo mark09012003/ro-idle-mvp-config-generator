@@ -3,102 +3,118 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>批次裝備精練</title>
+  <title>RO 放置仙境工具</title>
   <link rel="stylesheet" href="popup.css">
   <script type="module" src="popup.js"></script>
 </head>
 <body>
-  <h1>批次裝備精練</h1>
+  <h1>RO 放置仙境工具</h1>
   <p id="character">讀取目前角色中…</p>
-  <details id="handoff">
-    <summary>神射11轉裝備交接</summary>
-    <p>原角色記錄配置並存倉。換到同帳號的新角色後，領裝、重綁並建立同名配置。</p>
-    <button id="handoff-send" type="button" disabled>記錄並存倉</button>
-    <button id="handoff-receive" type="button" disabled>領裝並套用配置</button>
-    <button id="handoff-clear" type="button" hidden>清除本機交接紀錄</button>
-    <p id="handoff-status" role="status"></p>
-  </details>
-  <details id="rebind">
-    <summary>跨角色換裝重綁</summary>
-    <p>在原角色搬裝備前記錄對照。新角色匯入原配置並取出裝備後，即可預覽重綁。已經搬完也可以手動選新裝備。</p>
-    <button id="rebind-capture" type="button" disabled>記錄原角色裝備</button>
-    <button id="rebind-preview" type="button" disabled>預覽目前角色</button>
-    <div id="rebind-rows"></div>
-    <button id="rebind-apply" type="button" disabled>套用換裝重綁</button>
-    <p id="rebind-status" role="status"></p>
-  </details>
-  <details id="archer-growth">
-    <summary>弓箭手自動加點與轉生</summary>
-    <p>只作用於目前角色。升級後整批加點，轉生 10 次並達 Base 99／Job 70 時停止。每次轉生需 1,285,000 Zeny。</p>
-    <p>遊戲轉生會停用掛機技能規則和自動屬性配點。</p>
-    <button id="archer-start" type="button" disabled>啟用流程</button>
-    <button id="archer-stop" type="button" disabled>停止流程</button>
-    <p id="archer-status" role="status">尚未啟用。</p>
-  </details>
-  <details id="market">
-    <summary>攤位搜尋與限價購買</summary>
-    <fieldset id="market-fields" disabled>
-      <label>裝備名稱 <input id="market-name" maxlength="40" type="search" placeholder="輸入名稱關鍵字"></label>
-      <div class="market-limits">
-        <label>指定洞數
-          <select id="market-holes">
-            <option value="">請選擇</option>
-            <option value="0">0 洞</option><option value="1">1 洞</option>
-            <option value="2">2 洞</option><option value="3">3 洞</option>
-            <option value="4">4 洞</option>
+  <div id="tool-tabs" class="tool-tabs" role="tablist" aria-label="功能分類">
+    <button id="tab-refine" type="button" role="tab" aria-controls="panel-refine" aria-selected="true">裝備精練</button>
+    <button id="tab-market" type="button" role="tab" aria-controls="panel-market" aria-selected="false" tabindex="-1">攤位購買</button>
+    <button id="tab-growth" type="button" role="tab" aria-controls="panel-growth" aria-selected="false" tabindex="-1">角色練功</button>
+    <button id="tab-handoff" type="button" role="tab" aria-controls="panel-handoff" aria-selected="false" tabindex="-1">角色交接</button>
+  </div>
+  <section id="panel-refine" class="tool-panel" role="tabpanel" aria-labelledby="tab-refine">
+    <label for="mode">精練方式</label>
+    <select id="mode" disabled>
+      <option value="weapon">武器（神工匠技能）</option>
+      <option value="weapon-npc">武器（城鎮精練師）</option>
+      <option value="armor">防具（城鎮精練師）</option>
+    </select>
+    <p id="mode-help"></p>
+    <label for="target">目標精練等級</label>
+    <select id="target" disabled><option value="0">安全值（100% 成功）</option></select>
+    <label class="storage"><input id="storage-materials" type="checkbox" disabled> 從倉庫補足材料</label>
+    <label class="storage"><input id="storage-weapons" type="checkbox" disabled> 從倉庫挑選裝備</label>
+    <label id="auto-equip-option" class="storage" hidden><input id="auto-equip" type="checkbox"> 自動穿戴防具後精練，完成後換回原裝</label>
+    <fieldset id="gear" disabled>
+      <legend>選擇裝備</legend>
+      <div class="equipment-filters">
+        <label>搜尋裝備
+          <input id="equipment-query" type="search" placeholder="名稱或道具 ID">
+        </label>
+        <label>裝備來源
+          <select id="equipment-location">
+            <option value="">全部</option>
+            <option value="bag">背包</option>
+            <option value="worn">已穿戴</option>
+            <option value="storage">倉庫</option>
           </select>
         </label>
-        <label>單價上限（Zeny） <input id="market-price" type="number" min="1" step="1"></label>
-        <label>最多買幾件 <input id="market-qty" type="number" min="1" max="100" value="1"></label>
       </div>
-      <button id="market-search" type="button">搜尋並預覽</button>
-      <button id="market-buy" type="button" disabled>確認批次購買</button>
+      <label><input id="select-all" type="checkbox">全選篩選結果</label>
+      <p id="equipment-count" aria-live="polite"></p>
+      <div id="equipment"></div>
     </fieldset>
-    <p id="market-status" role="status">搜尋各城鎮的攤位，確認後從目前城鎮的最低價開始買。</p>
-    <ul id="market-preview" hidden></ul>
-    <div id="market-other" hidden>
-      <p>其他城鎮 · 到當地後重新搜尋即可購買</p>
-      <ul id="market-remote-list"></ul>
+    <p id="plan"></p>
+    <p id="results" aria-live="polite" hidden></p>
+    <div class="actions">
+      <button id="start" disabled>開始精練</button>
+      <button id="stop" disabled>停止批次</button>
     </div>
-  </details>
-  <label for="mode">精練方式</label>
-  <select id="mode" disabled>
-    <option value="weapon">武器（神工匠技能）</option>
-    <option value="weapon-npc">武器（城鎮精練師）</option>
-    <option value="armor">防具（城鎮精練師）</option>
-  </select>
-  <p id="mode-help"></p>
-  <label for="target">目標精練等級</label>
-  <select id="target" disabled><option value="0">安全值（100% 成功）</option></select>
-  <label class="storage"><input id="storage-materials" type="checkbox" disabled> 從倉庫補足材料</label>
-  <label class="storage"><input id="storage-weapons" type="checkbox" disabled> 從倉庫挑選裝備</label>
-  <label id="auto-equip-option" class="storage" hidden><input id="auto-equip" type="checkbox"> 自動穿戴防具後精練，完成後換回原裝</label>
-  <fieldset id="gear" disabled>
-    <legend>選擇裝備</legend>
-    <div class="equipment-filters">
-      <label>搜尋裝備
-        <input id="equipment-query" type="search" placeholder="名稱或道具 ID">
-      </label>
-      <label>裝備來源
-        <select id="equipment-location">
-          <option value="">全部</option>
-          <option value="bag">背包</option>
-          <option value="worn">已穿戴</option>
-          <option value="storage">倉庫</option>
-        </select>
-      </label>
+  </section>
+  <section id="panel-market" class="tool-panel" role="tabpanel" aria-labelledby="tab-market" hidden>
+    <div id="market">
+      <h2>攤位搜尋與限價購買</h2>
+      <fieldset id="market-fields" disabled>
+        <label>裝備名稱 <input id="market-name" maxlength="40" type="search" placeholder="輸入名稱關鍵字"></label>
+        <div class="market-limits">
+          <label>指定洞數
+            <select id="market-holes">
+              <option value="">請選擇</option>
+              <option value="0">0 洞</option><option value="1">1 洞</option>
+              <option value="2">2 洞</option><option value="3">3 洞</option>
+              <option value="4">4 洞</option>
+            </select>
+          </label>
+          <label>單價上限（Zeny） <input id="market-price" type="number" min="1" step="1"></label>
+          <label>最多買幾件 <input id="market-qty" type="number" min="1" max="100" value="1"></label>
+        </div>
+        <button id="market-search" type="button">搜尋並預覽</button>
+        <button id="market-buy" type="button" disabled>確認批次購買</button>
+      </fieldset>
+      <p id="market-status" role="status">搜尋各城鎮的攤位，確認後從目前城鎮的最低價開始買。</p>
+      <ul id="market-preview" hidden></ul>
+      <div id="market-other" hidden>
+        <p>其他城鎮 · 到當地後重新搜尋即可購買</p>
+        <ul id="market-remote-list"></ul>
+      </div>
     </div>
-    <label><input id="select-all" type="checkbox">全選篩選結果</label>
-    <p id="equipment-count" aria-live="polite"></p>
-    <div id="equipment"></div>
-  </fieldset>
-  <p id="plan"></p>
-  <p id="results" aria-live="polite" hidden></p>
-  <p id="status" role="status" aria-live="polite">讀取遊戲角色中…</p>
-  <div class="actions">
-    <button id="start" disabled>開始精練</button>
-    <button id="stop" disabled>停止批次</button>
+  </section>
+  <section id="panel-growth" class="tool-panel" role="tabpanel" aria-labelledby="tab-growth" hidden>
+    <div id="archer-growth">
+      <h2>弓箭手自動加點與轉生</h2>
+      <p>只作用於目前角色。升級後整批加點，轉生 10 次並達 Base 99／Job 70 時停止。每次轉生需 1,285,000 Zeny。</p>
+      <p>遊戲轉生會停用掛機技能規則和自動屬性配點。</p>
+      <button id="archer-start" type="button" disabled>啟用流程</button>
+      <button id="archer-stop" type="button" disabled>停止流程</button>
+      <p id="archer-status" role="status">尚未啟用。</p>
+    </div>
+  </section>
+  <section id="panel-handoff" class="tool-panel" role="tabpanel" aria-labelledby="tab-handoff" hidden>
+    <details id="handoff">
+      <summary>神射11轉裝備交接</summary>
+      <p>原角色記錄配置並存倉。換到同帳號的新角色後，領裝、重綁並建立同名配置。</p>
+      <button id="handoff-send" type="button" disabled>記錄並存倉</button>
+      <button id="handoff-receive" type="button" disabled>領裝並套用配置</button>
+      <button id="handoff-clear" type="button" hidden>清除本機交接紀錄</button>
+      <p id="handoff-status" role="status"></p>
+    </details>
+    <details id="rebind">
+      <summary>跨角色換裝重綁</summary>
+      <p>在原角色搬裝備前記錄對照。新角色匯入原配置並取出裝備後，即可預覽重綁。已經搬完也可以手動選新裝備。</p>
+      <button id="rebind-capture" type="button" disabled>記錄原角色裝備</button>
+      <button id="rebind-preview" type="button" disabled>預覽目前角色</button>
+      <div id="rebind-rows"></div>
+      <button id="rebind-apply" type="button" disabled>套用換裝重綁</button>
+      <p id="rebind-status" role="status"></p>
+    </details>
+  </section>
+  <footer class="utility">
+    <p id="status" role="status" aria-live="polite">讀取遊戲角色中…</p>
     <button id="refresh" disabled>更新物品</button>
-  </div>
+  </footer>
 </body>
 </html>
