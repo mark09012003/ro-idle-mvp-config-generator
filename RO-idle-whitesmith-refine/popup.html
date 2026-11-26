@@ -10,6 +10,15 @@
 <body>
   <h1>批次裝備精練</h1>
   <p id="character">讀取目前角色中…</p>
+  <details id="rebind">
+    <summary>跨角色換裝重綁</summary>
+    <p>在原角色搬裝備前記錄對照。新角色匯入原配置並取出裝備後，即可預覽重綁。已經搬完也可以手動選新裝備。</p>
+    <button id="rebind-capture" type="button" disabled>記錄原角色裝備</button>
+    <button id="rebind-preview" type="button" disabled>預覽目前角色</button>
+    <div id="rebind-rows"></div>
+    <button id="rebind-apply" type="button" disabled>套用換裝重綁</button>
+    <p id="rebind-status" role="status"></p>
+  </details>
   <details id="archer-growth">
     <summary>弓箭手自動加點與轉生</summary>
     <p>只作用於目前角色。升級後整批加點，轉生 10 次並達 Base 99／Job 70 時停止。每次轉生需 1,285,000 Zeny。</p>

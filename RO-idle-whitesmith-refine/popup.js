@@ -1,3 +1,4 @@
+import {itemFingerprint, remapRules, ruleReferences, suitableItem} from "./rebind.mjs";
 import {marketPlan} from "./market.mjs";
 import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, refineOutcome, restoreEquipment, skillLevel, equipmentPlan} from "./refine.mjs";
 
@@ -19,8 +20,10 @@ const storageMaterials = $("storage-materials");
 const storageWeapons = $("storage-weapons");
 const results = $("results");
 const status = message => { $("status").textContent = message; };
-let catalog, marketSlots, marketTowns, tabId, view, storage, activeRole;
+let catalog, marketSlots, marketTowns, rebindItems, tabId, view, storage, activeRole;
 let marketPreview;
+let rebindPreview;
+const rebindKey = "equipment-rebind-reference";
 let loadVersion = 0;
 let plans = [];
 let busy = false;
@@ -151,6 +154,8 @@ async function loadGear(preserve = false) {
   const version = ++loadVersion;
   $("market-fields").disabled = true;
   clearMarketPreview();
+  clearRebind();
+  $("rebind-capture").disabled = $("rebind-preview").disabled = true;
   const showStorage = storageMaterials.checked || storageWeapons.checked;
   needsRefresh = true;
   mode.disabled = target.disabled = gear.disabled = start.disabled = true;
@@ -181,6 +186,7 @@ async function loadGear(preserve = false) {
     mode.disabled = $("market-fields").disabled = false;
     needsRefresh = false;
     updateMode(preserve);
+    $("rebind-capture").disabled = $("rebind-preview").disabled = false;
     void archerMonitor("status");
   } catch (error) {
     if (version !== loadVersion) return;
@@ -449,6 +455,134 @@ $("market-fields").oninput = () => {
 $("market-search").onclick = previewMarket;
 $("market-buy").onclick = buyMarket;
 
+function clearRebind() {
+  rebindPreview = null;
+  $("rebind-rows").replaceChildren();
+  $("rebind-apply").disabled = true;
+}
+
+async function rebindView() {
+  const role = activeRole;
+  const {activeName, characters} = await gameRequest("/api/characters");
+  if (activeName !== role.name || !characters?.some(entry => entry.id === role.id && entry.name === activeName)) {
+    throw new Error("目前角色已切換，請先更新物品。");
+  }
+  const current = checkView(await gameRequest(`/api/characters/${role.id}?deferCatchup=1`), role.id);
+  if (!current.snapshot.config) throw new Error("讀取不到目前角色的掛機設定。");
+  return current;
+}
+
+function rebindStatus(message) {
+  $("rebind-status").textContent = message;
+}
+
+function equipmentName(item) {
+  const cards = (item.cards ?? []).filter(Boolean).join("、");
+  return `${rebindItems[item.itemId]?.[0] ?? `道具 #${item.itemId}`} +${item.refine ?? 0}${cards ? `（卡片 ${cards}）` : ""}`;
+}
+
+function savedReference() {
+  try { return JSON.parse(localStorage.getItem(rebindKey)); }
+  catch { return null; }
+}
+
+async function captureRebind() {
+  if (!activeRole || busy) return;
+  try {
+    const current = await rebindView();
+    const rules = current.snapshot.config.equipRules ?? [];
+    const refs = ruleReferences(rules);
+    const items = current.snapshot.inventory.filter(item => refs.has(item.uid));
+    if (!items.length) throw new Error("原角色背包裡找不到換裝規則綁定的裝備。");
+    const previous = savedReference();
+    if (previous && !window.confirm(`將原本的 ${previous.name} 裝備對照替換成 ${activeRole.name}？`)) return;
+    localStorage.setItem(rebindKey, JSON.stringify({id: activeRole.id, name: activeRole.name, rules, items}));
+    clearRebind();
+    rebindStatus(`已記錄 ${activeRole.name} 的 ${items.length} 件裝備。`);
+  } catch (error) { rebindStatus(error.message); }
+}
+
+async function previewRebind() {
+  if (!activeRole || busy) return;
+  clearRebind();
+  try {
+    const current = await rebindView();
+    const rules = current.snapshot.config.equipRules ?? [];
+    const refs = ruleReferences(rules);
+    if (!refs.size) throw new Error("目前角色沒有自動換裝規則。請先匯入原配置。");
+    const backup = savedReference();
+    const useBackup = backup && backup.id !== current.characterId &&
+      JSON.stringify(backup.rules) === JSON.stringify(rules);
+    const previous = new Map(useBackup ? backup.items.map(item => [item.uid, item]) : []);
+    const rows = [];
+    for (const [uid, slots] of refs) {
+      const original = previous.get(uid);
+      const eligible = current.snapshot.inventory.filter(item => suitableItem(item, slots, rebindItems));
+      const matches = original ? eligible.filter(item => itemFingerprint(item) === itemFingerprint(original)) : [];
+      const field = document.createElement("select");
+      field.add(new Option("保留原設定", ""));
+      for (const item of eligible) field.add(new Option(`${equipmentName(item)} · UID ${item.uid}`, item.uid));
+      if (matches.length === 1) field.value = String(matches[0].uid);
+      const label = document.createElement("label");
+      const slotNames = {weapon:"主手", shield:"副手", ammo:"箭矢", gear:"其他裝備"};
+      label.textContent = `${[...slots].map(slot => slotNames[slot]).join("／")} · 舊 UID ${uid}` +
+        (original ? ` · ${equipmentName(original)}${matches.length === 1 ? "" : "（需手選）"}` : "");
+      label.append(field);
+      $("rebind-rows").append(label);
+      rows.push({uid, field});
+    }
+    rebindPreview = {current, rows};
+    $("rebind-apply").disabled = false;
+    rebindStatus(useBackup ? `已使用 ${backup.name} 的對照，請核對預選項目。` : "未使用原角色對照，請逐項選擇替換裝備。");
+  } catch (error) { rebindStatus(error.message); }
+}
+
+async function applyRebind() {
+  if (!activeRole || !rebindPreview || busy) return;
+  const {current, rows} = rebindPreview;
+  const mapping = new Map(rows.filter(({field}) => field.value).map(({uid, field}) => [uid, Number(field.value)]));
+  if (!mapping.size) { rebindStatus("請先選擇要重綁的裝備。"); return; }
+  const changed = [...mapping].filter(([old, next]) => old !== next).length;
+  if (!changed) { rebindStatus("選取的裝備 UID 與原設定相同。"); return; }
+  const mappingCount = changed;
+  if (!window.confirm(`確定重綁 ${activeRole.name} 的 ${mappingCount} 個裝備 UID？`)) return;
+  busy = true;
+  $("rebind-apply").disabled = true;
+  try {
+    const fresh = await rebindView();
+    if (fresh.characterId !== current.characterId || fresh.commandRevision !== current.commandRevision ||
+        JSON.stringify(fresh.snapshot.config.equipRules) !== JSON.stringify(current.snapshot.config.equipRules)) {
+      throw new Error("角色狀態已變更，請重新預覽。");
+    }
+    for (const replacement of mapping.values()) {
+      const before = current.snapshot.inventory.find(item => item.uid === replacement);
+      const after = fresh.snapshot.inventory.find(item => item.uid === replacement);
+      if (!before || !after || itemFingerprint(before) !== itemFingerprint(after)) {
+        throw new Error("背包裝備已變更，請重新預覽。");
+      }
+    }
+    const config = fresh.snapshot.config;
+    const equipRules = remapRules(config.equipRules, mapping, fresh.snapshot.inventory);
+    const reply = await gameRequest(`/api/characters/${fresh.characterId}/commands`,
+      guardedCommand(fresh, {type:"updateConfig", config:{...config, equipRules}}));
+    const next = checkView(reply.view, fresh.characterId);
+    const bindings = rules => rules?.map(({weapon, shield, ammo, gear}) => [weapon, shield, ammo, gear ?? []]);
+    if (JSON.stringify(bindings(next.snapshot.config?.equipRules)) !== JSON.stringify(bindings(equipRules))) {
+      throw new Error("伺服器未確認換裝規則，請先檢查遊戲設定。");
+    }
+    rebindStatus(`已重綁 ${mappingCount} 個裝備 UID。`);
+  } catch (error) { rebindStatus(error.message); }
+  finally {
+    busy = false;
+    clearRebind();
+    await loadGear(true);
+  }
+}
+
+$("rebind-capture").onclick = captureRebind;
+$("rebind-preview").onclick = previewRebind;
+$("rebind-apply").onclick = applyRebind;
+
 async function archerMonitor(action) {
   if (!tabId) return;
   try {
@@ -496,7 +630,7 @@ try {
     throw new Error("請先開啟並登入 ro-idle.app 遊戲，再點這個擴充功能。");
   }
   tabId = tab.id;
-  [catalog, marketSlots, marketTowns] = await Promise.all(["catalog.json", "market-slots.json", "market-towns.json"]
+  [catalog, marketSlots, marketTowns, rebindItems] = await Promise.all(["catalog.json", "market-slots.json", "market-towns.json", "rebind-items.json"]
     .map(path => fetch(path).then(response => response.json())));
   refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = false;
   await loadGear();
