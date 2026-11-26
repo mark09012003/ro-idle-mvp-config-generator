@@ -1,3 +1,4 @@
+import {marketPlan} from "./market.mjs";
 import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, refineOutcome, restoreEquipment, skillLevel, equipmentPlan} from "./refine.mjs";
 
 const $ = id => document.getElementById(id);
@@ -18,7 +19,8 @@ const storageMaterials = $("storage-materials");
 const storageWeapons = $("storage-weapons");
 const results = $("results");
 const status = message => { $("status").textContent = message; };
-let catalog, tabId, view, storage, activeRole;
+let catalog, marketSlots, tabId, view, storage, activeRole;
+let marketPreview;
 let loadVersion = 0;
 let plans = [];
 let busy = false;
@@ -145,7 +147,10 @@ async function getStorage() {
 }
 
 async function loadGear(preserve = false) {
+  if (busy) return;
   const version = ++loadVersion;
+  $("market-fields").disabled = true;
+  clearMarketPreview();
   const showStorage = storageMaterials.checked || storageWeapons.checked;
   needsRefresh = true;
   mode.disabled = target.disabled = gear.disabled = start.disabled = true;
@@ -173,7 +178,7 @@ async function loadGear(preserve = false) {
     mode.options[0].disabled = !canUseSkill;
     if (!preserve) mode.value = canUseSkill ? "weapon" : "weapon-npc";
     if (mode.value === "weapon" && !canUseSkill) mode.value = "weapon-npc";
-    mode.disabled = false;
+    mode.disabled = $("market-fields").disabled = false;
     needsRefresh = false;
     updateMode(preserve);
   } catch (error) {
@@ -216,7 +221,8 @@ async function runBatch() {
   let chosen = selectedPlans();
   if (!chosen.length) return;
   const {id, name: roleName} = activeRole;
-  busy = true;
+  busy = $("market-fields").disabled = true;
+  clearMarketPreview();
   cancelled = false;
   mode.disabled = refresh.disabled = gear.disabled = start.disabled = target.disabled = storageMaterials.disabled = storageWeapons.disabled = autoEquip.disabled = true;
   let success = 0;
@@ -306,7 +312,7 @@ async function runBatch() {
     needsRefresh = true;
     status(`批次停止。${error.message} 請更新物品並確認裝備欄。`);
   } finally {
-    busy = false;
+    busy = $("market-fields").disabled = false;
     refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = autoEquip.disabled = false;
     stop.disabled = true;
     mode.disabled = needsRefresh;
@@ -322,6 +328,113 @@ async function runBatch() {
     renderEquipment(!started);
   }
 }
+
+function clearMarketPreview() {
+  marketPreview = null;
+  $("market-preview").hidden = true;
+  $("market-preview").replaceChildren();
+  $("market-buy").disabled = true;
+}
+
+async function searchMarket(role, criteria) {
+  const {characters, activeName} = await gameRequest("/api/characters");
+  if (activeName !== role.name || !characters?.some(entry => entry.id === role.id && entry.name === activeName)) {
+    throw new Error("遊戲分頁已切換角色，請更新物品。");
+  }
+  const current = checkView(await gameRequest(`/api/characters/${role.id}?deferCatchup=1`), role.id);
+  const {mapId, character: {zeny}} = current.snapshot;
+  if (!Number.isSafeInteger(zeny) || zeny < 0) throw new Error("無法確認可用 Zeny。");
+  const response = await gameRequest(`/api/vending?q=${encodeURIComponent(criteria.keyword)}`);
+  if (!Array.isArray(response.shops)) throw new Error("無法讀取攤位。");
+  return marketPlan(response, marketSlots, {id: role.id, mapId, zeny}, criteria);
+}
+
+function lockMarket(locked) {
+  busy = locked;
+  $("market-fields").disabled = locked;
+  mode.disabled = target.disabled = gear.disabled = refresh.disabled =
+    storageMaterials.disabled = storageWeapons.disabled = autoEquip.disabled = locked;
+  if (locked) start.disabled = true;
+  else if (view) updateMode(true);
+}
+
+async function previewMarket() {
+  if (busy || !activeRole) return;
+  const criteria = {
+    keyword: $("market-name").value.trim(),
+    holes: $("market-holes").value === "" ? NaN : Number($("market-holes").value),
+    ceiling: Number($("market-price").value),
+    quantity: Number($("market-qty").value),
+  };
+  clearMarketPreview();
+  if (!criteria.keyword || !Number.isInteger(criteria.holes) ||
+      !Number.isSafeInteger(criteria.ceiling) || criteria.ceiling < 1 ||
+      !Number.isInteger(criteria.quantity) || criteria.quantity < 1 || criteria.quantity > 100) {
+    $("market-status").textContent = "請填寫裝備名稱、指定洞數、單價上限與購買件數（1～100）。";
+    return;
+  }
+  lockMarket(true);
+  try {
+    const plan = await searchMarket(activeRole, criteria);
+    $("market-status").textContent = plan.count
+      ? `預計購買 ${plan.count} 件，合計 ${plan.total.toLocaleString()} Zeny。`
+      : plan.matches ? "目前 Zeny 不足。" : "目前城鎮沒有符合條件的攤位裝備。";
+    if (!plan.count) return;
+    marketPreview = {criteria, plan};
+    $("market-preview").replaceChildren(...plan.orders.map(({seller, item, qty}) => {
+      const line = document.createElement("li");
+      const refine = item.refine ? `+${item.refine} ` : "";
+      const state = [item.unidentified && "未鑑定", item.broken && "損壞", item.cards?.some(Boolean) && "已插卡"].filter(Boolean);
+      line.textContent = `${refine}${item.name}［${criteria.holes} 洞］${state.length ? `（${state.join("、")}）` : ""} · ${item.price.toLocaleString()} Zeny ×${qty} · ${seller}`;
+      return line;
+    }));
+    $("market-preview").hidden = false;
+    $("market-buy").disabled = false;
+  } catch (error) {
+    $("market-status").textContent = error.message;
+  } finally {
+    lockMarket(false);
+  }
+}
+
+async function buyMarket() {
+  if (busy || !activeRole || !marketPreview) return;
+  const {criteria, plan} = marketPreview;
+  const role = activeRole;
+  lockMarket(true);
+  let bought = 0;
+  let paid = 0;
+  let submitted = false;
+  try {
+    const fresh = await searchMarket(role, criteria);
+    if (JSON.stringify(fresh.orders) !== JSON.stringify(plan.orders)) {
+      throw new Error("攤位商品、價格或可購買數量已變動，請重新搜尋。");
+    }
+    for (const {vendorId, item, qty} of fresh.orders) {
+      submitted = true;
+      const {result} = await gameRequest(`/api/characters/${role.id}/vending/buy`, {
+        vendorId, orders: [{cartUid: item.cartUid, qty, price: item.price}],
+      });
+      if (result?.paid !== item.price * qty) throw new Error("未能確認這筆購買金額。");
+      bought += qty;
+      paid += result.paid;
+    }
+    $("market-status").textContent = `已購買 ${bought} 件，共花費 ${paid.toLocaleString()} Zeny。`;
+  } catch (error) {
+    $("market-status").textContent = `購買停止。已確認 ${bought} 件、${paid.toLocaleString()} Zeny。${error.message}${submitted ? " 請先確認背包再重試。" : ""}`;
+  } finally {
+    clearMarketPreview();
+    lockMarket(false);
+    if (submitted) await loadGear(true);
+  }
+}
+
+$("market-fields").oninput = () => {
+  clearMarketPreview();
+  $("market-status").textContent = "條件已變更，請重新搜尋。";
+};
+$("market-search").onclick = previewMarket;
+$("market-buy").onclick = buyMarket;
 
 all.onchange = () => {
   for (const row of selection.children) {
@@ -343,7 +456,8 @@ try {
     throw new Error("請先開啟並登入 ro-idle.app 遊戲，再點這個擴充功能。");
   }
   tabId = tab.id;
-  catalog = await fetch("catalog.json").then(response => response.json());
+  [catalog, marketSlots] = await Promise.all(["catalog.json", "market-slots.json"]
+    .map(path => fetch(path).then(response => response.json())));
   refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = false;
   await loadGear();
 } catch (error) {
