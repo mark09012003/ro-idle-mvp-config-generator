@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>神工匠批次精練</title>
+  <link rel="stylesheet" href="popup.css">
+  <script type="module" src="popup.js"></script>
+</head>
+<body>
+  <h1>神工匠批次精練</h1>
+  <p>使用「武器精練」技能，每級消耗 1 份材料和 5 SP。</p>
+  <label for="character">神工匠角色</label>
+  <select id="character" disabled><option value="">請選擇角色</option></select>
+  <fieldset id="gear" disabled>
+    <legend>選擇背包武器</legend>
+    <label><input id="select-all" type="checkbox">全選可精練武器</label>
+    <div id="weapons"></div>
+  </fieldset>
+  <p id="plan"></p>
+  <p id="status" role="status" aria-live="polite">讀取遊戲角色中…</p>
+  <div class="actions">
+    <button id="start" disabled>開始精練</button>
+    <button id="stop" disabled>停止批次</button>
+    <button id="refresh" disabled>更新背包</button>
+  </div>
+</body>
+</html>

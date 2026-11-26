@@ -1,0 +1,10 @@
+:root { color-scheme: light dark; font: 14px system-ui, sans-serif; }
+body { width: 360px; margin: 0; padding: 16px; }
+h1 { font-size: 18px; margin: 0 0 8px; }
+p { line-height: 1.5; margin: 8px 0; }
+select { display: block; width: 100%; margin: 4px 0 12px; }
+fieldset { border: 1px solid GrayText; border-radius: 8px; }
+#weapons { max-height: 240px; overflow: auto; margin-top: 8px; }
+#weapons label { display: flex; gap: 6px; padding: 5px 0; }
+button, select { font: inherit; padding: 5px 8px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
