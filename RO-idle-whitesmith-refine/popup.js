@@ -181,6 +181,7 @@ async function loadGear(preserve = false) {
     mode.disabled = $("market-fields").disabled = false;
     needsRefresh = false;
     updateMode(preserve);
+    void archerMonitor("status");
   } catch (error) {
     if (version !== loadVersion) return;
     view = storage = activeRole = null;
@@ -447,6 +448,33 @@ $("market-fields").oninput = () => {
 };
 $("market-search").onclick = previewMarket;
 $("market-buy").onclick = buyMarket;
+
+async function archerMonitor(action) {
+  if (!tabId) return;
+  try {
+    if (action === "start") {
+      if (!activeRole || !window.confirm(`啟用 ${activeRole.name} 的弓箭手流程？流程會自動加點、轉職並付費轉生，共計最多 10 次。遊戲會在轉生時停用掛機技能規則和自動配點。`)) return;
+      await chrome.scripting.executeScript({
+        target: {tabId}, files: ["archer-tree.js", "archer-plan.js", "archer-monitor.js"],
+      });
+    }
+    const state = await chrome.tabs.sendMessage(tabId, {feature: "archer-growth", action, role: activeRole});
+    $("archer-status").textContent = state.message;
+    $("archer-start").disabled = state.running || !activeRole;
+    $("archer-stop").disabled = !state.running;
+  } catch (error) {
+    if (action !== "status") $("archer-status").textContent = error.message;
+    $("archer-start").disabled = !activeRole;
+    $("archer-stop").disabled = true;
+  }
+}
+
+$("archer-start").onclick = () => archerMonitor("start");
+$("archer-stop").onclick = () => archerMonitor("stop");
+$("archer-growth").ontoggle = () => archerMonitor("status");
+setInterval(() => {
+  if ($("archer-growth").open) void archerMonitor("status");
+}, 1500);
 
 all.onchange = () => {
   for (const row of selection.children) {

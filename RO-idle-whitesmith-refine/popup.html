@@ -10,6 +10,14 @@
 <body>
   <h1>批次裝備精練</h1>
   <p id="character">讀取目前角色中…</p>
+  <details id="archer-growth">
+    <summary>弓箭手自動加點與轉生</summary>
+    <p>只作用於目前角色。升級後整批加點，轉生 10 次並達 Base 99／Job 70 時停止。每次轉生需 1,285,000 Zeny。</p>
+    <p>遊戲轉生會停用掛機技能規則和自動屬性配點。</p>
+    <button id="archer-start" type="button" disabled>啟用流程</button>
+    <button id="archer-stop" type="button" disabled>停止流程</button>
+    <p id="archer-status" role="status">尚未啟用。</p>
+  </details>
   <details id="market">
     <summary>攤位搜尋與限價購買</summary>
     <fieldset id="market-fields" disabled>
