@@ -33,41 +33,49 @@ let cancelled = false;
 let needsRefresh = false;
 
 async function gameRequest(path, payload) {
-  const [reply] = await chrome.scripting.executeScript({
-    target: {tabId},
-    args: [host, path, payload ?? null, activeRole?.name ?? null],
-    func: async (origin, requestPath, body, expectedName) => {
-      if (location.origin !== origin || location.pathname.startsWith("/info")) {
-        throw new Error("請回到原本的遊戲分頁。");
-      }
-      const classicName = [...document.querySelectorAll(".xp-title .caption")]
-        .map(caption => caption.textContent.trim().match(/^RO放置仙境 - \[(.+)\] .+ Lv\.\d+ \/ Job \d+$/)?.[1])
-        .find(Boolean);
-      const nameNode = document.querySelector(
-        '.ui2-avatar + div > b:first-child, .ui2-mstatus button[aria-label="打開完整狀態"] > b:first-child',
-      );
-      const modernName = nameNode && [...nameNode.childNodes]
-        .filter(node => node.nodeType === Node.TEXT_NODE)
-        .map(node => node.textContent).join("").trim();
-      const name = classicName || modernName;
-      if (body && (!expectedName || name !== expectedName)) return {error: "遊戲分頁已切換角色。"};
-      const response = await fetch(requestPath, {
-        method: body ? "POST" : "GET",
-        credentials: "same-origin",
-        signal: AbortSignal.timeout(15000),
-        ...(body ? {
-          headers: {"content-type": "application/json", "x-ro-client": "1"},
-          body: JSON.stringify(body),
-        } : {}),
-      });
-      const data = await response.json();
-      if (!response.ok) return {error: data.error?.message ?? data.message ?? (typeof data.error === "string" ? data.error : `HTTP ${response.status}`)};
-      return {data, name};
-    },
-  });
-  if (!reply?.result?.data) throw new Error(reply?.result?.error ?? "遊戲未傳回完整結果。");
-  if (path === "/api/characters") return {...reply.result.data, activeName: reply.result.name};
-  return reply.result.data;
+  let timeout;
+  try {
+    const request = chrome.scripting.executeScript({
+      target: {tabId},
+      args: [host, path, payload ?? null, activeRole?.name ?? null],
+      func: async (origin, requestPath, body, expectedName) => {
+        if (location.origin !== origin || location.pathname.startsWith("/info")) {
+          throw new Error("請回到原本的遊戲分頁。");
+        }
+        const classicName = [...document.querySelectorAll(".xp-title .caption")]
+          .map(caption => caption.textContent.trim().match(/^RO放置仙境 - \[(.+)\] .+ Lv\.\d+ \/ Job \d+$/)?.[1])
+          .find(Boolean);
+        const nameNode = document.querySelector(
+          '.ui2-avatar + div > b:first-child, .ui2-mstatus button[aria-label="打開完整狀態"] > b:first-child',
+        );
+        const modernName = nameNode && [...nameNode.childNodes]
+          .filter(node => node.nodeType === Node.TEXT_NODE)
+          .map(node => node.textContent).join("").trim();
+        const name = classicName || modernName;
+        if (body && (!expectedName || name !== expectedName)) return {error: "遊戲分頁已切換角色。"};
+        const response = await fetch(requestPath, {
+          method: body ? "POST" : "GET",
+          credentials: "same-origin",
+          signal: AbortSignal.timeout(15000),
+          ...(body ? {
+            headers: {"content-type": "application/json", "x-ro-client": "1"},
+            body: JSON.stringify(body),
+          } : {}),
+        });
+        const data = await response.json();
+        if (!response.ok) return {error: data.error?.message ?? data.message ?? (typeof data.error === "string" ? data.error : `HTTP ${response.status}`)};
+        return {data, name};
+      },
+    });
+    const [reply] = await Promise.race([request, new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error("讀取遊戲逾時，請確認網路後重試。")), 20000);
+    })]);
+    if (!reply?.result?.data) throw new Error(reply?.result?.error ?? "遊戲未傳回完整結果。");
+    if (path === "/api/characters") return {...reply.result.data, activeName: reply.result.name};
+    return reply.result.data;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function selectedPlans() {
@@ -162,13 +170,15 @@ async function loadGear(preserve = false) {
   const showStorage = storageMaterials.checked || storageWeapons.checked;
   needsRefresh = true;
   mode.disabled = target.disabled = gear.disabled = start.disabled = true;
-  status("讀取物品中…");
+  character.textContent = "讀取目前角色中…";
+  status("正在確認遊戲分頁的角色…");
   try {
     const {characters, activeName} = await gameRequest("/api/characters");
     if (version !== loadVersion) return;
     const matches = (characters ?? []).filter(entry => activeName && entry.name === activeName);
     if (matches.length !== 1) throw new Error("請先在遊戲分頁進入角色，再更新物品。");
     const role = matches[0];
+    status(`正在讀取 ${role.name} 的背包…`);
     const [current, box] = await Promise.all([
       gameRequest(`/api/characters/${role.id}?deferCatchup=1`),
       showStorage ? getStorage() : null,
@@ -822,7 +832,7 @@ async function renderArcherTiming() {
   }
 }
 
-chrome.storage.onChanged.addListener((changes, area) => {
+globalThis.chrome?.storage?.onChanged?.addListener((changes, area) => {
   if (area === "local" && changes[`archer-timing-v1:${activeRole?.id}`]) void renderArcherTiming();
 });
 
@@ -867,21 +877,39 @@ all.onchange = () => {
 selection.onchange = updatePlan;
 query.oninput = locationFilter.onchange = applyEquipmentFilters;
 mode.onchange = () => updateMode(false);
-refresh.onclick = storageMaterials.onchange = storageWeapons.onchange = () => loadGear(true);
+refresh.onclick = () => catalog ? loadGear(true) : initialize();
+storageMaterials.onchange = storageWeapons.onchange = () => loadGear(true);
 target.onchange = autoEquip.onchange = () => renderEquipment(true);
 start.onclick = runBatch;
 stop.onclick = () => { cancelled = true; stop.disabled = true; };
 
-try {
-  const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
-  if (!tab?.url || new URL(tab.url).origin !== host || new URL(tab.url).pathname.startsWith("/info")) {
-    throw new Error("請先開啟並登入 ro-idle.app 遊戲，再點這個擴充功能。");
+async function initialize() {
+  refresh.disabled = true;
+  character.textContent = "讀取目前角色中…";
+  try {
+    if (!chrome.tabs?.query || !chrome.scripting?.executeScript) {
+      throw new Error("擴充權限尚未載入，請在 chrome://extensions 重新載入。");
+    }
+    const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+    if (!tab?.url || new URL(tab.url).origin !== host || new URL(tab.url).pathname.startsWith("/info")) {
+      throw new Error("請先在 ro-idle.app 進入角色，再從 Chrome 工具列開啟擴充。");
+    }
+    tabId = tab.id;
+    [catalog, marketSlots, marketTowns, rebindItems] = await Promise.all(
+      ["catalog.json", "market-slots.json", "market-towns.json", "rebind-items.json"].map(async path => {
+        const response = await fetch(path, {signal: AbortSignal.timeout(10000)});
+        if (!response.ok) throw new Error(`無法載入擴充資料（${path}），請重新載入擴充。`);
+        return response.json();
+      }),
+    );
+    storageMaterials.disabled = storageWeapons.disabled = false;
+    await loadGear();
+  } catch (error) {
+    character.textContent = "無法讀取目前角色";
+    status(error.message);
+  } finally {
+    refresh.disabled = false;
   }
-  tabId = tab.id;
-  [catalog, marketSlots, marketTowns, rebindItems] = await Promise.all(["catalog.json", "market-slots.json", "market-towns.json", "rebind-items.json"]
-    .map(path => fetch(path).then(response => response.json())));
-  refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = false;
-  await loadGear();
-} catch (error) {
-  status(error.message);
 }
+
+await initialize();
