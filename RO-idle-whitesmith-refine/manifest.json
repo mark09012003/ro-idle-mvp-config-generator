@@ -1,9 +1,12 @@
 {
   "manifest_version": 3,
   "name": "RO 放置仙境 · 神工匠批次精練",
-  "version": "1.0.0",
-  "description": "使用神工匠的武器精練技能，將選定的背包武器批次精練到安全值。",
-  "permissions": ["activeTab", "scripting"],
+  "version": "1.1.0",
+  "description": "使用神工匠的武器精練技能批次精練武器，支援倉庫補貨與指定目標等級。",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
   "action": {
     "default_title": "神工匠批次精練",
     "default_popup": "popup.html"

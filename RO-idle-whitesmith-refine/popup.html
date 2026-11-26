@@ -12,17 +12,21 @@
   <p>使用「武器精練」技能，每級消耗 1 份材料和 5 SP。</p>
   <label for="character">神工匠角色</label>
   <select id="character" disabled><option value="">請選擇角色</option></select>
+  <label for="target">目標精練等級</label>
+  <select id="target" disabled><option value="0">安全值（100% 成功）</option></select>
+  <label class="storage"><input id="storage" type="checkbox" disabled> 從倉庫挑選武器並補足材料</label>
   <fieldset id="gear" disabled>
-    <legend>選擇背包武器</legend>
+    <legend>選擇武器</legend>
     <label><input id="select-all" type="checkbox">全選可精練武器</label>
     <div id="weapons"></div>
   </fieldset>
   <p id="plan"></p>
+  <p id="results" aria-live="polite" hidden></p>
   <p id="status" role="status" aria-live="polite">讀取遊戲角色中…</p>
   <div class="actions">
     <button id="start" disabled>開始精練</button>
     <button id="stop" disabled>停止批次</button>
-    <button id="refresh" disabled>更新背包</button>
+    <button id="refresh" disabled>更新物品</button>
   </div>
 </body>
 </html>

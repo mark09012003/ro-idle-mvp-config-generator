@@ -8,3 +8,6 @@ fieldset { border: 1px solid GrayText; border-radius: 8px; }
 #weapons label { display: flex; gap: 6px; padding: 5px 0; }
 button, select { font: inherit; padding: 5px 8px; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.storage { display: block; margin-bottom: 10px; }
+#results { padding: 8px; border: 1px solid GrayText; border-radius: 6px; }
+#plan { white-space: pre-line; }
