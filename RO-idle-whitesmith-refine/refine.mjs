@@ -25,7 +25,7 @@ export function weaponPlan(view, catalog, weapon, targetLevel, source = "bag") {
   return {source, weapon, name, from, target, steps: steps.slice(from, target), rates: rates.slice(from, target)};
 }
 
-export function batchPlan(view, storage, weapons) {
+export function batchPlan(view, storage, weapons, useStorageMaterials) {
   const withdraw = weapons.filter(plan => plan.source === "storage")
     .map(({weapon}) => ({sid: weapon.sid, qty: 1}));
   const materials = new Map();
@@ -49,7 +49,7 @@ export function batchPlan(view, storage, weapons) {
     }
     material.missing = Math.max(0, material.qty - usable);
     let remaining = material.missing;
-    for (const item of storage?.items ?? []) {
+    for (const item of useStorageMaterials ? storage?.items ?? [] : []) {
       if (remaining === 0) break;
       if (item.itemId !== material.id || item.locked) continue;
       const qty = Math.min(remaining, item.qty);

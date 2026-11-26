@@ -10,7 +10,8 @@ const stop = $("stop");
 const refresh = $("refresh");
 const all = $("select-all");
 const target = $("target");
-const useStorage = $("storage");
+const storageMaterials = $("storage-materials");
+const storageWeapons = $("storage-weapons");
 const results = $("results");
 const status = message => { $("status").textContent = message; };
 let catalog, tabId, view, storage;
@@ -54,10 +55,13 @@ function planSummary(chosen, batch) {
   const materials = batch.materials.map(({name, qty, missing}) =>
     `${name} ×${qty}${missing ? `（倉庫補 ${missing}）` : ""}`);
   const stored = chosen.filter(plan => plan.source === "storage").length;
+  const withdrawals = [];
+  if (stored) withdrawals.push(`${stored} 件武器`);
+  if (batch.materials.some(material => material.missing)) withdrawals.push("上列缺少的材料");
   return [
     `${chosen.length} 件武器，最多 ${batch.steps} 次精練，${batch.steps * 5} SP`,
     materials.join("、"),
-    ...(batch.withdraw.length ? [`從倉庫取出 ${stored} 件武器及上列缺少材料，倉庫費 ${batch.fee} Zeny。`] : []),
+    ...(withdrawals.length ? [`從倉庫取出 ${withdrawals.join("及")}，倉庫費 ${batch.fee} Zeny。`] : []),
     ...(chosen.some(plan => plan.rates.some(rate => rate < 100))
       ? ["有精練步驟低於 100% 成功率。失敗時武器和已插入的卡片會消失。"] : []),
   ].join("\n");
@@ -72,7 +76,7 @@ function updatePlan() {
   summary.textContent = "";
   if (busy || needsRefresh || !chosen.length) return;
   try {
-    summary.textContent = planSummary(chosen, batchPlan(view, storage, chosen));
+    summary.textContent = planSummary(chosen, batchPlan(view, storage, chosen, storageMaterials.checked));
     start.disabled = false;
   } catch (error) {
     summary.textContent = error.message;
@@ -88,7 +92,7 @@ function renderWeapons(preserve = false) {
   const level = Number(target.value);
   plans = [
     ...(view?.snapshot?.inventory ?? []).map(item => weaponPlan(view, catalog, item, level)),
-    ...(storage?.items ?? []).map(item => weaponPlan(view, catalog, item, level, "storage")),
+    ...(storageWeapons.checked ? storage?.items ?? [] : []).map(item => weaponPlan(view, catalog, item, level, "storage")),
   ].filter(Boolean);
   selection.replaceChildren(...plans.map(plan => {
     const label = document.createElement("label");
@@ -113,7 +117,7 @@ async function getStorage() {
 async function loadGear(preserve = false) {
   const id = Number(character.value);
   const version = ++loadVersion;
-  const showStorage = useStorage.checked;
+  const showStorage = storageMaterials.checked || storageWeapons.checked;
   needsRefresh = true;
   target.disabled = true;
   gear.disabled = start.disabled = true;
@@ -169,7 +173,7 @@ async function runBatch() {
   const roleName = character.selectedOptions[0].text;
   busy = true;
   cancelled = false;
-  character.disabled = refresh.disabled = gear.disabled = start.disabled = target.disabled = useStorage.disabled = true;
+  character.disabled = refresh.disabled = gear.disabled = start.disabled = target.disabled = storageMaterials.disabled = storageWeapons.disabled = true;
   let success = 0;
   let failure = 0;
   let uncertain = 0;
@@ -183,7 +187,7 @@ async function runBatch() {
         if (JSON.stringify(item) !== JSON.stringify(plan.weapon)) throw new Error("選取的倉庫武器已變更。");
       }
     }
-    const batch = batchPlan(view, storage, chosen);
+    const batch = batchPlan(view, storage, chosen, storageMaterials.checked);
     const weapons = chosen.map(plan =>
       `${plan.source === "storage" ? "倉庫" : "背包"} · ${plan.name} +${plan.from} → +${plan.target}`);
     if (!window.confirm(`確定由 ${roleName} 執行神工匠武器精練？\n${planSummary(chosen, batch)}\n\n${weapons.join("\n")}`)) return;
@@ -191,7 +195,7 @@ async function runBatch() {
     results.hidden = true;
     stop.disabled = false;
     if (batch.withdraw.length) {
-      status("正在從倉庫取出武器及材料…");
+      status("正在取出倉庫物品…");
       const payload = guardedCommand(view, {type: "storageWithdraw", items: batch.withdraw});
       const reply = await gameRequest(`/api/characters/${id}/commands`, payload);
       const next = checkView(reply.view, id);
@@ -228,7 +232,7 @@ async function runBatch() {
     status(`批次停止。${error.message} 請更新物品確認結果。`);
   } finally {
     busy = false;
-    character.disabled = refresh.disabled = useStorage.disabled = false;
+    character.disabled = refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = false;
     stop.disabled = true;
     target.disabled = needsRefresh || skillLevel(view) < 1;
     if (started) {
@@ -252,7 +256,7 @@ character.onchange = () => {
   results.hidden = true;
   loadGear();
 };
-refresh.onclick = useStorage.onchange = () => loadGear(true);
+refresh.onclick = storageMaterials.onchange = storageWeapons.onchange = () => loadGear(true);
 target.onchange = () => renderWeapons(true);
 start.onclick = runBatch;
 stop.onclick = () => { cancelled = true; stop.disabled = true; };
@@ -270,7 +274,7 @@ try {
   catalog = items;
   const smiths = (roster.characters ?? []).filter(entry => entry.job === "whitesmith");
   for (const entry of smiths) character.append(new Option(entry.name, String(entry.id)));
-  character.disabled = refresh.disabled = useStorage.disabled = !smiths.length;
+  character.disabled = refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = !smiths.length;
   status(smiths.length ? "請選擇神工匠角色。" : "目前帳號找不到神工匠角色。");
 } catch (error) {
   status(error.message);
