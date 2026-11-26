@@ -192,6 +192,7 @@ async function loadGear(preserve = false) {
     $("rebind-capture").disabled = $("rebind-preview").disabled = false;
     updateHandoff();
     void archerMonitor("status");
+    if (!$("panel-growth").hidden) void renderArcherTiming();
   } catch (error) {
     if (version !== loadVersion) return;
     view = storage = activeRole = null;
@@ -748,7 +749,7 @@ async function archerMonitor(action) {
     if (action === "start") {
       if (!activeRole || !window.confirm(`啟用 ${activeRole.name} 的弓箭手流程？流程會自動加點、轉職並付費轉生，共計最多 10 次。遊戲會在轉生時停用掛機技能規則和自動配點。`)) return;
       await chrome.scripting.executeScript({
-        target: {tabId}, files: ["archer-tree.js", "archer-plan.js", "archer-monitor.js"],
+        target: {tabId}, files: ["archer-tree.js", "archer-plan.js", "archer-timing.js", "archer-monitor.js"],
       });
     }
     const state = await chrome.tabs.sendMessage(tabId, {feature: "archer-growth", action, role: activeRole});
@@ -769,6 +770,62 @@ setInterval(() => {
   if (!$("panel-growth").hidden) void archerMonitor("status");
 }, 1500);
 
+const timingDate = new Intl.DateTimeFormat("zh-TW", {dateStyle:"short", timeStyle:"medium"});
+let timingRenderKey = "";
+
+function timingDuration(ms) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  return `${hours} 小時 ${minutes} 分 ${seconds % 60} 秒`;
+}
+
+async function renderArcherTiming() {
+  const id = activeRole?.id;
+  const target = $("archer-timing");
+  if (!id) {
+    timingRenderKey = "";
+    target.textContent = "請先進入遊戲角色。";
+    return;
+  }
+  const key = `archer-timing-v1:${id}`;
+  try {
+    const data = await chrome.storage.local.get(key);
+    if (activeRole?.id !== id) return;
+    const rounds = data[key] ?? [];
+    const signature = JSON.stringify([id, rounds]);
+    if (signature === timingRenderKey) return;
+    timingRenderKey = signature;
+    if (!rounds.length) {
+      target.textContent = "尚無紀錄。啟用自動加點後開始計時。";
+      return;
+    }
+    target.replaceChildren(...[...rounds].reverse().map((round, index) => {
+      const block = document.createElement("details");
+      block.open = index === 0;
+      const summary = document.createElement("summary");
+      const title = round.cycle ? `第 ${round.cycle} 轉` : "轉生前";
+      const duration = round.end ? timingDuration(round.end - round.start) : index === 0 ? "計時未結算" : "結束時間未記錄";
+      summary.textContent = `${title} · ${round.partial ? "部分紀錄 · " : ""}${duration}`;
+      const events = document.createElement("ol");
+      for (const event of round.events) {
+        const row = document.createElement("li");
+        row.textContent = `${timingDate.format(event.at)} · ${event.label}（+${timingDuration(event.at - round.start)}）`;
+        events.append(row);
+      }
+      block.append(summary, events);
+      return block;
+    }));
+  } catch {
+    timingRenderKey = "";
+    target.textContent = "無法讀取本機計時紀錄。";
+  }
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes[`archer-timing-v1:${activeRole?.id}`]) void renderArcherTiming();
+});
+
 const tabs = [...$("tool-tabs").querySelectorAll('[role="tab"]')];
 
 function activateToolTab(active, focus = false) {
@@ -779,7 +836,10 @@ function activateToolTab(active, focus = false) {
     $(tab.getAttribute("aria-controls")).hidden = !selected;
   }
   if (focus) active.focus();
-  if (active.id === "tab-growth") void archerMonitor("status");
+  if (active.id === "tab-growth") {
+    void archerMonitor("status");
+    void renderArcherTiming();
+  }
 }
 
 for (const tab of tabs) {

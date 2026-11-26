@@ -66,6 +66,18 @@
     return view;
   }
 
+  async function track(view, confirmedRebirth = false) {
+    try {
+      const key = globalThis.roArcherTiming.key(role.id);
+      const stored = await chrome.storage.local.get(key);
+      const rounds = globalThis.roArcherTiming.recordProgress(stored[key] ?? [],
+        view.snapshot.character, Date.now(), confirmedRebirth);
+      if (rounds) await chrome.storage.local.set({[key]: rounds});
+    } catch (error) {
+      console.warn("RO 弓箭手計時儲存失敗", error);
+    }
+  }
+
   async function run() {
     if (!observing || inFlight) return;
     inFlight = true;
@@ -73,6 +85,7 @@
     try {
       const path = `/api/characters/${role.id}`;
       let view = checkedView(await request(`${path}?deferCatchup=1`));
+      await track(view);
       while (observing) {
         if (displayedCharacter()?.name !== role.name) {
           stop("找不到原本的遊戲角色，流程已停止。");
@@ -109,6 +122,7 @@
             throw new Error("伺服器未確認全部技能等級。");
           }
         }
+        await track(next, command.type === "rebirth");
         view = next;
       }
     } catch (error) {

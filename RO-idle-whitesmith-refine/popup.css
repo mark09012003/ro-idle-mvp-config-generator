@@ -35,3 +35,7 @@ button, select { font: inherit; padding: 5px 8px; }
 .tool-panel h2 { margin: 0 0 8px; font-size: 15px; }
 .utility { margin-top: 12px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, GrayText 35%, Canvas); }
 .utility p { margin: 0 0 6px; }
+#archer-timing details { margin-bottom: 8px; }
+#archer-timing summary { cursor: pointer; font-weight: 600; }
+#archer-timing ol { font-size: 12px; padding-left: 22px; }
+#archer-timing li { margin-bottom: 4px; }
