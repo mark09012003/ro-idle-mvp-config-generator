@@ -7,28 +7,41 @@ export function skillLevel(view) {
 export function equipmentPlan(view, catalog, item, targetLevel, source, mode) {
   const snapshot = view?.snapshot;
   const armor = mode === "armor";
+  const usesSkill = mode === "weapon";
   const definition = (armor ? catalog.armor : catalog.weapon)[item?.itemId];
-  const cap = armor ? 10 : skillLevel(view);
+  const cap = usesSkill ? skillLevel(view) : 10;
   if (view?.running !== false || cap < 1 || !definition || item.qty !== 1 ||
       item.locked || item.unidentified || item.broken) return null;
-  if (armor && !catalog.refineTowns.includes(snapshot.mapId)) return null;
+  if (!usesSkill && !catalog.refineTowns.includes(snapshot.mapId)) return null;
 
   const worn = source === "bag" && Object.values(snapshot.equipment).includes(item.uid);
-  if (worn && !armor) return null;
+  if (worn && usesSkill) return null;
   const [name, level] = definition;
   const from = item.refine ?? 0;
   const steps = catalog.steps[level];
   const jobLv = snapshot.character.jobLv;
-  if ((!armor && !Number.isInteger(jobLv)) || !Number.isInteger(from) || from < 0) return null;
+  if ((usesSkill && !Number.isInteger(jobLv)) || !Number.isInteger(from) || from < 0) return null;
 
-  const bonus = armor ? 0 : Math.trunc((jobLv - 50) / 2);
+  const bonus = usesSkill ? Math.trunc((jobLv - 50) / 2) : 0;
   const rates = steps.map(([, , rate]) => Math.max(0, Math.min(100, rate + bonus)));
   const firstRisk = rates.findIndex(rate => rate < 100);
   const safe = firstRisk < 0 ? rates.length : firstRisk;
   const target = targetLevel || Math.min(cap, safe);
-  if (target <= from || target > cap || target > steps.length || (armor && !worn && target !== safe)) return null;
-  const method = armor ? (worn ? "npc" : "safe") : "skill";
+  if (target <= from || target > cap || target > steps.length || (!usesSkill && !worn && target !== safe)) return null;
+  const method = usesSkill ? "skill" : worn ? "npc" : "safe";
   return {source, item, name, from, target, mode, method, steps: steps.slice(from, target), rates: rates.slice(from, target)};
+}
+
+export function equipmentLocation(plan) {
+  if (plan.source === "storage") return "storage";
+  return plan.method === "npc" ? "worn" : "bag";
+}
+
+export function matchesEquipment(plan, query, location) {
+  const term = query.trim().normalize("NFKC").toLowerCase();
+  const name = plan.name.normalize("NFKC").toLowerCase();
+  return (!location || equipmentLocation(plan) === location) &&
+    (!term || name.includes(term) || String(plan.item.itemId) === term);
 }
 
 export function batchPlan(view, storage, equipment, useStorageMaterials) {
@@ -43,7 +56,7 @@ export function batchPlan(view, storage, equipment, useStorageMaterials) {
       material.qty++;
       materials.set(id, material);
       steps++;
-      zeny += price;
+      if (plan.method !== "skill") zeny += price;
     }
   }
 

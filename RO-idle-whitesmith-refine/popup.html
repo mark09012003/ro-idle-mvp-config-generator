@@ -10,9 +10,10 @@
 <body>
   <h1>批次裝備精練</h1>
   <p id="character">讀取目前角色中…</p>
-  <label for="mode">裝備類型</label>
+  <label for="mode">精練方式</label>
   <select id="mode" disabled>
     <option value="weapon">武器（神工匠技能）</option>
+    <option value="weapon-npc">武器（城鎮精練師）</option>
     <option value="armor">防具（城鎮精練師）</option>
   </select>
   <p id="mode-help"></p>
@@ -22,7 +23,21 @@
   <label class="storage"><input id="storage-weapons" type="checkbox" disabled> 從倉庫挑選裝備</label>
   <fieldset id="gear" disabled>
     <legend>選擇裝備</legend>
-    <label><input id="select-all" type="checkbox">全選可精練裝備</label>
+    <div class="equipment-filters">
+      <label>搜尋裝備
+        <input id="equipment-query" type="search" placeholder="名稱或道具 ID">
+      </label>
+      <label>裝備來源
+        <select id="equipment-location">
+          <option value="">全部</option>
+          <option value="bag">背包</option>
+          <option value="worn">已穿戴</option>
+          <option value="storage">倉庫</option>
+        </select>
+      </label>
+    </div>
+    <label><input id="select-all" type="checkbox">全選篩選結果</label>
+    <p id="equipment-count" aria-live="polite"></p>
     <div id="equipment"></div>
   </fieldset>
   <p id="plan"></p>

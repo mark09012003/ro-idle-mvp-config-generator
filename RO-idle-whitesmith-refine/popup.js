@@ -1,4 +1,4 @@
-import {associateWithdrawnEquipment, batchPlan, guardedCommand, nextRefineCommand, refineOutcome, skillLevel, equipmentPlan} from "./refine.mjs";
+import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, refineOutcome, skillLevel, equipmentPlan} from "./refine.mjs";
 
 const $ = id => document.getElementById(id);
 const host = "https://ro-idle.app";
@@ -6,6 +6,8 @@ const character = $("character");
 const gear = $("gear");
 const selection = $("equipment");
 const mode = $("mode");
+const query = $("equipment-query");
+const locationFilter = $("equipment-location");
 const start = $("start");
 const stop = $("stop");
 const refresh = $("refresh");
@@ -72,7 +74,7 @@ function planSummary(chosen, batch) {
   if (stored) withdrawals.push(`${stored} 件裝備`);
   if (batch.materials.some(material => material.missing)) withdrawals.push("上列缺少的材料");
   return [
-    `${chosen.length} 件裝備，最多 ${batch.steps} 次精練，${mode.value === "armor" ? `精練費 ${batch.zeny} Zeny` : `${batch.steps * 5} SP`}`,
+    `${chosen.length} 件裝備，最多 ${batch.steps} 次精練，${mode.value === "weapon" ? `${batch.steps * 5} SP` : `精練費 ${batch.zeny} Zeny`}`,
     materials.join("、"),
     ...(withdrawals.length ? [`從倉庫取出 ${withdrawals.join("及")}，倉庫費 ${batch.fee} Zeny。`] : []),
     ...(chosen.some(plan => plan.rates.some(rate => rate < 100))
@@ -82,8 +84,14 @@ function planSummary(chosen, batch) {
 
 function updatePlan() {
   const chosen = selectedPlans();
-  all.checked = plans.length > 0 && chosen.length === plans.length;
-  all.indeterminate = chosen.length > 0 && !all.checked;
+  const visible = [...selection.children].filter(row => !row.hidden);
+  const visibleSelected = visible.filter(row => row.firstElementChild.checked).length;
+  const hiddenSelected = chosen.length - visibleSelected;
+  all.disabled = visible.length === 0;
+  all.checked = visible.length > 0 && visibleSelected === visible.length;
+  all.indeterminate = visibleSelected > 0 && !all.checked;
+  $("equipment-count").textContent = `顯示 ${visible.length} ／ ${plans.length} 件 · 已選 ${chosen.length} 件` +
+    (hiddenSelected ? `（含篩選隱藏的 ${hiddenSelected} 件）` : "");
   start.disabled = true;
   const summary = $("plan");
   summary.textContent = "";
@@ -112,12 +120,19 @@ function renderEquipment(preserve = false) {
     const input = document.createElement("input");
     input.type = "checkbox";
     input.checked = checked.has(planKey(plan));
-    const source = plan.source === "storage" ? "倉庫" : plan.method === "npc" ? "已穿戴" : "背包";
+    const source = {storage: "倉庫", worn: "已穿戴", bag: "背包"}[equipmentLocation(plan)];
     const lowest = Math.min(...plan.rates);
     label.append(input, `[${source}] ${plan.name} +${plan.from} → +${plan.target}（#${plan.item.uid ?? plan.item.sid}${lowest < 100 ? `，最低單步 ${lowest}%` : ""}）`);
     return label;
   }));
   gear.disabled = busy || needsRefresh || !plans.length;
+  applyEquipmentFilters();
+}
+
+function applyEquipmentFilters() {
+  for (const [index, row] of [...selection.children].entries()) {
+    row.hidden = !matchesEquipment(plans[index], query.value, locationFilter.value);
+  }
   updatePlan();
 }
 
@@ -154,8 +169,8 @@ async function loadGear(preserve = false) {
     character.textContent = `目前角色：${role.name}`;
     const canUseSkill = skillLevel(view) > 0;
     mode.options[0].disabled = !canUseSkill;
-    if (!preserve) mode.value = canUseSkill ? "weapon" : "armor";
-    if (mode.value === "weapon" && !canUseSkill) mode.value = "armor";
+    if (!preserve) mode.value = canUseSkill ? "weapon" : "weapon-npc";
+    if (mode.value === "weapon" && !canUseSkill) mode.value = "weapon-npc";
     mode.disabled = false;
     needsRefresh = false;
     updateMode(preserve);
@@ -169,19 +184,19 @@ async function loadGear(preserve = false) {
 }
 
 function updateMode(preserve) {
-  const armor = mode.value === "armor";
+  const usesSkill = mode.value === "weapon";
   const previousLevel = preserve ? Number(target.value) : 0;
-  const cap = armor ? 10 : skillLevel(view);
-  const hasNpc = armor && catalog.refineTowns.includes(view.snapshot.mapId);
-  $("mode-help").textContent = armor
-    ? "防具須在有精練師的城鎮精練。未穿戴的防具只能直接精練到安全值。"
-    : "使用神工匠的武器精練技能，每級消耗 1 份材料和 5 SP。";
+  const cap = usesSkill ? skillLevel(view) : 10;
+  const hasNpc = catalog.refineTowns.includes(view.snapshot.mapId);
+  $("mode-help").textContent = usesSkill
+    ? "使用神工匠的武器精練技能，每級消耗 1 份材料和 5 SP。"
+    : "須在有精練師的城鎮。未穿戴的裝備只能直接精練到安全值。";
   target.replaceChildren(new Option("安全值（100% 成功）", "0"));
   for (let level = 1; level <= cap; level++) target.add(new Option(`+${level}`, level));
   target.value = String(previousLevel <= cap ? previousLevel : 0);
-  target.disabled = needsRefresh || view.running || (armor && !hasNpc);
+  target.disabled = needsRefresh || view.running || (!usesSkill && !hasNpc);
   renderEquipment(preserve);
-  status(view.running ? "請先停止角色掛機。" : armor && !hasNpc
+  status(view.running ? "請先停止角色掛機。" : !usesSkill && !hasNpc
     ? "請先到有精練師的城鎮。" : plans.length
       ? "請勾選要精練的裝備。" : "沒有符合目前目標的裝備。");
 }
@@ -278,10 +293,13 @@ async function runBatch() {
 }
 
 all.onchange = () => {
-  for (const label of selection.children) label.firstElementChild.checked = all.checked;
+  for (const row of selection.children) {
+    if (!row.hidden) row.firstElementChild.checked = all.checked;
+  }
   updatePlan();
 };
 selection.onchange = updatePlan;
+query.oninput = locationFilter.onchange = applyEquipmentFilters;
 mode.onchange = () => updateMode(false);
 refresh.onclick = storageMaterials.onchange = storageWeapons.onchange = () => loadGear(true);
 target.onchange = () => renderEquipment(true);

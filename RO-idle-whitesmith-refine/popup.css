@@ -11,3 +11,8 @@ button, select { font: inherit; padding: 5px 8px; }
 .storage { display: block; margin-bottom: 10px; }
 #results { padding: 8px; border: 1px solid GrayText; border-radius: 6px; }
 #plan { white-space: pre-line; }
+.equipment-filters { display: grid; grid-template-columns: minmax(0, 1fr) 105px; gap: 8px; }
+.equipment-filters input, .equipment-filters select { box-sizing: border-box; width: 100%; margin: 4px 0 8px; }
+.equipment-filters input { font: inherit; padding: 5px 8px; }
+#equipment-count { font-size: 12px; }
+#equipment label[hidden] { display: none; }
