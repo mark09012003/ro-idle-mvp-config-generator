@@ -84,7 +84,7 @@
     } else if (ready && baseLv >= 99 && jobLv >= (job === "hunter" ? 50 : 70)) {
       const cycle = rebirth ? (rebirth.count ?? 0) + 1 : 0;
       if (job === "sniper" && cycle >= 10 && points === 0) {
-        return {stop: true, message: "已完成第 10 次轉生，達到 Base 99／Job 70。"};
+        return {stop: true, message: "已達第 10 次轉生的 Base 99／Job 70，自動加點與轉職流程結束，掛機照常。"};
       }
       if (points > 0) return {stop: true, message: "仍有技能點，但目前沒有可自動分配的技能。"};
       if (!(character.zeny >= fee)) return {stop: true, message: "轉生需要 1,285,000 Zeny，補足後可重新啟用。"};
