@@ -16,3 +16,5 @@ button, select { font: inherit; padding: 5px 8px; }
 .equipment-filters input { font: inherit; padding: 5px 8px; }
 #equipment-count { font-size: 12px; }
 #equipment label[hidden] { display: none; }
+
+#auto-equip-option[hidden] { display: none; }

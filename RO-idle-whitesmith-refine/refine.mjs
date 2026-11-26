@@ -4,7 +4,7 @@ export function skillLevel(view) {
   return character?.job === "whitesmith" && Number.isInteger(skill) ? Math.min(10, skill) : 0;
 }
 
-export function equipmentPlan(view, catalog, item, targetLevel, source, mode) {
+export function equipmentPlan(view, catalog, item, targetLevel, source, mode, autoEquip = false) {
   const snapshot = view?.snapshot;
   const armor = mode === "armor";
   const usesSkill = mode === "weapon";
@@ -16,7 +16,7 @@ export function equipmentPlan(view, catalog, item, targetLevel, source, mode) {
 
   const worn = source === "bag" && Object.values(snapshot.equipment).includes(item.uid);
   if (worn && usesSkill) return null;
-  const [name, level] = definition;
+  const [name, level, equipLevel, jobs] = definition;
   const from = item.refine ?? 0;
   const steps = catalog.steps[level];
   const jobLv = snapshot.character.jobLv;
@@ -27,14 +27,19 @@ export function equipmentPlan(view, catalog, item, targetLevel, source, mode) {
   const firstRisk = rates.findIndex(rate => rate < 100);
   const safe = firstRisk < 0 ? rates.length : firstRisk;
   const target = targetLevel || Math.min(cap, safe);
-  if (target <= from || target > cap || target > steps.length || (!usesSkill && !worn && target !== safe)) return null;
-  const method = usesSkill ? "skill" : worn ? "npc" : "safe";
-  return {source, item, name, from, target, mode, method, steps: steps.slice(from, target), rates: rates.slice(from, target)};
+  const needsEquip = armor && !worn && target !== safe;
+  const canEquip = autoEquip && snapshot.character.baseLv >= equipLevel &&
+    (jobs === "all" || jobs?.includes(snapshot.character.job));
+  if (target <= from || target > cap || target > steps.length ||
+      (!usesSkill && !worn && target !== safe && !(needsEquip && canEquip))) return null;
+  const method = usesSkill ? "skill" : worn || needsEquip ? "npc" : "safe";
+  return {source, item, name, from, target, mode, method, needsEquip, worn,
+    steps: steps.slice(from, target), rates: rates.slice(from, target)};
 }
 
 export function equipmentLocation(plan) {
   if (plan.source === "storage") return "storage";
-  return plan.method === "npc" ? "worn" : "bag";
+  return plan.worn ? "worn" : "bag";
 }
 
 export function matchesEquipment(plan, query, location) {
@@ -143,4 +148,32 @@ export function refineOutcome(view, plan, level) {
   if (!updated && plan.rates[level - plan.from] < 100) return "failure";
   if (updated?.itemId === plan.item.itemId && updated.refine === (plan.method === "safe" ? plan.target : level + 1) && !updated.broken) return "success";
   throw new Error("伺服器未確認預期精練結果。");
+}
+
+// Remove the temporary item first so restoring an accessory uses its original slot.
+export async function restoreEquipment(view, original, temporaryUid, catalog, send) {
+  const equipment = view.snapshot.equipment;
+  const temporarySlot = Object.keys(equipment).find(slot => equipment[slot] === temporaryUid);
+  const unexpected = Object.keys(equipment).some(slot =>
+    equipment[slot] != null && equipment[slot] !== temporaryUid && equipment[slot] !== original[slot]);
+  if (unexpected) throw new Error("裝備欄已有其他變動。");
+  if (temporarySlot) {
+    view = await send(view, {type: "unequip", slot: temporarySlot});
+    if (view.snapshot.equipment[temporarySlot] != null) throw new Error("暫時穿戴的防具未卸下。");
+  }
+
+  for (const [slot, uid] of Object.entries(original)) {
+    if (uid == null || view.snapshot.equipment[slot] === uid) continue;
+    const item = view.snapshot.inventory.find(item => item.uid === uid);
+    if (!item) throw new Error("原裝備已不在背包。");
+    const command = {type: "equip", uid};
+    if (slot === "shield" && catalog.weaponIds.includes(item.itemId)) command.hand = "left";
+    view = await send(view, command);
+    if (view.snapshot.equipment[slot] !== uid) throw new Error("原裝備無法回到原本欄位。");
+  }
+  const slots = new Set([...Object.keys(view.snapshot.equipment), ...Object.keys(original)]);
+  if ([...slots].some(slot => (view.snapshot.equipment[slot] ?? null) !== (original[slot] ?? null))) {
+    throw new Error("原裝備欄位未完整還原。");
+  }
+  return view;
 }

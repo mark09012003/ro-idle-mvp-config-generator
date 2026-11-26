@@ -1,4 +1,4 @@
-import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, refineOutcome, skillLevel, equipmentPlan} from "./refine.mjs";
+import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, refineOutcome, restoreEquipment, skillLevel, equipmentPlan} from "./refine.mjs";
 
 const $ = id => document.getElementById(id);
 const host = "https://ro-idle.app";
@@ -6,6 +6,7 @@ const character = $("character");
 const gear = $("gear");
 const selection = $("equipment");
 const mode = $("mode");
+const autoEquip = $("auto-equip");
 const query = $("equipment-query");
 const locationFilter = $("equipment-location");
 const start = $("start");
@@ -112,8 +113,8 @@ function renderEquipment(preserve = false) {
   const checked = new Set(preserve ? selectedPlans().map(planKey) : []);
   const level = Number(target.value);
   plans = [
-    ...(view?.snapshot?.inventory ?? []).map(item => equipmentPlan(view, catalog, item, level, "bag", mode.value)),
-    ...(storageWeapons.checked ? storage?.items ?? [] : []).map(item => equipmentPlan(view, catalog, item, level, "storage", mode.value)),
+    ...(view?.snapshot?.inventory ?? []).map(item => equipmentPlan(view, catalog, item, level, "bag", mode.value, autoEquip.checked)),
+    ...(storageWeapons.checked ? storage?.items ?? [] : []).map(item => equipmentPlan(view, catalog, item, level, "storage", mode.value, autoEquip.checked)),
   ].filter(Boolean);
   selection.replaceChildren(...plans.map(plan => {
     const label = document.createElement("label");
@@ -122,7 +123,8 @@ function renderEquipment(preserve = false) {
     input.checked = checked.has(planKey(plan));
     const source = {storage: "倉庫", worn: "已穿戴", bag: "背包"}[equipmentLocation(plan)];
     const lowest = Math.min(...plan.rates);
-    label.append(input, `[${source}] ${plan.name} +${plan.from} → +${plan.target}（#${plan.item.uid ?? plan.item.sid}${lowest < 100 ? `，最低單步 ${lowest}%` : ""}）`);
+    const auto = plan.needsEquip ? "，自動穿戴" : "";
+    label.append(input, `[${source}] ${plan.name} +${plan.from} → +${plan.target}（#${plan.item.uid ?? plan.item.sid}${lowest < 100 ? `，最低單步 ${lowest}%` : ""}${auto}）`);
     return label;
   }));
   gear.disabled = busy || needsRefresh || !plans.length;
@@ -185,12 +187,13 @@ async function loadGear(preserve = false) {
 
 function updateMode(preserve) {
   const usesSkill = mode.value === "weapon";
+  $("auto-equip-option").hidden = mode.value !== "armor";
   const previousLevel = preserve ? Number(target.value) : 0;
   const cap = usesSkill ? skillLevel(view) : 10;
   const hasNpc = catalog.refineTowns.includes(view.snapshot.mapId);
   $("mode-help").textContent = usesSkill
     ? "使用神工匠的武器精練技能，每級消耗 1 份材料和 5 SP。"
-    : "須在有精練師的城鎮。未穿戴的裝備只能直接精練到安全值。";
+    : "須在有精練師的城鎮。未穿戴的裝備可直接精練到安全值，其他等級需要穿戴。";
   target.replaceChildren(new Option("安全值（100% 成功）", "0"));
   for (let level = 1; level <= cap; level++) target.add(new Option(`+${level}`, level));
   target.value = String(previousLevel <= cap ? previousLevel : 0);
@@ -215,7 +218,7 @@ async function runBatch() {
   const {id, name: roleName} = activeRole;
   busy = true;
   cancelled = false;
-  mode.disabled = refresh.disabled = gear.disabled = start.disabled = target.disabled = storageMaterials.disabled = storageWeapons.disabled = true;
+  mode.disabled = refresh.disabled = gear.disabled = start.disabled = target.disabled = storageMaterials.disabled = storageWeapons.disabled = autoEquip.disabled = true;
   let success = 0;
   let failure = 0;
   let uncertain = 0;
@@ -232,7 +235,8 @@ async function runBatch() {
     const batch = batchPlan(view, storage, chosen, storageMaterials.checked);
     const items = chosen.map(plan =>
       `${plan.source === "storage" ? "倉庫" : "背包"} · ${plan.name} +${plan.from} → +${plan.target}`);
-    if (!window.confirm(`確定由 ${roleName} 執行批次精練？\n${planSummary(chosen, batch)}\n\n${items.join("\n")}`)) return;
+    const equipNote = chosen.some(plan => plan.needsEquip) ? "\n將暫時更換防具，請保持擴充視窗開啟，直到原裝備還原。" : "";
+    if (!window.confirm(`確定由 ${roleName} 執行批次精練？\n${planSummary(chosen, batch)}${equipNote}\n\n${items.join("\n")}`)) return;
     started = true;
     results.hidden = true;
     stop.disabled = false;
@@ -247,36 +251,63 @@ async function runBatch() {
       chosen = chosen.map(plan => ({...plan, uid: plan.item.uid}));
     }
 
+    const send = async (current, command) => {
+      const reply = await gameRequest(`/api/characters/${id}/commands`, guardedCommand(current, command));
+      return checkView(reply.view, id);
+    };
     for (const plan of chosen) {
       if (cancelled) break;
-      let level = plan.from;
-      while (!cancelled && level < plan.target) {
-        const nextLevel = plan.method === "safe" ? plan.target : level + 1;
-        status(`精練 ${plan.name} +${level} → +${nextLevel}…`);
-        const payload = nextRefineCommand(view, catalog, plan, plan.uid, level);
-        awaitingRefine = true;
-        const reply = await gameRequest(`/api/characters/${id}/commands`, payload);
-        const next = checkView(reply.view, id);
-        const outcome = refineOutcome(next, plan, level);
-        view = next;
-        awaitingRefine = false;
-        if (outcome === "failure") {
-          failure++;
-          break;
+      const original = plan.needsEquip ? {...view.snapshot.equipment} : null;
+      let equipConfirmed = false;
+      try {
+        if (original) {
+          status(`正在穿戴 ${plan.name}…`);
+          view = await send(view, {type: "equip", uid: plan.uid});
+          equipConfirmed = Object.values(view.snapshot.equipment).includes(plan.uid);
+          if (!equipConfirmed) throw new Error("未確認穿戴成功，請檢查裝備欄。");
         }
-        if (nextLevel === plan.target) success++;
-        level = nextLevel;
-        await new Promise(resolve => setTimeout(resolve, 450));
+        let level = plan.from;
+        while (!cancelled && level < plan.target) {
+          const nextLevel = plan.method === "safe" ? plan.target : level + 1;
+          status(`精練 ${plan.name} +${level} → +${nextLevel}…`);
+          const payload = nextRefineCommand(view, catalog, plan, plan.uid, level);
+          awaitingRefine = true;
+          const reply = await gameRequest(`/api/characters/${id}/commands`, payload);
+          const next = checkView(reply.view, id);
+          view = next;
+          const outcome = refineOutcome(next, plan, level);
+          awaitingRefine = false;
+          if (outcome === "failure") {
+            failure++;
+            break;
+          }
+          if (nextLevel === plan.target) success++;
+          level = nextLevel;
+          await new Promise(resolve => setTimeout(resolve, 450));
+        }
+      } finally {
+        if (original) {
+          status("正在換回原裝備…");
+          try {
+            if (!equipConfirmed || awaitingRefine) {
+              view = checkView(await gameRequest(`/api/characters/${id}?deferCatchup=1`), id);
+            }
+            if (view.running) throw new Error("角色已開始掛機。");
+            view = await restoreEquipment(view, original, plan.uid, catalog, send);
+          } catch (error) {
+            throw new Error(`未能確認原裝備已還原，請檢查裝備欄。${error.message}`);
+          }
+        }
       }
     }
     status(cancelled ? "批次已停止。" : "批次已結束。");
   } catch (error) {
     if (awaitingRefine) uncertain++;
     needsRefresh = true;
-    status(`批次停止。${error.message} 請更新物品確認結果。`);
+    status(`批次停止。${error.message} 請更新物品並確認裝備欄。`);
   } finally {
     busy = false;
-    refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = false;
+    refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = autoEquip.disabled = false;
     stop.disabled = true;
     mode.disabled = needsRefresh;
     target.disabled = needsRefresh;
@@ -302,7 +333,7 @@ selection.onchange = updatePlan;
 query.oninput = locationFilter.onchange = applyEquipmentFilters;
 mode.onchange = () => updateMode(false);
 refresh.onclick = storageMaterials.onchange = storageWeapons.onchange = () => loadGear(true);
-target.onchange = () => renderEquipment(true);
+target.onchange = autoEquip.onchange = () => renderEquipment(true);
 start.onclick = runBatch;
 stop.onclick = () => { cancelled = true; stop.disabled = true; };
 
