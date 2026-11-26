@@ -24,6 +24,23 @@ export function handoffRules(config, rebirth) {
   });
 }
 
+export function rebindPlan(snapshot, characterId, backup) {
+  const activeRules = snapshot.config.equipRules ?? [];
+  const target = snapshot.profiles?.find(entry => entry.name === profileName)?.config;
+  const reference = backup?.id !== characterId && backup?.rules?.length ? backup : null;
+  if (reference && (!activeRules.length || (!target && reference.config))) {
+    const profile = target ?? reference.config;
+    if (!profile) throw new Error(`請回原角色重新記錄「${profileName}」完整配置。`);
+    return {
+      rules: handoffRules({equipRules: reference.rules}, snapshot.character.rebirth),
+      useBackup: true,
+      profile,
+      create: !target,
+    };
+  }
+  return {rules: activeRules, useBackup: !!reference && JSON.stringify(reference.rules) === JSON.stringify(activeRules)};
+}
+
 export function handoffItems(snapshot, config, definitions) {
   const ammo = new Set((config.equipRules ?? []).map(rule => rule.ammo).filter(Boolean));
   const ids = new Set([...Object.entries(snapshot.equipment)
