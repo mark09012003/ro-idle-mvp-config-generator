@@ -1,4 +1,4 @@
-import {destinationConfig, handoffItems, matchMoved, profileName} from "./handoff.mjs";
+import {destinationConfig, handoffItems, matchMoved, profileName, handoffRules, sameBindings, sourceHandoffConfig} from "./handoff.mjs";
 import {itemFingerprint, remapRules, ruleReferences, suitableItem} from "./rebind.mjs";
 import {marketPlan} from "./market.mjs";
 import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, refineOutcome, restoreEquipment, skillLevel, equipmentPlan} from "./refine.mjs";
@@ -505,15 +505,17 @@ async function captureRebind() {
   if (!activeRole || busy) return;
   try {
     const current = await rebindView();
-    const rules = current.snapshot.config.equipRules ?? [];
+    const profile = current.snapshot.profiles?.find(entry => entry.name === profileName)?.config;
+    const activeRules = current.snapshot.config.equipRules ?? [];
+    const rules = profile?.equipRules?.length ? profile.equipRules : activeRules;
     const refs = ruleReferences(rules);
     const items = current.snapshot.inventory.filter(item => refs.has(item.uid));
-    if (!items.length) throw new Error("原角色背包裡找不到換裝規則綁定的裝備。");
+    if (!refs.size) throw new Error("原角色沒有可記錄的自動換裝規則。");
     const previous = savedReference();
     if (previous && !window.confirm(`將原本的 ${previous.name} 裝備對照替換成 ${activeRole.name}？`)) return;
     localStorage.setItem(rebindKey, JSON.stringify({id: activeRole.id, name: activeRole.name, rules, items}));
     clearRebind();
-    rebindStatus(`已記錄 ${activeRole.name} 的 ${items.length} 件裝備。`);
+    rebindStatus(`已記錄 ${activeRole.name} 的 ${rules.length} 條規則及 ${items.length} 件裝備對照。${items.length < refs.size ? " 缺少對照的裝備可在新角色手選。" : ""}`);
   } catch (error) { rebindStatus(error.message); }
 }
 
@@ -522,12 +524,15 @@ async function previewRebind() {
   clearRebind();
   try {
     const current = await rebindView();
-    const rules = current.snapshot.config.equipRules ?? [];
-    const refs = ruleReferences(rules);
-    if (!refs.size) throw new Error("目前角色沒有自動換裝規則。請先匯入原配置。");
+    const activeRules = current.snapshot.config.equipRules ?? [];
     const backup = savedReference();
-    const useBackup = backup && backup.id !== current.characterId &&
-      JSON.stringify(backup.rules) === JSON.stringify(rules);
+    const profile = current.snapshot.profiles?.find(entry => entry.name === profileName);
+    const repair = Boolean(!activeRules.length && profile && backup?.id !== current.characterId && backup?.rules?.length);
+    const rules = repair ? handoffRules({equipRules: backup.rules}, current.snapshot.character.rebirth) : activeRules;
+    const refs = ruleReferences(rules);
+    if (!refs.size) throw new Error("目前沒有可重綁的規則。請先到原角色記錄換裝規則。");
+    const useBackup = repair || (backup && backup.id !== current.characterId &&
+      JSON.stringify(backup.rules) === JSON.stringify(rules));
     const previous = new Map(useBackup ? backup.items.map(item => [item.uid, item]) : []);
     const rows = [];
     for (const [uid, slots] of refs) {
@@ -546,20 +551,24 @@ async function previewRebind() {
       $("rebind-rows").append(label);
       rows.push({uid, field});
     }
-    rebindPreview = {current, rows};
+    rebindPreview = {current, rows, rules, repair};
     $("rebind-apply").disabled = false;
-    rebindStatus(useBackup ? `已使用 ${backup.name} 的對照，請核對預選項目。` : "未使用原角色對照，請逐項選擇替換裝備。");
+    rebindStatus(repair ? `將把 ${backup.name} 的換裝規則補進「${profileName}」，請為每個舊 UID 選擇裝備。`
+      : useBackup ? `已使用 ${backup.name} 的對照，請核對預選項目。` : "未使用原角色對照，請逐項選擇替換裝備。");
   } catch (error) { rebindStatus(error.message); }
 }
 
 async function applyRebind() {
   if (!activeRole || !rebindPreview || busy) return;
-  const {current, rows} = rebindPreview;
+  const {current, rows, rules, repair} = rebindPreview;
   const mapping = new Map(rows.filter(({field}) => field.value).map(({uid, field}) => [uid, Number(field.value)]));
-  if (!mapping.size) { rebindStatus("請先選擇要重綁的裝備。"); return; }
+  if (!mapping.size || (repair && mapping.size !== rows.length)) {
+    rebindStatus(repair ? "請為每個舊 UID 選擇裝備，再補套用規則。" : "請先選擇要重綁的裝備。");
+    return;
+  }
   const changed = [...mapping].filter(([old, next]) => old !== next).length;
-  if (!changed) { rebindStatus("選取的裝備 UID 與原設定相同。"); return; }
-  const mappingCount = changed;
+  if (!changed && !repair) { rebindStatus("選取的裝備 UID 與原設定相同。"); return; }
+  const mappingCount = repair ? mapping.size : changed;
   if (!window.confirm(`確定重綁 ${activeRole.name} 的 ${mappingCount} 個裝備 UID？`)) return;
   busy = true;
   $("rebind-apply").disabled = true;
@@ -576,14 +585,16 @@ async function applyRebind() {
         throw new Error("背包裝備已變更，請重新預覽。");
       }
     }
-    const config = fresh.snapshot.config;
-    const equipRules = remapRules(config.equipRules, mapping, fresh.snapshot.inventory);
-    const reply = await gameRequest(`/api/characters/${fresh.characterId}/commands`,
-      guardedCommand(fresh, {type:"updateConfig", config:{...config, equipRules}}));
-    const next = checkView(reply.view, fresh.characterId);
-    const bindings = rules => rules?.map(({weapon, shield, ammo, gear}) => [weapon, shield, ammo, gear ?? []]);
-    if (JSON.stringify(bindings(next.snapshot.config?.equipRules)) !== JSON.stringify(bindings(equipRules))) {
-      throw new Error("伺服器未確認換裝規則，請先檢查遊戲設定。");
+    const equipRules = remapRules(rules, mapping, fresh.snapshot.inventory);
+    if (repair) {
+      const profile = fresh.snapshot.profiles?.find(entry => entry.name === profileName);
+      if (!profile) throw new Error("同名配置已移除，請重新預覽。");
+      await saveAndApplyHandoff(fresh, {...profile.config, equipRules});
+    } else {
+      const reply = await handoffCommand(fresh, {type:"updateConfig", config:{...fresh.snapshot.config, equipRules}});
+      if (!sameBindings(reply.view.snapshot.config?.equipRules, equipRules)) {
+        throw new Error("伺服器未確認換裝規則，請先檢查遊戲設定。");
+      }
     }
     rebindStatus(`已重綁 ${mappingCount} 個裝備 UID。`);
   } catch (error) { rebindStatus(error.message); }
@@ -649,8 +660,7 @@ async function sendHandoff(current, account, record) {
     throw new Error("目前已有一筆裝備交接。");
   }
   if (!record) {
-    const config = current.snapshot.profiles?.find(profile => profile.name === profileName)?.config;
-    if (!config) throw new Error(`原角色找不到已儲存的「${profileName}」配置。`);
+    const config = sourceHandoffConfig(current.snapshot);
     const items = handoffItems(current.snapshot, config, rebindItems);
     if (!items.length || items.length > 100) throw new Error("請確認交接裝備清單介於 1 到 100 件。");
     if (box.items.length + items.length > box.capacity) throw new Error("倉庫空間不足。");
@@ -678,10 +688,26 @@ async function sendHandoff(current, account, record) {
   saveHandoff(record, "stored");
 }
 
+async function saveAndApplyHandoff(current, config) {
+  const saved = await handoffCommand(current, {type:"profileSave", name:profileName, config});
+  const profile = saved.view.snapshot.profiles?.find(entry => entry.name === profileName);
+  if (!profile || !sameBindings(profile.config?.equipRules, config.equipRules)) {
+    throw new Error("未確認換裝規則已寫入同名配置。");
+  }
+  const applied = await handoffCommand(saved.view, {type:"profileApply", name:profileName});
+  if (applied.view.snapshot.activeProfile !== profileName ||
+      !sameBindings(applied.view.snapshot.config?.equipRules, config.equipRules)) {
+    throw new Error("未確認換裝規則已套用至目前角色。");
+  }
+}
+
 async function receiveHandoff(current, account, record) {
   if (!record || record.account !== account || record.source === current.characterId ||
       !(record.stage === "stored" || (record.stage === "received" && record.target === current.characterId))) {
     throw new Error("找不到這個角色可領取的交接裝備。");
+  }
+  if (!record.config.equipRules?.length) {
+    throw new Error("這筆舊交接缺少原角色的換裝規則，請用「跨角色換裝重綁」補套用。");
   }
   const sameName = current.snapshot.profiles?.some(profile => profile.name === profileName);
   const box = record.stage === "stored" ? await getStorage() : null;
@@ -709,12 +735,7 @@ async function receiveHandoff(current, account, record) {
     throw new Error("領出的裝備已變更，請檢查背包。");
   }
   const config = destinationConfig(record, current.snapshot);
-  const saved = await handoffCommand(current, {type:"profileSave", name:profileName, config});
-  if (!saved.view.snapshot.profiles?.some(profile => profile.name === profileName)) throw new Error("未確認配置已儲存。");
-  const applied = await handoffCommand(saved.view, {type:"profileApply", name:profileName});
-  if (applied.view.snapshot.activeProfile !== profileName) {
-    throw new Error("未確認配置已套用，請檢查遊戲目前配置。");
-  }
+  await saveAndApplyHandoff(current, config);
   localStorage.removeItem(handoffKey);
   handoffStatus(`已領裝、重綁並套用「${profileName}」。`);
 }

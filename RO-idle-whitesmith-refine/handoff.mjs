@@ -2,6 +2,19 @@ import {itemFingerprint, remapRules, ruleReferences} from "./rebind.mjs";
 
 export const profileName = "神射11轉";
 
+export function sourceHandoffConfig(snapshot) {
+  const saved = snapshot.profiles?.find(profile => profile.name === profileName)?.config;
+  if (!saved) throw new Error(`原角色找不到已儲存的「${profileName}」配置。`);
+  const equipRules = saved.equipRules?.length ? saved.equipRules : snapshot.config?.equipRules;
+  if (!equipRules?.length) throw new Error("原角色的已儲存配置與目前設定都沒有自動換裝規則。");
+  return {...saved, equipRules};
+}
+
+export function sameBindings(actual, expected) {
+  const slots = rules => (rules ?? []).map(({weapon, shield, ammo, gear}) => [weapon, shield, ammo, gear ?? []]);
+  return JSON.stringify(slots(actual)) === JSON.stringify(slots(expected));
+}
+
 export function handoffRules(config, rebirth) {
   if (rebirth) return config.equipRules ?? [];
   return (config.equipRules ?? []).flatMap(rule => {
