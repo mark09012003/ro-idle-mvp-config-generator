@@ -165,6 +165,9 @@ const songStats: Record<string, readonly (keyof PerformerCtx["stats"])[]> = {
   DC_HUMMING:["dex"],
   DC_FORTUNEKISS:["luk"],
   DC_SERVICEFORYOU:["int"],
+  BD_DRUMBATTLEFIELD:[],
+  BD_RINGNIBELUNGEN:[],
+  BD_SIEGFRIED:[],
 };
 const songIds = Object.keys(songStats).filter(id => SONGS[id]?.party && SKILLS.has(id));
 const manualStatuses: Partial<Record<MobStatusId, number>> = {

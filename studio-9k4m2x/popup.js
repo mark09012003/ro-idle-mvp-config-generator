@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-21";
+const ASSET_VER = "20261127-22";
 const MAX_REBIRTHS = 11;
 const EXTRA_STAT_PER_REBIRTH = 20;
 const host = "https://ro-idle.app";
@@ -1882,7 +1882,7 @@ function effectRow(definition, isBuff = false) {
   if (definition.maxCasters) {
     settings.append(numberField("施法者人數", "casterCount", 1, 1, definition.maxCasters));
   }
-  if (definition.stats) {
+  if (definition.stats?.length) {
     for (const stat of definition.stats) settings.append(numberField(`演奏者 ${stat.toUpperCase()}`, stat, 90, 0, 999));
     settings.append(numberField(definition.lessonName, "lesson", 10, 0, 10));
   }
