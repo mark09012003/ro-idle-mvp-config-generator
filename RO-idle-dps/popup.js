@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-20";
+const ASSET_VER = "20261127-21";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -1068,8 +1068,11 @@ function show(result) {
   $("ttk").textContent = result.averageKill == null ? "未擊殺" : seconds(result.averageKill);
   $("kpi-cardrate").textContent = `×${format(panel.cardRate)}`;
   $("kpi-combat").textContent = `${format(panel.hit)}% ／ ${format(panel.crit)}% ／ ${format(panel.aspd)}`;
+  $("summon-dps-grid").hidden = result.summons.count === 0;
+  $("summon-dps").textContent = format(result.summons.dps);
+  $("combined-dps").textContent = format(result.summons.totalDps);
   $("summon-summary").hidden = result.summons.count === 0;
-  $("summon-summary").textContent = `召喚物 DPS ${format(result.summons.dps)} · 含召喚物 DPS ${format(result.summons.totalDps)} · ${result.trials} 次合計召喚 ${format(result.summons.count)} 隻、擊倒 ${format(result.summons.kills)} 隻`;
+  $("summon-summary").textContent = `${result.trials} 次合計召喚 ${format(result.summons.count)} 隻、擊倒 ${format(result.summons.kills)} 隻`;
   $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · 期末平均 SP ${format(result.endingSp)}${result.mobDefense ? " · 含怪物防禦技" : " · 關閉怪物防禦技"}${result.invincible ? " · 角色不死" : ""}`;
   $("combat-stats").textContent = `起始普攻：${element[panel.element] ?? panel.element}屬性 ×${format(panel.modifier / 100)} · 攻擊間隔 ${seconds(panel.interval)}`;
 
