@@ -50,4 +50,19 @@ replace_once("""    c.hp = Math.max(hpFloor(s), c.hp - dmg);
     emit({ type: 'ailmentDamage', ailment: 'bleeding'""")
 replace_once("function equipBagAmmo(", "export function equipBagAmmo(")
 replace_once("function autoEquipFor(", "export function autoEquipFor(")
+# Preserve the actual skill critical roll in the emitted event for the simulation log.
+damage_path = path.parent.parent / "combat" / "damage.ts"
+damage_source = damage_path.read_text()
+old_return = """  if (!o.noCards) dmg = applyCardRates(dmg, d, mob, o.noEnchants);
+  return { kind: 'hit', damage: dmg * o.hits, elementMod, hits: o.hits };"""
+assert damage_source.count(old_return) == 1
+damage_source = damage_source.replace(old_return,
+    old_return.replace("hits: o.hits };", "hits: o.hits, crit: critical };"))
+old_type = "hits: number; baseMiss?: true };"
+assert damage_source.count(old_type) == 1
+damage_path.write_text(damage_source.replace(old_type, "hits: number; baseMiss?: true; crit?: boolean };"))
+replace_once("""      type: 'skillHit', skill: id, lv, uid: m.uid, monsterId: m.monsterId, result: id === 'ASC_BREAKER' && damage > 0 ? 'hit' : guarded || prot.blocked ? 'miss' : out.kind,
+      damage,""", """      type: 'skillHit', skill: id, lv, uid: m.uid, monsterId: m.monsterId, result: id === 'ASC_BREAKER' && damage > 0 ? 'hit' : guarded || prot.blocked ? 'miss' : out.kind,
+      ...(out.kind === 'hit' && 'crit' in out && out.crit && !guarded && !prot.blocked && damage > 0 ? { crit: true } : {}),
+      damage,""")
 path.write_text(source)

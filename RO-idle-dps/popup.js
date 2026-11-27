@@ -392,14 +392,17 @@ function show(result) {
   $("summon-summary").hidden = result.summons.count === 0;
   $("summon-summary").textContent = `召喚物 DPS ${format(result.summons.dps)} · 含召喚物 DPS ${format(result.summons.totalDps)} · ${result.trials} 次合計召喚 ${format(result.summons.count)} 隻、擊倒 ${format(result.summons.kills)} 隻`;
   $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · ${result.unlimitedSp ? "無限 SP" : `期末平均 SP ${format(result.endingSp)}`}${result.invincible ? " · 角色免傷" : ""}`;
-  $("combat-stats").textContent = `起始普攻：${element[panel.element] ?? panel.element}屬性 ×${format(panel.modifier / 100)} · ASPD ${format(panel.aspd)}／間隔 ${seconds(panel.interval)} · 命中 ${format(panel.hit)}% · 爆擊 ${format(panel.crit)}%`;
+  $("combat-stats").textContent = `起始普攻：${element[panel.element] ?? panel.element}屬性 ×${format(panel.modifier / 100)} · ASPD ${format(panel.aspd)}／間隔 ${seconds(panel.interval)} · 命中 ${format(panel.hit)}% · 爆擊 ${format(panel.crit)}% · 對目標物理卡片與裝備倍率 ×${format(panel.cardRate)}`;
   const share = lines.reduce((sum, entry) => sum + entry.share, 0);
   const displayed = result.dps > 0 && share < 0.999 ? [...lines, {name:"其他傷害", share:1-share, casts:0}] : lines;
   $("damage").replaceChildren(...displayed.map(entry => {
     const row = document.createElement("tr");
     const timing = entry.casts ? [entry.castMs,entry.delayMs,entry.cooldownMs]
       .map(value => seconds(value / entry.casts)).join("／") : "—";
-    for (const value of [entry.name, `${format(entry.share * 100)}%`, timing]) {
+    const range = hit => hit.min === hit.max ? format(hit.min) : `${format(hit.min)}～${format(hit.max)}`;
+    const damage = [entry.normal && `一般 ${range(entry.normal)}`, entry.critical && `爆擊 ${range(entry.critical)}`]
+      .filter(Boolean).join("\n") || "—";
+    for (const value of [entry.name, `${format(entry.share * 100)}%`, damage, timing]) {
       const cell = document.createElement("td");
       cell.textContent = value;
       row.append(cell);

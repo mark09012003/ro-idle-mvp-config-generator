@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-source_root=ro-idle-client-src-df6277909
+source_root=ro-idle-client-src-8af00cc61
 build_dir="$(mktemp -d)"
 trap 'rm -rf "$build_dir"' EXIT
 curl -fsSL "https://ro-idle.app/source/$source_root.tar.gz" -o "$build_dir/client.tar.gz"

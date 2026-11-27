@@ -7,7 +7,7 @@ import { MONSTERS, type MonsterDef } from "./src/game/data/monsters";
 import { MAPS } from "./src/game/data/maps";
 import { SKILLS, atLv } from "./src/game/data/skills";
 import { canAttackWithSkill } from "./src/game/combat/skillEffects";
-import { monsterDefender, playerHitRate, playerCritRate } from "./src/game/combat/damage";
+import { cardfixPermille, monsterDefender, playerHitRate, playerCritRate } from "./src/game/combat/damage";
 import { effectiveMonster, POISON_INTERVAL_MS, STATUS_NAMES, type MobStatusId, type MobStatuses } from "./src/game/combat/monsterStatus";
 import { buffDisplayName, getBuff, isKnownBuff } from "./src/game/data/buffs";
 import { elementModifier } from "./src/game/data/elements";
@@ -163,7 +163,8 @@ function initialStatuses(effects: Effect[], time: number): MobStatuses {
 }
 
 type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; unlimitedSp?: boolean; scenario?: Scenario};
-type DamageLine = {name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
+type HitRange = {min: number; max: number; count: number};
+type DamageLine = {normal?: HitRange; critical?: HitRange; name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
 function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   const state = createGameState(snapshot.character.name, seed, {exp:0, drop:0});
@@ -326,6 +327,16 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     if (!lines.has(id)) lines.set(id, {name: SKILLS.get(id)?.name ?? id, damage:0, hits:0, casts:0, castMs:0, delayMs:0, cooldownMs:0});
     return lines.get(id)!;
   };
+  function noteHit(entry: DamageLine, critical: boolean, raw: number) {
+    const slot = critical ? "critical" : "normal";
+    const range = entry[slot];
+    if (!range) entry[slot] = {min:raw, max:raw, count:1};
+    else {
+      range.min = Math.min(range.min, raw);
+      range.max = Math.max(range.max, raw);
+      range.count++;
+    }
+  }
   let total = 0, kills = 0, casts = 0, endingSp = 0;
   let summonCount = 0, summonKills = 0, summonDamage = 0;
   const counterattack = !!(options.counterattack || options.invincible);
@@ -366,6 +377,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
       panel = {
         element: stats.attackElement, interval: stats.attackIntervalMs, aspd: stats.aspd,
         hit: playerHitRate(stats, target), crit: playerCritRate(stats, target),
+        cardRate:cardfixPermille(stats, target) / 1000,
         modifier: elementModifier(stats.attackElement, target.element, target.elementLv),
         def: target.def, mdef: defender.mdef, elementTarget:target.element, elementLvTarget:target.elementLv, map: MAPS.get(state.mapId)?.name,
       };
@@ -444,10 +456,13 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           const entry = line(event.type === "playerAttack" ? "普攻" : event.type === "homunAttack" ? "生命體" : event.skill);
           if (event.uid === current.uid) {
             const damage = Math.min(event.damage, Math.max(0, monster.hp - credited));
+            const critical = event.result === "crit" || ("crit" in event && event.crit === true);
+            noteHit(entry, critical, event.damage);
             credited += damage;
             entry.damage += damage;
             entry.hits++;
-            record(`${entry.name} · ${event.result === "crit" ? "爆擊 " : ""}造成 ${damage} 傷害`, "player");
+            const effective = damage < event.damage ? `（有效 ${damage}）` : "";
+            record(`${entry.name} · ${critical ? "爆擊 " : ""}造成 ${event.damage} 傷害${effective}`, "player");
           } else {
             const prior = summonHp.get(event.uid);
             if (prior === undefined) return;
