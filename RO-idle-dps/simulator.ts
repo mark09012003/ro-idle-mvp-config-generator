@@ -56,8 +56,22 @@ const manualStatuses: Partial<Record<MobStatusId, number>> = {
 const maximumBuffLevel = (id: string) => SKILLS.get(id)?.maxLv ?? 1;
 const previewBuffs = (snapshot: GameSnapshot) => withPetBuff(snapshot.buffs ?? [], snapshot);
 
+function ammoChoices(snapshot: GameSnapshot) {
+  const choices = new Map<number, {id:number; name:string; element:string; quantity:number}>();
+  for (const item of snapshot.inventory) {
+    const def = ITEMS.get(item.itemId);
+    if (def?.category !== "ammo" || !(item.qty > 0)) continue;
+    const prior = choices.get(def.id);
+    if (prior) prior.quantity += item.qty;
+    else choices.set(def.id, {id:def.id, name:def.name, element:def.element, quantity:item.qty});
+  }
+  return [...choices.values()].sort((a,b) => a.id - b.id);
+}
+
 export function scenarioCatalog(snapshot: GameSnapshot) {
+  registerItemDefs(snapshot.heldItems ?? []);
   return {
+    ammo: ammoChoices(snapshot),
     active: previewBuffs(snapshot).map((buff, index) => ({
       index, name: buffDisplayName(buff.id), level: "lv" in buff ? buff.lv : undefined,
     })),
@@ -70,7 +84,7 @@ export function scenarioCatalog(snapshot: GameSnapshot) {
 }
 
 type Effect = {id: string; level: number; seconds: number; performer?: Partial<PerformerCtx["stats"]> & {lesson?: number}};
-type Scenario = {includeActive?: number[]; buffs?: Effect[]; statuses?: Effect[]; autoBuffs?: boolean};
+type Scenario = {includeActive?: number[]; buffs?: Effect[]; statuses?: Effect[]; autoBuffs?: boolean; ammoItemId?: number};
 
 function effectTime(effect: Effect, max: number) {
   if (!Number.isInteger(effect.level) || effect.level < 1 || effect.level > max ||
@@ -156,6 +170,13 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   if (snapshot.cart) state.cart = {items: [], nextUid: 1};
   const config = defaultAutoConfig();
   const loaded = snapshot.config;
+  const chosenAmmo = options.scenario?.ammoItemId;
+  if (chosenAmmo !== undefined) {
+    const stack = state.inventory.items.filter(item => item.itemId === chosenAmmo && item.qty > 0)
+      .sort((a, b) => b.qty - a.qty || a.uid - b.uid)[0];
+    if (!stack || ITEMS.get(chosenAmmo)?.category !== "ammo") throw new Error("背包裡找不到指定的箭矢。");
+    state.equipment.ammo = stack.uid;
+  }
   const map = [snapshot.mapId, loaded.lockMap, config.lockMap].find(id => MAPS.get(id)?.type !== "town" && MAPS.has(id))!;
   state.mapId = map;
   state.saveMap = map;
@@ -167,7 +188,7 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
     stopOnOverweight: false,
     autoBuy: {
       ...config.autoBuy, enabled:false,
-      arrows: {...config.autoBuy.arrows, itemId:loaded.autoBuy?.arrows?.itemId ?? config.autoBuy.arrows.itemId},
+      arrows: {...config.autoBuy.arrows, itemId:chosenAmmo ?? loaded.autoBuy?.arrows?.itemId ?? config.autoBuy.arrows.itemId},
       quivers: loaded.autoBuy?.quivers ?? [],
       quiverBelow: loaded.autoBuy?.quiverBelow ?? 0,
     },
@@ -214,13 +235,13 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario) {
     };
   }
   const current = setup(snapshot, {...options, scenario}, 1);
-  const baseline = setup(snapshot, options, 1);
+  const baseline = setup(snapshot, {...options, scenario:{ammoItemId:scenario?.ammoItemId}}, 1);
   const base = panel(baseline);
   const equipment = getEquipped(baseline.inventory, baseline.equipment).map(({slot, stack, def}) => ({
     slot:SLOT_NAMES[slot], name:def.name, refine:stack.refine ?? 0, broken:!!stack.broken,
     cards:(stack.cards ?? []).filter(Boolean).map(id => ITEMS.get(id)?.name ?? `#${id}`),
   }));
-  const ammo = getAmmo(baseline.inventory, baseline.equipment);
+  const ammo = getAmmo(current.inventory, current.equipment);
   const stats = derived(current);
   const allocated = Object.fromEntries(Object.entries(baseline.character.stats)
     .map(([key, value]) => [key.toUpperCase(), value]));
@@ -229,7 +250,7 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario) {
     names:current.buffs.map(buff => buffDisplayName(buff.id)), allocated, equipment,
     weaponType:stats.weaponType, attackElement:stats.attackElement,
     ammo:ammo ? {name:ammo.def.name, atk:ammo.def.atk, element:ammo.def.element, quantity:ammo.stack.qty,
-      fromBag:ammo.stack.uid !== snapshot.equipment.ammo} : null,
+      fromBag:ammo.stack.uid !== snapshot.equipment.ammo, manual:scenario?.ammoItemId !== undefined} : null,
   };
 }
 

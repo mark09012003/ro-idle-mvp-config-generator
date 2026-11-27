@@ -127,6 +127,12 @@ function fillLevels() {
 }
 
 function renderScenario() {
+  const ammo = $("ammo-choice");
+  const selected = ammo.value;
+  ammo.replaceChildren(new Option("沿用目前裝備與自動補箭", ""), ...scenario.ammo.map(arrow =>
+    new Option(`${arrow.name} · ${element[arrow.element] ?? arrow.element} · 背包 ${format(arrow.quantity)} 支`, arrow.id)));
+  if (scenario.ammo.some(arrow => String(arrow.id) === selected)) ammo.value = selected;
+  ammo.disabled = !scenario.ammo.length;
   $("active-buffs").replaceChildren(...scenario.active.map(({index, name, level}) => {
     const label = document.createElement("label");
     label.className = "check";
@@ -223,6 +229,7 @@ function readScenario() {
     buffs: readEffects("extra-buffs"),
     statuses: readEffects("monster-statuses"),
     autoBuffs: $("auto-buffs").checked,
+    ammoItemId: $("ammo-choice").value ? Number($("ammo-choice").value) : undefined,
   };
 }
 
@@ -235,7 +242,7 @@ function scheduleStats() {
 
 function showEquipment({equipment, ammo, weaponType, attackElement}) {
   const arrow = ammo
-    ? `${ammo.name} ×${format(ammo.quantity)} · 箭矢 ATK ${format(ammo.atk)} · ${element[ammo.element] ?? ammo.element}屬性${ammo.fromBag ? "（從背包補上）" : ""}`
+    ? `${ammo.name} ×${format(ammo.quantity)} · 箭矢 ATK ${format(ammo.atk)} · ${element[ammo.element] ?? ammo.element}屬性${ammo.manual ? "（手動指定）" : ammo.fromBag ? "（從背包補上）" : ""}`
     : weaponType === "bow" ? "目前使用弓，箭矢欄和背包都沒有可用的散裝箭矢。" : "箭矢欄為空。";
   $("ammo-summary").textContent = `${arrow}　｜　起始普攻：${element[attackElement] ?? attackElement}屬性`;
   $("equipment-list").replaceChildren(...equipment.map(({slot, name, refine, broken, cards}) => {
@@ -291,6 +298,7 @@ async function showStats() {
 $("scenario").addEventListener("input", event => {
   if (event.target.type !== "search") scheduleStats();
 });
+$("ammo-choice").onchange = scheduleStats;
 $("buff-filter").oninput = () => filterEffects("buff");
 $("status-filter").oninput = () => filterEffects("status");
 
