@@ -89,6 +89,8 @@ summary { cursor: pointer; font-weight: 600; }
 #character-stats small[data-direction="up"] { color: light-dark(#11693b, #8ee3aa); }
 #character-stats small[data-direction="down"] { color: light-dark(#a42420, #ffaaa3); }
 #snapshot-buff-options { margin: 4px 0 8px; }
+.active-buff-actions { display: flex; gap: 6px; margin: 6px 0; }
+.active-buff-actions button { min-height: 28px; padding: 3px 8px; font-size: 11px; }
 #timeline-details { margin: 10px 0; }
 #timeline { max-height: 250px; overflow: auto; list-style: none; background: #141a24; color: #e5eaf2; border-radius: 6px; padding: 6px 8px; }
 #timeline li { display: grid; grid-template-columns: 48px 1fr auto; align-items: baseline; gap: 6px; margin: 3px 0; }

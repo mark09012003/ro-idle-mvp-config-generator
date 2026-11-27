@@ -271,12 +271,40 @@ function renderScenario() {
     return label;
   }));
   if (!scenario.active.length) $("active-buffs").textContent = "角色目前沒有 Buff。";
+  syncActiveBuffControls();
   if (!$("extra-buffs").children.length) {
     $("extra-buffs").replaceChildren(...scenario.buffs.map(effectRow));
     $("monster-statuses").replaceChildren(...scenario.statuses.map(effectRow));
   }
   filterEffects("buff");
   filterEffects("status");
+}
+
+function syncActiveBuffControls() {
+  const boxes = [...$("active-buffs").querySelectorAll('input[type="checkbox"]')];
+  const total = boxes.length;
+  const checked = boxes.filter(box => box.checked).length;
+  $("active-buff-actions").hidden = total === 0;
+  $("quick-active-buffs-wrap").hidden = total === 0;
+  $("active-buffs-all").disabled = total === 0 || checked === total;
+  $("active-buffs-none").disabled = checked === 0;
+  const quick = $("quick-active-buffs");
+  quick.checked = total > 0 && checked === total;
+  quick.indeterminate = checked > 0 && checked < total;
+  $("quick-active-buffs-label").textContent = checked > 0 && checked < total
+    ? `套用角色目前身上的 Buff（已選 ${checked}／${total} 項）`
+    : `套用角色目前身上的 Buff（共 ${total} 項）`;
+  $("snapshot-buff-summary").textContent = total
+    ? `匯入遊戲身上的 Buff（已選 ${checked}／${total} 項）`
+    : "匯入遊戲身上的 Buff（角色目前沒有 Buff）";
+}
+
+function setAllActiveBuffs(checked) {
+  for (const box of $("active-buffs").querySelectorAll('input[type="checkbox"]')) {
+    box.checked = checked;
+  }
+  syncActiveBuffControls();
+  scheduleStats();
 }
 
 function numberField(text, name, initial, min, max) {
@@ -943,8 +971,12 @@ function show(result) {
 // =========================================================================
 
 $("scenario").addEventListener("input", event => {
+  if (event.target.closest("#active-buffs")) syncActiveBuffControls();
   if (event.target.type !== "search") scheduleStats();
 });
+$("quick-active-buffs").onchange = () => setAllActiveBuffs($("quick-active-buffs").checked);
+$("active-buffs-all").onclick = () => setAllActiveBuffs(true);
+$("active-buffs-none").onclick = () => setAllActiveBuffs(false);
 $("ammo-choice").onchange = scheduleStats;
 $("buff-filter").oninput = () => filterEffects("buff");
 $("status-filter").oninput = () => filterEffects("status");

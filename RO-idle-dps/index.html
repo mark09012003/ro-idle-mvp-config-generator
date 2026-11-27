@@ -168,6 +168,7 @@
         <label class="check"><input id="counterattack" type="checkbox"> 模擬怪物反擊並計算承傷</label>
         <label class="check"><input id="invincible" type="checkbox"> 角色免傷，怪物照常施技</label>
         <label class="check"><input id="unlimited-sp" type="checkbox"> 無限 SP</label>
+        <label class="check" id="quick-active-buffs-wrap" hidden><input id="quick-active-buffs" type="checkbox"> <span id="quick-active-buffs-label">套用角色目前身上的 Buff</span></label>
         <details id="scenario">
           <summary>角色 Buff 與怪物狀態</summary>
           <h2>角色起始 Buff</h2>
@@ -175,7 +176,11 @@
           <div id="extra-buffs" class="effect-list" aria-label="手動 Buff"></div>
           <p class="filter-count" id="buff-count" aria-live="polite"></p>
           <details id="snapshot-buff-options">
-            <summary>匯入遊戲身上的 Buff（預設不選）</summary>
+            <summary id="snapshot-buff-summary">匯入遊戲身上的 Buff（預設不選）</summary>
+            <div id="active-buff-actions" class="active-buff-actions" hidden>
+              <button id="active-buffs-all" type="button">全部勾選</button>
+              <button id="active-buffs-none" type="button">全部取消</button>
+            </div>
             <div id="active-buffs"></div>
           </details>
           <label class="check"><input id="auto-buffs" type="checkbox"> 允許使用 Buff 道具及掛機模式自補 Buff</label>
