@@ -1,4 +1,4 @@
-import {attackSkills, equipmentCatalog, previewCharacter, scenarioCatalog, simulate, targets} from "./engine.js";
+import {attackSkills, equipmentCatalog, previewCharacter, scenarioCatalog, simulate, targets} from "./engine.js?v=20261127-2";
 
 self.onmessage = ({data: {id, action, snapshot, options}}) => {
   try {

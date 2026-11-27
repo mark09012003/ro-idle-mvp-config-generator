@@ -1,4 +1,5 @@
 const $ = id => document.getElementById(id);
+const ASSET_VER = "20261127-2";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -36,11 +37,41 @@ let itemMap = new Map();
 let cardMap = new Map();
 let savedCharacters = [];
 let activeSavedKey = "";
+let useDirectEngine = false;
+let directEnginePromise = null;
+let targetsPromise = null;
 const requests = new Map();
+
+async function runDirectEngine(action, options) {
+  if (!directEnginePromise) {
+    directEnginePromise = import(`./engine.js?v=${ASSET_VER}`);
+  }
+  const eng = await directEnginePromise;
+  return {
+    targets: () => eng.targets,
+    skills: () => eng.attackSkills(snapshot),
+    scenario: () => eng.scenarioCatalog(snapshot),
+    equipment: () => eng.equipmentCatalog(snapshot),
+    character: () => eng.previewCharacter(snapshot, options.scenario, options.mode, options.monsterId),
+    simulate: () => eng.simulate(snapshot, options),
+  }[action]();
+}
+
+function fallbackToDirectEngine() {
+  useDirectEngine = true;
+  worker?.terminate();
+  worker = null;
+  const pending = [...requests.values()];
+  requests.clear();
+  for (const task of pending) {
+    clearTimeout(task.timeout);
+    runDirectEngine(task.action, task.options).then(task.resolve, task.reject);
+  }
+}
 
 function getWorker() {
   if (worker) return worker;
-  worker = new Worker("worker.js", {type:"module"});
+  worker = new Worker(`worker.js?v=${ASSET_VER}`, {type:"module"});
   worker.onmessage = ({data}) => {
     const task = requests.get(data.id);
     if (!task) return;
@@ -49,7 +80,7 @@ function getWorker() {
     if (data.error) task.reject(new Error(data.error));
     else task.resolve(data.result);
   };
-  worker.onerror = () => resetWorker("無法啟動戰鬥引擎，請確認檔案完整並透過網頁伺服器開啟。");
+  worker.onerror = () => fallbackToDirectEngine();
   return worker;
 }
 
@@ -64,13 +95,31 @@ function resetWorker(message) {
 }
 
 function engine(action, options) {
+  if (useDirectEngine) return runDirectEngine(action, options);
   return new Promise((resolve, reject) => {
-    const thread = getWorker();
+    let thread;
+    try {
+      thread = getWorker();
+    } catch {
+      useDirectEngine = true;
+      runDirectEngine(action, options).then(resolve, reject);
+      return;
+    }
     const id = ++sequence;
-    const timeout = setTimeout(() => resetWorker("本機試算逾時，請改用較短的模擬時間。"), 20000);
-    requests.set(id, {resolve, reject, timeout});
+    const timeout = setTimeout(() => resetWorker("本機試算逾時，請改用較短的模擬時間。"), 25000);
+    requests.set(id, {resolve, reject, timeout, action, options});
     thread.postMessage({id, action, snapshot: action === "targets" ? undefined : snapshot, options});
   });
+}
+
+function ensureTargets() {
+  if (targets.length) return Promise.resolve(targets);
+  if (!targetsPromise) {
+    targetsPromise = engine("targets")
+      .then(list => { targets = list; return list; })
+      .catch(error => { targetsPromise = null; throw error; });
+  }
+  return targetsPromise;
 }
 
 function normalizeSnapshot(raw) {
@@ -287,20 +336,26 @@ function syncActiveBuffControls() {
   const boxes = [...$("active-buffs").querySelectorAll('input[type="checkbox"]')];
   const total = boxes.length;
   const checked = boxes.filter(box => box.checked).length;
-  $("active-buff-actions").hidden = total === 0;
-  $("quick-active-buffs-wrap").hidden = total === 0;
-  $("keep-active-buffs-wrap").hidden = total === 0;
-  $("active-buffs-all").disabled = total === 0 || checked === total;
-  $("active-buffs-none").disabled = checked === 0;
+  if ($("active-buff-actions")) $("active-buff-actions").hidden = total === 0;
+  if ($("quick-active-buffs-wrap")) $("quick-active-buffs-wrap").hidden = total === 0;
+  if ($("keep-active-buffs-wrap")) $("keep-active-buffs-wrap").hidden = total === 0;
+  if ($("active-buffs-all")) $("active-buffs-all").disabled = total === 0 || checked === total;
+  if ($("active-buffs-none")) $("active-buffs-none").disabled = checked === 0;
   const quick = $("quick-active-buffs");
-  quick.checked = total > 0 && checked === total;
-  quick.indeterminate = checked > 0 && checked < total;
-  $("quick-active-buffs-label").textContent = checked > 0 && checked < total
-    ? `套用角色目前身上的 Buff（已選 ${checked}／${total} 項）`
-    : `套用角色目前身上的 Buff（共 ${total} 項）`;
-  $("snapshot-buff-summary").textContent = total
-    ? `匯入遊戲身上的 Buff（已選 ${checked}／${total} 項）`
-    : "匯入遊戲身上的 Buff（角色目前沒有 Buff）";
+  if (quick) {
+    quick.checked = total > 0 && checked === total;
+    quick.indeterminate = checked > 0 && checked < total;
+  }
+  if ($("quick-active-buffs-label")) {
+    $("quick-active-buffs-label").textContent = checked > 0 && checked < total
+      ? `套用角色目前身上的 Buff（已選 ${checked}／${total} 項）`
+      : `套用角色目前身上的 Buff（共 ${total} 項）`;
+  }
+  if ($("snapshot-buff-summary")) {
+    $("snapshot-buff-summary").textContent = total
+      ? `匯入遊戲身上的 Buff（已選 ${checked}／${total} 項）`
+      : "匯入遊戲身上的 Buff（角色目前沒有 Buff）";
+  }
 }
 
 function setAllActiveBuffs(checked) {
@@ -391,7 +446,7 @@ function cleanEquipOverrides() {
 function readScenario() {
   return {
     includeActive: [...$("active-buffs").querySelectorAll("input:checked")].map(input => Number(input.value)),
-    keepActiveBuffs: $("keep-active-buffs").checked,
+    keepActiveBuffs: $("keep-active-buffs") ? $("keep-active-buffs").checked : true,
     buffs: readEffects("extra-buffs"),
     statuses: readEffects("monster-statuses"),
     autoBuffs: $("auto-buffs").checked,
@@ -841,7 +896,7 @@ async function applyLoadedSnapshot(nextSnapshot, {save = true, sourceLabel = ""}
   $("status").textContent = "正在初始化角色與裝備資料…";
   try {
     snapshot = normalizeSnapshot(nextSnapshot);
-    if (!targets.length) targets = await engine("targets");
+    await ensureTargets();
     const [nextSkills, nextScenario, nextCatalog] = await Promise.all([
       engine("skills"),
       engine("scenario"),
@@ -979,10 +1034,10 @@ $("scenario").addEventListener("input", event => {
   if (event.target.closest("#active-buffs")) syncActiveBuffControls();
   if (event.target.type !== "search") scheduleStats();
 });
-$("quick-active-buffs").onchange = () => setAllActiveBuffs($("quick-active-buffs").checked);
-$("keep-active-buffs").onchange = scheduleStats;
-$("active-buffs-all").onclick = () => setAllActiveBuffs(true);
-$("active-buffs-none").onclick = () => setAllActiveBuffs(false);
+if ($("quick-active-buffs")) $("quick-active-buffs").onchange = () => setAllActiveBuffs($("quick-active-buffs").checked);
+if ($("keep-active-buffs")) $("keep-active-buffs").onchange = scheduleStats;
+if ($("active-buffs-all")) $("active-buffs-all").onclick = () => setAllActiveBuffs(true);
+if ($("active-buffs-none")) $("active-buffs-none").onclick = () => setAllActiveBuffs(false);
 $("ammo-choice").onchange = scheduleStats;
 $("buff-filter").oninput = () => filterEffects("buff");
 $("status-filter").oninput = () => filterEffects("status");
@@ -1137,7 +1192,7 @@ $("calculator").onsubmit = async event => {
 // Web mode initialization & events
 function setupWebMode() {
   $("web-loader").hidden = false;
-  $("back-route").hidden = false;
+  if ($("back-route")) $("back-route").hidden = false;
   $("refresh").textContent = "匯入／切換角色";
   $("refresh").onclick = () => {
     const panel = $("import-panel");
@@ -1275,40 +1330,48 @@ function setupWebMode() {
 }
 
 async function init() {
-  if (isExtension) {
-    $("refresh").onclick = loadFromExtension;
-    await loadFromExtension();
-    return;
-  }
-  setupWebMode();
-  savedCharacters = loadSavedList();
-  renderSavedBar();
   try {
-    targets = await engine("targets");
-  } catch (error) {
-    $("status").textContent = error.message;
-  }
-  try {
-    const fromHash = await decodeHashSnapshot();
-    if (fromHash) {
-      await applyLoadedSnapshot(fromHash, {save: true, sourceLabel: "從遊戲分頁傳送"});
+    if (isExtension) {
+      $("refresh").onclick = loadFromExtension;
+      await loadFromExtension();
       return;
     }
-  } catch (error) {
-    $("status").textContent = error.message;
-  }
-  if (location.hash === "#waiting") {
-    $("role").textContent = "正在等待遊戲分頁傳送角色…";
-    $("status").textContent = "正在接收來自 ro-idle.app 的角色快照…";
-    return;
-  }
-  if (savedCharacters.length) {
-    activeSavedKey = savedCharacters[0].key;
+    setupWebMode();
+    savedCharacters = loadSavedList();
     renderSavedBar();
-    await applyLoadedSnapshot(savedCharacters[0].snapshot, {save: false, sourceLabel: "本機已存角色"});
-  } else {
-    $("role").textContent = "尚未載入角色 · 請選擇下方載入方式";
-    $("import-panel").open = true;
+
+    // Preload engine targets in background so the UI is immediately interactive.
+    void ensureTargets().catch(error => {
+      if (!snapshot) $("status").textContent = error.message;
+    });
+
+    try {
+      const fromHash = await decodeHashSnapshot();
+      if (fromHash) {
+        await applyLoadedSnapshot(fromHash, {save: true, sourceLabel: "從遊戲分頁傳送"});
+        return;
+      }
+    } catch (error) {
+      $("status").textContent = error.message;
+    }
+
+    if (location.hash === "#waiting") {
+      $("role").textContent = "正在等待遊戲分頁傳送角色…";
+      $("status").textContent = "正在接收來自 ro-idle.app 的角色快照…";
+      return;
+    }
+
+    if (savedCharacters.length) {
+      activeSavedKey = savedCharacters[0].key;
+      renderSavedBar();
+      await applyLoadedSnapshot(savedCharacters[0].snapshot, {save: false, sourceLabel: "本機已存角色"});
+    } else {
+      $("role").textContent = "尚未載入角色 · 請選擇下方載入方式";
+      $("import-panel").open = true;
+    }
+  } catch (error) {
+    $("role").textContent = "初始化失敗";
+    $("status").textContent = error?.message ?? String(error);
   }
 }
 
