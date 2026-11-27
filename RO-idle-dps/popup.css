@@ -1,0 +1,34 @@
+:root {
+  color-scheme: light dark;
+  font: 14px/1.45 system-ui, sans-serif;
+  --line: color-mix(in srgb, CanvasText 20%, Canvas);
+  --tint: color-mix(in srgb, Highlight 10%, Canvas);
+}
+body { width: 406px; margin: 0; padding: 16px; color: CanvasText; background: Canvas; }
+[hidden] { display: none !important; }
+header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+h1, h2, p { margin: 0; }
+h1 { font-size: 19px; }
+h2 { font-size: 16px; }
+p { margin-top: 6px; }
+#role, #summary, #monster-stats, #combat-stats { font-size: 12px; }
+fieldset { margin: 0; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+label { display: block; }
+select, input, button { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+input, select { display: block; width: 100%; box-sizing: border-box; margin: 4px 0 8px; background: Canvas; color: CanvasText; }
+button { cursor: pointer; white-space: nowrap; }
+button:disabled { cursor: default; }
+#calculate { background: Highlight; color: HighlightText; border-color: Highlight; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+#result { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+.metrics > div { background: var(--tint); border-radius: 6px; padding: 8px; }
+dt { font-size: 12px; }
+dd { margin: 0; font-size: 21px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.table-scroll { max-height: 165px; overflow: auto; margin: 10px 0; }
+table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+th { position: sticky; top: 0; background: Canvas; }
+th, td { padding: 4px; border-bottom: 1px solid var(--line); }
+details { font-size: 12px; }
+summary { cursor: pointer; }
+#status:empty { display: none; }

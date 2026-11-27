@@ -1,0 +1,25 @@
+ASSET NOTICES / 素材說明
+
+這份網頁客戶端原始碼封存檔不含下列 public/ 素材。
+LICENSE 的 GPL-3.0 聲明只涵蓋封存檔所含程式碼；此檔不對未納入素材授予授權，也不判斷它們的權利歸屬。
+
+未納入的資料夾（檔案數）：
+  - public/avatar/ (75679)
+  - public/bgm/ (93)
+  - public/client/ (35715)
+  - public/fonts/ (2)
+  - public/licenses/ (3)
+  - public/sound/ (662)
+
+未納入的單一檔案：
+  - public/ads.txt
+  - public/apple-touch-icon.png
+  - public/favicon.svg
+  - public/googleeccfb43b12f3941d.html
+  - public/icon-192.png
+  - public/icon-512.png
+  - public/icon.svg
+  - public/manifest.webmanifest
+  - public/privacy.html
+  - public/robots.txt
+  - public/sitemap.xml
