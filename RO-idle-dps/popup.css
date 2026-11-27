@@ -343,35 +343,8 @@ textarea { min-height: 72px; resize: vertical; font-family: ui-monospace, SFMono
 .form-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
 .form-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
 .rebirth-row { display: flex; gap: 6px; align-items: stretch; }
-.seg-btn {
-  flex: 1;
-  min-height: 36px;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 650;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.seg-btn.is-active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-.rebirth-num { width: 64px !important; flex: 0 0 64px; text-align: center; font-weight: 700; }
-.rebirth-bonus-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 6px;
-  padding: 5px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--gold-soft);
-  border: 1px solid var(--gold-border);
-  font-size: 12px;
-}
-.rebirth-bonus-row label { font-weight: 600; color: var(--gold); }
-.rebirth-bonus-row input { width: 78px !important; min-height: 28px !important; text-align: center; font-weight: 700; padding: 2px 6px !important; }
+.rebirth-select { flex: 1; min-width: 0; font-weight: 600; }
+.rebirth-row .btn.is-active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .extra-char-flags { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 18px; padding-top: 6px; border-top: 1px solid var(--border); }
 
 /* 6-Stat Radar Chart & Allocator Layout */

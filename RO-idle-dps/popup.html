@@ -12,8 +12,8 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="popup.css?v=20261127-7">
-  <script type="module" src="popup.js?v=20261127-7"></script>
+  <link rel="stylesheet" href="popup.css?v=20261127-8">
+  <script type="module" src="popup.js?v=20261127-8"></script>
 </head>
 <body>
   <div class="shell">
@@ -150,15 +150,25 @@
               </label>
 
               <div class="field">
-                <span>轉生次數</span>
+                <span>轉生次數（0 轉或 1～11 轉）</span>
                 <div class="rebirth-row">
-                  <button id="rebirth-0" class="seg-btn" type="button" data-rebirth="0">0 轉（一般）</button>
-                  <button id="rebirth-1" class="seg-btn" type="button" data-rebirth="1">1 轉（進階）</button>
-                  <input id="build-rebirths" class="rebirth-num" type="number" min="0" max="99" value="1" aria-label="轉生次數">
-                </div>
-                <div id="rebirth-bonus-wrap" class="rebirth-bonus-row" hidden>
-                  <label for="build-rebirth-bonus">2 轉起每多 1 轉額外素質點</label>
-                  <input id="build-rebirth-bonus" type="number" min="0" max="500" value="52">
+                  <select id="build-rebirths" class="rebirth-select" aria-label="轉生次數">
+                    <option value="0">0 轉（一般 · 起始 48 點）</option>
+                    <option value="1" selected>1 轉（進階 · 起始 100 點）</option>
+                    <option value="2">2 轉（進階 · 起始 120 點）</option>
+                    <option value="3">3 轉（進階 · 起始 140 點）</option>
+                    <option value="4">4 轉（進階 · 起始 160 點）</option>
+                    <option value="5">5 轉（進階 · 起始 180 點）</option>
+                    <option value="6">6 轉（進階 · 起始 200 點）</option>
+                    <option value="7">7 轉（進階 · 起始 220 點）</option>
+                    <option value="8">8 轉（進階 · 起始 240 點）</option>
+                    <option value="9">9 轉（進階 · 起始 260 點）</option>
+                    <option value="10">10 轉（進階 · 起始 280 點）</option>
+                    <option value="11">11 轉（進階 · 起始 300 點）</option>
+                  </select>
+                  <button id="rebirth-0" class="btn btn-outline btn-sm" type="button">0轉</button>
+                  <button id="rebirth-1" class="btn btn-outline btn-sm" type="button">1轉</button>
+                  <button id="rebirth-11" class="btn btn-outline btn-sm" type="button">11轉</button>
                 </div>
                 <p id="rebirth-hint" class="hint"></p>
               </div>

@@ -1,5 +1,7 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-7";
+const ASSET_VER = "20261127-8";
+const MAX_REBIRTHS = 11;
+const EXTRA_STAT_PER_REBIRTH = 20;
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -57,7 +59,6 @@ let activeSavedKey = "";
 let activeTab = "build";
 let currentIsCustom = true;
 let currentRebirths = 1;
-let currentRebirthBonus = 52;
 let currentFirstJobLv = 50;
 let skillFilterMode = "all";
 let skillViewMode = (() => {
@@ -185,10 +186,9 @@ function statStepCost(currentVal) {
   return Math.floor((currentVal - 1) / 10) + 2;
 }
 
-function totalStatPointsFor(baseLv, rebirths, extraPerRebirth = currentRebirthBonus) {
-  const rb = Math.max(0, Math.trunc(rebirths || 0));
-  const extra = Math.max(0, Math.trunc(extraPerRebirth ?? 52));
-  let pts = rb === 0 ? 48 : 100 + (rb - 1) * extra;
+function totalStatPointsFor(baseLv, rebirths) {
+  const rb = Math.max(0, Math.min(MAX_REBIRTHS, Math.trunc(rebirths || 0)));
+  let pts = rb === 0 ? 48 : 100 + (rb - 1) * EXTRA_STAT_PER_REBIRTH;
   const lv = Math.max(1, Math.min(99, Math.trunc(baseLv)));
   for (let i = 1; i < lv; i++) pts += Math.floor(i / 5) + 3;
   return pts;
@@ -311,7 +311,7 @@ function persistSavedList() {
   }
 }
 
-function upsertSavedCharacter(snap, {isCustom = false, rebirths, rebirthBonus, firstJobLv, overrides, preserveKey} = {}) {
+function upsertSavedCharacter(snap, {isCustom = false, rebirths, firstJobLv, overrides, preserveKey} = {}) {
   const key = preserveKey || charStorageKey(snap, isCustom);
   const jobDef = jobMap.get(snap.character.job);
   const inferredRebirths = rebirths ?? (jobDef?.upper ? 1 : 0);
@@ -323,7 +323,6 @@ function upsertSavedCharacter(snap, {isCustom = false, rebirths, rebirthBonus, f
     job: snap.character.job ?? "",
     jobName: jobDef?.name ?? snap.character.job ?? "",
     rebirths: inferredRebirths,
-    rebirthBonus: rebirthBonus ?? currentRebirthBonus,
     firstJobLv: firstJobLv ?? 50,
     isCustom: Boolean(isCustom),
     savedAt: Date.now(),
@@ -530,22 +529,17 @@ function renderBuildTab() {
   const c = snapshot.character;
   const jobDef = jobMap.get(c.job);
   $("build-name").value = c.name;
-  if (document.activeElement !== $("build-rebirths")) {
-    $("build-rebirths").value = String(currentRebirths);
-  }
+  $("build-rebirths").value = String(currentRebirths);
   $("rebirth-0").classList.toggle("is-active", currentRebirths === 0);
-  $("rebirth-1").classList.toggle("is-active", currentRebirths >= 1);
-  $("rebirth-bonus-wrap").hidden = currentRebirths < 2;
-  if (document.activeElement !== $("build-rebirth-bonus")) {
-    $("build-rebirth-bonus").value = String(currentRebirthBonus);
-  }
-  const startPts = currentRebirths === 0 ? 48 : 100 + (currentRebirths - 1) * currentRebirthBonus;
-  const totalLvPts = totalStatPointsFor(c.baseLv, currentRebirths, currentRebirthBonus);
+  $("rebirth-1").classList.toggle("is-active", currentRebirths === 1);
+  $("rebirth-11").classList.toggle("is-active", currentRebirths === 11);
+  const startPts = currentRebirths === 0 ? 48 : 100 + (currentRebirths - 1) * EXTRA_STAT_PER_REBIRTH;
+  const totalLvPts = totalStatPointsFor(c.baseLv, currentRebirths);
   $("rebirth-hint").textContent = currentRebirths === 0
     ? `0 轉一般職業：Lv.1 起始 48 點（目前 Lv.${c.baseLv} 共 ${format(totalLvPts)} 點）、基礎 HP／SP 1.0×`
     : currentRebirths === 1
-      ? `1 轉進階職業：Lv.1 起始 100 點（+52，目前 Lv.${c.baseLv} 共 ${format(totalLvPts)} 點）、基礎 HP／SP ×1.25、Job 上限 70`
-      : `${currentRebirths} 轉：Lv.1 起始 ${format(startPts)} 點（100 + ${currentRebirths - 1}×${currentRebirthBonus}，目前 Lv.${c.baseLv} 共 ${format(totalLvPts)} 點）、基礎 HP／SP ×1.25`;
+      ? `1 轉進階職業：Lv.1 起始 100 點（目前 Lv.${c.baseLv} 共 ${format(totalLvPts)} 點）、基礎 HP／SP ×1.25、Job 上限 70`
+      : `${currentRebirths} 轉進階職業：Lv.1 起始 ${format(startPts)} 點（100 + ${currentRebirths - 1}×${EXTRA_STAT_PER_REBIRTH}，目前 Lv.${c.baseLv} 共 ${format(totalLvPts)} 點）、基礎 HP／SP ×1.25`;
 
   populateJobSelect(currentRebirths, c.job);
   const maxJL = jobDef?.maxJobLv ?? 70;
@@ -637,7 +631,7 @@ function renderStatAllocator() {
   if (!snapshot) return;
   const c = snapshot.character;
   const freeMode = $("build-free-stats").checked;
-  const totalPts = totalStatPointsFor(c.baseLv, currentRebirths, currentRebirthBonus);
+  const totalPts = totalStatPointsFor(c.baseLv, currentRebirths);
   const usedPts = spentStatPoints(c.stats);
   const remain = totalPts - usedPts;
   const pill = $("stat-points-summary");
@@ -726,7 +720,7 @@ function setStatExact(key, desired) {
   const c = snapshot.character;
   let val = Math.max(1, Math.min(99, Math.trunc(desired)));
   if (!freeMode && val > c.stats[key]) {
-    const totalPts = totalStatPointsFor(c.baseLv, currentRebirths, currentRebirthBonus);
+    const totalPts = totalStatPointsFor(c.baseLv, currentRebirths);
     const otherSpent = spentStatPoints({...c.stats, [key]: 1});
     let best = 1;
     let acc = otherSpent;
@@ -2213,7 +2207,6 @@ async function applyLoadedSnapshot(nextSnapshot, {
   save = true,
   isCustom = false,
   rebirths,
-  rebirthBonus,
   firstJobLv = 50,
   overrides = {},
   sourceLabel = "",
@@ -2229,8 +2222,7 @@ async function applyLoadedSnapshot(nextSnapshot, {
     currentIsCustom = Boolean(isCustom);
     originalImportedSnapshot = isCustom ? null : structuredClone(snapshot);
     const jobDef = jobMap.get(snapshot.character.job);
-    currentRebirths = rebirths ?? (jobDef?.upper ? 1 : 0);
-    currentRebirthBonus = rebirthBonus ?? 52;
+    currentRebirths = Math.max(0, Math.min(MAX_REBIRTHS, Math.trunc(rebirths ?? (jobDef?.upper ? 1 : 0))));
     currentFirstJobLv = firstJobLv ?? 50;
     selectedSkillId = null;
 
@@ -2426,7 +2418,7 @@ $("build-name").oninput = () => {
 
 function setRebirthCount(nextCount) {
   if (!snapshot || !builderInfo) return;
-  const clamped = Math.max(0, Math.min(99, Math.trunc(nextCount) || 0));
+  const clamped = Math.max(0, Math.min(MAX_REBIRTHS, Math.trunc(nextCount) || 0));
   const wasUpper = currentRebirths >= 1;
   const nowUpper = clamped >= 1;
   currentRebirths = clamped;
@@ -2444,21 +2436,8 @@ function setRebirthCount(nextCount) {
 
 $("rebirth-0").onclick = () => setRebirthCount(0);
 $("rebirth-1").onclick = () => setRebirthCount(1);
-$("build-rebirths").oninput = () => {
-  if ($("build-rebirths").value === "") return;
-  setRebirthCount(Number($("build-rebirths").value));
-};
+$("rebirth-11").onclick = () => setRebirthCount(11);
 $("build-rebirths").onchange = () => setRebirthCount(Number($("build-rebirths").value));
-$("build-rebirth-bonus").oninput = () => {
-  if ($("build-rebirth-bonus").value === "") return;
-  currentRebirthBonus = Math.max(0, Math.min(500, Math.trunc(Number($("build-rebirth-bonus").value) || 0)));
-  renderBuildTab();
-};
-$("build-rebirth-bonus").onchange = () => {
-  currentRebirthBonus = Math.max(0, Math.min(500, Math.trunc(Number($("build-rebirth-bonus").value) || 0)));
-  $("build-rebirth-bonus").value = String(currentRebirthBonus);
-  renderBuildTab();
-};
 
 $("build-job").onchange = () => {
   if (!snapshot) return;
@@ -2821,7 +2800,6 @@ function setupWebMode() {
         save: true,
         isCustom: isBuildExport ? Boolean(parsed.isCustom) : false,
         rebirths: isBuildExport ? parsed.rebirths : undefined,
-        rebirthBonus: isBuildExport ? parsed.rebirthBonus : undefined,
         firstJobLv: isBuildExport ? parsed.firstJobLv : 50,
         overrides: isBuildExport ? parsed.equipOverrides : {},
         sourceLabel: file.name,
@@ -2850,7 +2828,6 @@ function setupWebMode() {
     const entry = upsertSavedCharacter(snapshot, {
       isCustom: currentIsCustom,
       rebirths: currentRebirths,
-      rebirthBonus: currentRebirthBonus,
       firstJobLv: currentFirstJobLv,
       overrides: equipOverrides,
     });
@@ -2867,7 +2844,6 @@ function setupWebMode() {
       save: false,
       isCustom: Boolean(found.isCustom),
       rebirths: found.rebirths,
-      rebirthBonus: found.rebirthBonus,
       firstJobLv: found.firstJobLv ?? 50,
       overrides: found.equipOverrides ?? {},
       sourceLabel: found.isCustom ? "已存自訂配點" : "已存匯入角色",
@@ -2880,7 +2856,6 @@ function setupWebMode() {
       roDpsBuild: 1,
       isCustom: currentIsCustom,
       rebirths: currentRebirths,
-      rebirthBonus: currentRebirthBonus,
       firstJobLv: currentFirstJobLv,
       equipOverrides: cleanEquipOverrides() ?? {},
       snapshot,
@@ -2985,7 +2960,6 @@ async function init() {
         save: false,
         isCustom: Boolean(first.isCustom),
         rebirths: first.rebirths,
-        rebirthBonus: first.rebirthBonus,
         firstJobLv: first.firstJobLv ?? 50,
         overrides: first.equipOverrides ?? {},
         sourceLabel: first.isCustom ? "已存自訂配點" : "已存匯入角色",
