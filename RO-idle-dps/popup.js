@@ -314,8 +314,8 @@ async function load() {
     renderScenario();
     $("role").textContent = `${snapshot.character.name} · Base ${snapshot.character.baseLv}／Job ${snapshot.character.jobLv}`;
     $("skill").replaceChildren(...skills.map(({id,name}) => new Option(name,id)));
-    $("mode").options[1].disabled = !skills.length;
-    if (!skills.length && $("mode").value === "skill") $("mode").value = "normal";
+    $("mode").querySelector('option[value="skill"]').disabled = !skills.length;
+    if (!skills.length && $("mode").value === "skill") $("mode").value = "auto";
     $("skill-fields").hidden = $("mode").value !== "skill";
     fillLevels();
     fillMonsters();
