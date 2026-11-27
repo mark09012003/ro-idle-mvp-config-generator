@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import { createGameState, type GameState, type ActiveMonster, type ActiveBuff } from "./src/game/sim/state";
-import { autoEquipFor, derived, equipBagAmmo, moveTime, nextEventTime, observeDamage, processAt, receiveHealing, setDamageImmunity } from "./src/game/sim/engine";
+import { autoEquipFor, derived, equipBagAmmo, monsterAttack, moveTime, nextEventTime, observeDamage, performMobSkill, processAt, receiveHealing, setDamageImmunity } from "./src/game/sim/engine";
 import { SONGS, type PerformerCtx } from "./src/game/combat/songs";
 import { defaultAutoConfig } from "./src/game/ai/config";
 import { MONSTERS, type MonsterDef } from "./src/game/data/monsters";
@@ -452,12 +452,206 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
     if (!selected || !Number.isInteger(options.level) || options.level! < 1 || options.level! > selected.lv) {
       throw new Error("請選擇角色已學會的攻擊技能和等級。");
     }
-    state.config.skills = [{skill:selected.id, lv:options.level!, use:"attack", percent:0}];
+    state.config.skills = buildSkillModeConfig(state, selected.id, options.level!);
   }
   const stats = derived(state);
   state.character.hp = Math.min(state.character.hp, stats.maxHp);
   state.character.sp = options.unlimitedSp ? stats.maxSp : Math.min(state.character.sp, stats.maxSp);
   return state;
+}
+
+const MONK_COMBO_CHAIN = ["MO_CHAINCOMBO", "MO_COMBOFINISH", "CH_TIGERFIST", "CH_CHAINCRUSH"] as const;
+const SPHERE_ATTACK_SKILLS = new Set([
+  "MO_FINGEROFFENSIVE", "MO_INVESTIGATE", "MO_COMBOFINISH",
+  "CH_TIGERFIST", "CH_CHAINCRUSH", "MO_EXTREMITYFIST", "CH_PALMSTRIKE",
+]);
+const EXPLOSION_ATTACK_SKILLS = new Set(["MO_EXTREMITYFIST", "CH_PALMSTRIKE"]);
+const HIDING_ATTACK_SKILLS = new Set(["AS_GRIMTOOTH", "RG_RAID"]);
+
+function buildSkillModeConfig(state: GameState, selectedId: string, selectedLv: number) {
+  const learned = state.character.skills ?? {};
+  const list: {skill: string; lv: number; use: "attack" | "buff"; percent: number}[] = [];
+  const added = new Set<string>();
+  const pushSkill = (id: string, lv: number, use: "attack" | "buff") => {
+    if (lv <= 0 || added.has(id)) return;
+    added.add(id);
+    list.push({skill: id, lv, use, percent: 0});
+  };
+
+  const attackList: {id: string; lv: number}[] = [];
+  const comboIdx = MONK_COMBO_CHAIN.indexOf(selectedId as typeof MONK_COMBO_CHAIN[number]);
+  if (comboIdx >= 0) {
+    attackList.push({id: selectedId, lv: selectedLv});
+    for (let i = comboIdx - 1; i >= 0; i--) {
+      const prevId = MONK_COMBO_CHAIN[i];
+      const prevLv = learned[prevId] ?? 0;
+      if (prevLv > 0) attackList.push({id: prevId, lv: prevLv});
+    }
+  } else {
+    attackList.push({id: selectedId, lv: selectedLv});
+  }
+
+  const needsExplosion = attackList.some(a => EXPLOSION_ATTACK_SKILLS.has(a.id));
+  const needsSpheres = needsExplosion || attackList.some(a => SPHERE_ATTACK_SKILLS.has(a.id));
+  const needsCartBoost = selectedId === "WS_CARTTERMINATION";
+  const needsCart = needsCartBoost || selectedId === "MC_CARTREVOLUTION";
+  const needsHiding = HIDING_ATTACK_SKILLS.has(selectedId);
+
+  if (needsCart && !state.cart) {
+    state.cart = {items: [], nextUid: 1};
+  }
+  if (needsSpheres) {
+    if ((learned.CH_SOULCOLLECT ?? 0) > 0) pushSkill("CH_SOULCOLLECT", learned.CH_SOULCOLLECT, "buff");
+    else if ((learned.MO_CALLSPIRITS ?? 0) > 0) pushSkill("MO_CALLSPIRITS", learned.MO_CALLSPIRITS, "buff");
+  }
+  if (needsExplosion && (learned.MO_EXPLOSIONSPIRITS ?? 0) > 0) {
+    pushSkill("MO_EXPLOSIONSPIRITS", learned.MO_EXPLOSIONSPIRITS, "buff");
+  }
+  if (needsCartBoost && (learned.WS_CARTBOOST ?? 0) > 0) {
+    pushSkill("WS_CARTBOOST", learned.WS_CARTBOOST, "buff");
+  }
+  if (needsHiding && (learned.TF_HIDING ?? 0) > 0) {
+    pushSkill("TF_HIDING", learned.TF_HIDING, "buff");
+  }
+
+  for (const a of attackList) {
+    pushSkill(a.id, a.lv, "attack");
+  }
+  return list;
+}
+
+const NON_OFFENSIVE_MOB_SKILLS = new Set([
+  "NPC_EMOTION", "NPC_EMOTION_ON", "NPC_RANDOMMOVE", "NPC_RUN", "AL_TELEPORT",
+  "NPC_SUMMONSLAVE", "NPC_CALLSLAVE", "NPC_SUMMONMONSTER", "NPC_ALLHEAL", "AL_HEAL",
+  "NPC_METAMORPHOSIS", "NPC_POWERUP", "NPC_AGIUP", "NPC_KEEPING", "NPC_DEFENDER",
+  "NPC_MAGICMIRROR", "NPC_STONESKIN", "HP_ASSUMPTIO", "CR_REFLECTSHIELD", "CR_AUTOGUARD",
+  "NPC_INVISIBLE", "TF_HIDING", "AS_CLOAKING", "NPC_REBIRTH", "NPC_ATTRICHANGE",
+  "NPC_CHANGEFIRE", "NPC_CHANGEGROUND", "NPC_CHANGEHOLY", "NPC_CHANGETELEKINESIS",
+  "NPC_CHANGEUNDEAD", "NPC_CHANGEWATER", "NPC_CHANGEWIND", "NPC_SMOKING", "NPC_SPEEDUP",
+  "NPC_BARRIER", "PR_LEXAETERNA", "SM_ENDURE", "KN_TWOHANDQUICKEN", "MG_ENERGYCOAT",
+  "CR_DEFENDER", "AL_INCAGI", "AL_BLESSING", "AL_ANGELUS", "PR_KYRIE", "PR_SANCTUARY",
+  "WZ_SIGHTRASHER", "MG_SIGHT", "AL_RUWACH", "AL_PNEUMA", "MG_SAFETYWALL",
+]);
+
+export function monsterSkills(monsterId: number) {
+  const mob = MONSTERS.get(monsterId);
+  if (!mob) return [];
+  const result: {key: string; skill: string; name: string; lv: number; element?: string}[] = [
+    {key: "__normal__", skill: "__normal__", name: "怪物普攻", lv: 1, element: mob.element},
+  ];
+  const seen = new Set<string>();
+  for (const entry of mob.skills ?? []) {
+    if (!entry.skill || NON_OFFENSIVE_MOB_SKILLS.has(entry.skill)) continue;
+    if (entry.target === "self" && entry.skill !== "NPC_SELFDESTRUCTION" && entry.skill !== "NPC_EARTHQUAKE" && entry.skill !== "NPC_PULSESTRIKE") continue;
+    const key = `${entry.skill}@${entry.lv}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({
+      key,
+      skill: entry.skill,
+      name: skillDisplayName(entry.skill, monsterId),
+      lv: entry.lv,
+      element: entry.element,
+    });
+  }
+  return result;
+}
+
+export function testMonsterSkill(
+  snapshot: GameSnapshot,
+  options: {monsterId: number; skill: string; lv?: number; mode?: Options["mode"]; scenario?: Scenario; samples?: number}
+) {
+  const monster = MONSTERS.get(options.monsterId);
+  if (!monster) throw new Error("請先選擇有效怪物。");
+  registerItemDefs(snapshot.heldItems ?? []);
+  const samples = Math.max(20, Math.min(400, options.samples ?? 200));
+  const isNormal = options.skill === "__normal__";
+  const skillEntry = isNormal
+    ? null
+    : (monster.skills ?? []).find(e => e.skill === options.skill && (options.lv == null || e.lv === options.lv))
+      ?? (monster.skills ?? []).find(e => e.skill === options.skill);
+  if (!isNormal && !skillEntry) throw new Error("此怪物沒有該技能。");
+
+  let maxHp = 1;
+  let hits = 0, misses = 0, blocked = 0, lethalCount = 0;
+  let totalDamage = 0, hitDamageSum = 0;
+  let minHit = Infinity, maxHit = 0;
+  const ailments = new Map<string, number>();
+  const sampleRolls: number[] = [];
+
+  for (let i = 0; i < samples; i++) {
+    const simOpts: Options = {
+      monsterId: options.monsterId,
+      mode: options.mode === "auto" ? "auto" : "normal",
+      seconds: 30,
+      counterattack: true,
+      invincible: true,
+      scenario: options.scenario,
+    };
+    const state = setup(snapshot, simOpts, 71001 + 3571 * i);
+    setDamageImmunity(state);
+    prepareEncounter(state, simOpts);
+    const d = derived(state);
+    if (i === 0) maxHp = d.maxHp;
+    state.character.hp = d.maxHp;
+    const mob = state.monsters[0];
+    let trialDamage = 0;
+    let trialResult: string | null = null;
+    observeDamage(state, (_src, dmg) => {
+      if (dmg > 0) trialDamage += dmg;
+    });
+    const emit = (ev: {type: string; result?: string; ailment?: string}) => {
+      if ((ev.type === "monsterAttack" || ev.type === "mobSkill") && ev.result) {
+        trialResult = ev.result;
+      }
+      if (ev.type === "ailmentStart" && ev.ailment) {
+        const label = AILMENT_NAMES[ev.ailment as keyof typeof AILMENT_NAMES] ?? ev.ailment;
+        ailments.set(label, (ailments.get(label) ?? 0) + 1);
+      }
+    };
+    if (isNormal) {
+      monsterAttack(state, mob, emit);
+    } else {
+      performMobSkill(state, mob, skillEntry!, emit);
+    }
+    if (trialDamage > 0) {
+      hits++;
+      hitDamageSum += trialDamage;
+      totalDamage += trialDamage;
+      if (trialDamage < minHit) minHit = trialDamage;
+      if (trialDamage > maxHit) maxHit = trialDamage;
+      if (trialDamage >= d.maxHp) lethalCount++;
+    } else if (trialResult === "blocked") {
+      blocked++;
+    } else {
+      misses++;
+    }
+    if (sampleRolls.length < 10) sampleRolls.push(trialDamage);
+  }
+
+  return {
+    monsterName: monster.name,
+    skill: options.skill,
+    skillName: isNormal ? "怪物普攻" : skillDisplayName(options.skill, options.monsterId),
+    lv: isNormal ? 1 : skillEntry!.lv,
+    samples,
+    maxHp,
+    hits,
+    misses,
+    blocked,
+    hitRate: (hits / samples) * 100,
+    missRate: (misses / samples) * 100,
+    blockRate: (blocked / samples) * 100,
+    min: hits ? minHit : 0,
+    max: hits ? maxHit : 0,
+    avgHit: hits ? hitDamageSum / hits : 0,
+    avgAll: totalDamage / samples,
+    lethalCount,
+    lethalRate: (lethalCount / samples) * 100,
+    ailments: [...ailments.entries()].map(([name, count]) => ({name, rate: (count / samples) * 100}))
+      .sort((a, b) => b.rate - a.rate),
+    sampleRolls,
+  };
 }
 
 export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario, mode: Options["mode"] = "normal", monsterId = 0) {

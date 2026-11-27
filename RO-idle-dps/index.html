@@ -12,8 +12,8 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="popup.css?v=20261127-9">
-  <script type="module" src="popup.js?v=20261127-9"></script>
+  <link rel="stylesheet" href="popup.css?v=20261127-10">
+  <script type="module" src="popup.js?v=20261127-10"></script>
 </head>
 <body>
   <div class="shell">
@@ -128,7 +128,7 @@
           <button class="tab-btn is-active" type="button" role="tab" data-tab="build" aria-selected="true">角色配點</button>
           <button class="tab-btn" type="button" role="tab" data-tab="skills" aria-selected="false">技能配點 <span id="tab-badge-skills" class="tab-badge"></span></button>
           <button class="tab-btn" type="button" role="tab" data-tab="gear" aria-selected="false">裝備／卡片 <span id="tab-badge-gear" class="tab-badge" hidden></span></button>
-          <button class="tab-btn" type="button" role="tab" data-tab="buffs" aria-selected="false">Buff／狀態 <span id="tab-badge-buffs" class="tab-badge" hidden></span></button>
+          <button class="tab-btn" type="button" role="tab" data-tab="buffs" aria-selected="false">角色 Buff <span id="tab-badge-buffs" class="tab-badge" hidden></span></button>
           <button class="tab-btn tab-btn-sim" type="button" role="tab" data-tab="simulate" aria-selected="false">DPS 試算</button>
         </nav>
 
@@ -386,19 +386,6 @@
               <p class="filter-count" id="buff-count" aria-live="polite"></p>
               <label class="check"><input id="auto-buffs" type="checkbox"> 允許使用 Buff 道具及掛機模式自補 Buff</label>
             </div>
-
-            <div class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2>怪物起始狀態</h2>
-                  <p class="hint">設為 0 秒時不自然到期（像天使之怒、冰凍仍會依遊戲規則被攻擊消耗或解除）。每次換新目標都會套用。</p>
-                </div>
-                <button id="clear-monster-statuses" class="btn btn-outline btn-sm" type="button">清除勾選</button>
-              </div>
-              <input id="status-filter" type="search" aria-label="篩選怪物狀態" placeholder="篩選怪物狀態名稱或代碼">
-              <div id="monster-statuses" class="effect-list" aria-label="怪物狀態"></div>
-              <p class="filter-count" id="status-count" aria-live="polite"></p>
-            </div>
           </div>
         </section>
 
@@ -425,6 +412,28 @@
               </div>
 
               <div id="selected-monster-preview" class="monster-preview" hidden></div>
+
+              <details id="monster-status-details" class="monster-subpanel">
+                <summary id="monster-status-summary">怪物起始狀態（未設定）</summary>
+                <div class="monster-subpanel-body">
+                  <div class="monster-subpanel-head">
+                    <p class="hint">設為 0 秒不自然到期（像天使之怒、冰凍仍會依遊戲規則被攻擊消耗或解除）；每次換新目標都會套用。</p>
+                    <button id="clear-monster-statuses" class="btn btn-outline btn-sm" type="button">清除勾選</button>
+                  </div>
+                  <input id="status-filter" type="search" aria-label="篩選怪物狀態" placeholder="篩選怪物狀態名稱或代碼">
+                  <div id="monster-statuses" class="effect-list effect-list-compact" aria-label="怪物狀態"></div>
+                  <p class="filter-count" id="status-count" aria-live="polite"></p>
+                </div>
+              </details>
+
+              <div id="mob-skill-tester" class="monster-subpanel mob-skill-tester" hidden>
+                <div class="mob-skill-head">
+                  <strong>測試怪物技能打我有多痛</strong>
+                  <span class="hint">點擊下方技能即可手動讓此怪物施放一次（抽樣 200 次計算承傷與致死率）</span>
+                </div>
+                <div id="mob-skill-buttons" class="mob-skill-buttons"></div>
+                <div id="mob-skill-result" class="mob-skill-result" hidden></div>
+              </div>
 
               <div class="form-grid-3">
                 <label class="field">
@@ -455,6 +464,7 @@
                 <label class="field"><span>攻擊技能</span><select id="skill"></select></label>
                 <label class="field"><span>技能等級</span><select id="skill-level"></select></label>
               </div>
+              <p id="skill-prereq-hint" class="skill-prereq-hint" hidden></p>
 
               <div class="sim-checks">
                 <label class="check" id="quick-active-buffs-wrap" hidden>
@@ -463,7 +473,7 @@
                 </label>
                 <label class="check"><input id="unlimited-sp" type="checkbox"> 無限 SP</label>
                 <label class="check"><input id="counterattack" type="checkbox"> 模擬怪物反擊並計算承傷</label>
-                <label class="check"><input id="invincible" type="checkbox"> 角色免傷，怪物照常施技</label>
+                <label class="check"><input id="invincible" type="checkbox"> 角色不死（HP 最低為 1，照常計算承傷）</label>
               </div>
 
               <button id="calculate" class="btn btn-primary btn-lg btn-full" type="submit">開始模擬計算 DPS</button>
@@ -530,7 +540,7 @@
 
             <details class="mini-details">
               <summary>試算條件說明</summary>
-              <p class="hint">以角色目前配點／快照的 HP、SP、裝備、卡片與 Buff 開始，連續模擬 16 次取平均。目標倒下後立即換上同種滿血怪物並計入有效傷害。已自訂的裝備部位會鎖定不被掛機自動換裝覆蓋。身上 Buff 預設常駐（模擬隊友續補），也可取消改用快照剩餘秒數倒數。</p>
+              <p class="hint">以角色目前配點／快照的 HP、SP、裝備、卡片與 Buff 開始，連續模擬 16 次取平均。目標倒下後立即換上同種滿血怪物並計入有效傷害。指定技能模式會自動搭配該技能所需的蓄氣／爆氣或武僧連技前置。勾選「角色不死」時 HP 最低維持 1 點不倒下，並照常完整計算每次實際承傷與傷害來源。</p>
             </details>
           </section>
         </section>

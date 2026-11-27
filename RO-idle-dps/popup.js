@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-9";
+const ASSET_VER = "20261127-10";
 const MAX_REBIRTHS = 11;
 const EXTRA_STAT_PER_REBIRTH = 20;
 const host = "https://ro-idle.app";
@@ -94,6 +94,8 @@ async function runDirectEngine(action, options) {
     scenario: () => eng.scenarioCatalog(snapshot),
     equipment: () => eng.equipmentCatalog(snapshot),
     character: () => eng.previewCharacter(snapshot, options.scenario, options.mode, options.monsterId),
+    mobSkills: () => eng.monsterSkills(options.monsterId),
+    testMobSkill: () => eng.testMonsterSkill(snapshot, options),
     simulate: () => eng.simulate(snapshot, options),
   }[action]();
 }
@@ -149,7 +151,7 @@ function engine(action, options) {
     const id = ++sequence;
     const timeout = setTimeout(() => resetWorker("本機試算逾時，請改用較短的模擬時間。"), 25000);
     requests.set(id, {resolve, reject, timeout, action, options});
-    const noSnap = action === "targets" || action === "builder";
+    const noSnap = action === "targets" || action === "builder" || action === "mobSkills";
     thread.postMessage({id, action, snapshot: noSnap ? undefined : snapshot, options});
   });
 }
@@ -1879,11 +1881,23 @@ function readEffects(container) {
 function updateBuffTabBadge() {
   const activeCount = $("active-buffs").querySelectorAll("input:checked").length;
   const manualCount = $("extra-buffs").querySelectorAll(".effect-toggle:checked").length;
-  const statusCount = $("monster-statuses").querySelectorAll(".effect-toggle:checked").length;
-  const total = activeCount + manualCount + statusCount;
+  const total = activeCount + manualCount;
   const badge = $("tab-badge-buffs");
   badge.hidden = total === 0;
   badge.textContent = String(total);
+  updateMonsterStatusSummary();
+}
+
+function updateMonsterStatusSummary() {
+  const summary = $("monster-status-summary");
+  if (!summary) return;
+  const checkedRows = [...$("monster-statuses").children].filter(row => row.querySelector(".effect-toggle").checked);
+  if (!checkedRows.length) {
+    summary.textContent = "怪物起始狀態（未設定）";
+    return;
+  }
+  const names = checkedRows.map(row => row.dataset.name);
+  summary.textContent = `怪物起始狀態（已套用 ${checkedRows.length} 項：${names.slice(0, 3).join("、")}${names.length > 3 ? "…" : ""}）`;
 }
 
 function syncActiveBuffControls() {
@@ -1992,12 +2006,139 @@ function readScenario() {
 // TAB 5: Monsters, Live Stats Sidebar & DPS Results
 // =========================================================================
 
+let mobSkillListVersion = 0;
+let mobSkillTestVersion = 0;
+let activeMobSkillKey = null;
+
+async function loadMobSkills(monsterId) {
+  const tester = $("mob-skill-tester");
+  const btnWrap = $("mob-skill-buttons");
+  const resultBox = $("mob-skill-result");
+  const ver = ++mobSkillListVersion;
+  activeMobSkillKey = null;
+  resultBox.hidden = true;
+  if (!monsterId) {
+    tester.hidden = true;
+    return;
+  }
+  try {
+    const list = await engine("mobSkills", {monsterId});
+    if (ver !== mobSkillListVersion) return;
+    if (!list?.length) {
+      tester.hidden = true;
+      return;
+    }
+    tester.hidden = false;
+    btnWrap.replaceChildren(...list.map(entry => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mob-skill-btn";
+      btn.dataset.key = entry.key;
+      const label = entry.skill === "__normal__" ? entry.name : `${entry.name} Lv.${entry.lv}`;
+      btn.append(label);
+      if (entry.element && entry.element !== "neutral") {
+        const elTag = document.createElement("span");
+        elTag.className = "mob-skill-el";
+        elTag.textContent = element[entry.element] ?? entry.element;
+        btn.append(elTag);
+      }
+      btn.onclick = () => { void runMobSkillTest(monsterId, entry, btn); };
+      return btn;
+    }));
+  } catch {
+    if (ver === mobSkillListVersion) tester.hidden = true;
+  }
+}
+
+async function runMobSkillTest(monsterId, entry, clickedBtn) {
+  if (!snapshot) return;
+  const ver = ++mobSkillTestVersion;
+  activeMobSkillKey = entry.key;
+  for (const b of $("mob-skill-buttons").children) {
+    b.classList.toggle("is-active", b === clickedBtn);
+  }
+  const resultBox = $("mob-skill-result");
+  resultBox.hidden = false;
+  resultBox.textContent = `正在測試「${entry.name}」的承傷（抽樣 200 次）…`;
+  try {
+    const res = await engine("testMobSkill", {
+      monsterId,
+      skill: entry.skill,
+      lv: entry.lv,
+      mode: $("mode").value,
+      scenario: readScenario(),
+    });
+    if (ver !== mobSkillTestVersion) return;
+
+    const head = document.createElement("div");
+    head.className = "mob-skill-result-head";
+    const title = document.createElement("strong");
+    title.textContent = `${res.monsterName} · ${res.skillName}${res.skill === "__normal__" ? "" : ` Lv.${res.lv}`}`;
+    const badge = document.createElement("span");
+    const maxPct = res.maxHp > 0 ? (res.max / res.maxHp) * 100 : 0;
+    const avgPct = res.maxHp > 0 ? (res.avgHit / res.maxHp) * 100 : 0;
+    if (res.lethalCount > 0) {
+      badge.className = "mob-skill-badge is-lethal";
+      badge.textContent = `⚠ 一擊致死率 ${format(res.lethalRate)}%（最高為最大 HP 的 ${format(maxPct)}%）`;
+    } else if (res.hits > 0) {
+      badge.className = "mob-skill-badge is-safe";
+      badge.textContent = `可承受（最高佔最大 HP ${format(maxPct)}%）`;
+    } else {
+      badge.className = "mob-skill-badge is-miss";
+      badge.textContent = res.blocked > 0 ? "完全格擋／免疫" : "完全迴避／未命中";
+    }
+    head.append(title, badge);
+
+    const metrics = document.createElement("div");
+    metrics.className = "mob-skill-metrics";
+    const mkMetric = (label, val) => {
+      const box = document.createElement("div");
+      box.className = "mob-skill-metric";
+      const sp = document.createElement("span");
+      sp.textContent = label;
+      const st = document.createElement("strong");
+      st.textContent = val;
+      box.append(sp, st);
+      return box;
+    };
+    const rangeStr = res.hits === 0
+      ? "0（未命中）"
+      : res.min === res.max ? format(res.min) : `${format(res.min)} ～ ${format(res.max)}`;
+    const avgStr = res.hits === 0 ? "0" : `${format(res.avgHit)}（${format(avgPct)}% HP）`;
+    const rateLabel = res.blocked > 0 ? "命中／迴避／格擋" : "命中／迴避";
+    const rateStr = res.blocked > 0
+      ? `${format(res.hitRate)}% ／ ${format(res.missRate)}% ／ ${format(res.blockRate)}%`
+      : `${format(res.hitRate)}% ／ ${format(res.missRate)}%`;
+    metrics.append(
+      mkMetric("命中單次傷害", rangeStr),
+      mkMetric("命中平均傷害", avgStr),
+      mkMetric(rateLabel, rateStr),
+      mkMetric("角色最大 HP", format(res.maxHp))
+    );
+
+    const meta = document.createElement("div");
+    meta.className = "mob-skill-meta";
+    const metaLines = [];
+    if (res.ailments?.length) {
+      metaLines.push(`可能附加狀態：${res.ailments.map(a => `${a.name} ${format(a.rate)}%`).join("、")}`);
+    }
+    if (res.sampleRolls?.length) {
+      metaLines.push(`前 ${res.sampleRolls.length} 次實測：${res.sampleRolls.map(v => v > 0 ? format(v) : "未命中").join("、")}`);
+    }
+    meta.textContent = metaLines.join(" ｜ ");
+    resultBox.replaceChildren(head, metrics, meta);
+  } catch (error) {
+    if (ver === mobSkillTestVersion) resultBox.textContent = `測試失敗：${error.message}`;
+  }
+}
+
 function updateMonsterPreview() {
   const id = Number($("monster").value);
   const mob = targets.find(m => m.id === id);
   const box = $("selected-monster-preview");
   if (!mob) {
     box.hidden = true;
+    $("mob-skill-tester").hidden = true;
     return;
   }
   box.hidden = false;
@@ -2008,6 +2149,7 @@ function updateMonsterPreview() {
   detail.className = "muted";
   detail.textContent = `HP ${format(mob.hp)} · ${element[mob.element] ?? mob.element} ${mob.elementLv} · ${race[mob.race] ?? mob.race} · ${size[mob.size] ?? mob.size} · DEF ${mob.def}／MDEF ${mob.mdef}`;
   box.append(title, detail);
+  void loadMobSkills(mob.id);
 }
 
 function fillMonsters() {
@@ -2028,11 +2170,89 @@ function fillMonsters() {
   scheduleStats();
 }
 
+const MONK_COMBO_CHAIN = ["MO_CHAINCOMBO", "MO_COMBOFINISH", "CH_TIGERFIST", "CH_CHAINCRUSH"];
+const SPHERE_ATTACK_SKILLS = new Set([
+  "MO_FINGEROFFENSIVE", "MO_INVESTIGATE", "MO_COMBOFINISH",
+  "CH_TIGERFIST", "CH_CHAINCRUSH", "MO_EXTREMITYFIST", "CH_PALMSTRIKE",
+]);
+const EXPLOSION_ATTACK_SKILLS = new Set(["MO_EXTREMITYFIST", "CH_PALMSTRIKE"]);
+const HIDING_ATTACK_SKILLS = new Set(["AS_GRIMTOOTH", "RG_RAID"]);
+const PREREQ_LABEL = {
+  CH_SOULCOLLECT: "狂蓄氣",
+  MO_CALLSPIRITS: "蓄氣",
+  MO_EXPLOSIONSPIRITS: "爆氣",
+  MO_TRIPLEATTACK: "六合拳",
+  MO_CHAINCOMBO: "連環全身掌",
+  MO_COMBOFINISH: "猛龍誇強",
+  CH_TIGERFIST: "伏虎拳",
+  WS_CARTBOOST: "手推車加速",
+  TF_HIDING: "隱匿",
+};
+
+function updateSkillPrereqHint() {
+  const box = $("skill-prereq-hint");
+  if (!box || !snapshot || $("mode").value !== "skill") {
+    if (box) box.hidden = true;
+    return;
+  }
+  const sid = $("skill").value;
+  if (!sid) {
+    box.hidden = true;
+    return;
+  }
+  const learned = snapshot.character.skills ?? {};
+  const autoList = [];
+  const warnList = [];
+  const comboIdx = MONK_COMBO_CHAIN.indexOf(sid);
+  const needsCombo = comboIdx >= 0;
+  const needsExplosion = EXPLOSION_ATTACK_SKILLS.has(sid);
+  const needsSpheres = needsExplosion || SPHERE_ATTACK_SKILLS.has(sid) || comboIdx >= 1;
+
+  if (needsSpheres) {
+    if ((learned.CH_SOULCOLLECT ?? 0) > 0) autoList.push(`狂蓄氣 Lv.${learned.CH_SOULCOLLECT}`);
+    else if ((learned.MO_CALLSPIRITS ?? 0) > 0) autoList.push(`蓄氣 Lv.${learned.MO_CALLSPIRITS}`);
+    else warnList.push("尚未學習「蓄氣」或「狂蓄氣」，將無法補充氣彈");
+  }
+  if (needsExplosion) {
+    if ((learned.MO_EXPLOSIONSPIRITS ?? 0) > 0) autoList.push(`爆氣 Lv.${learned.MO_EXPLOSIONSPIRITS}`);
+    else warnList.push("尚未學習「爆氣」，無法發動此技能");
+  }
+  if (needsCombo) {
+    if ((learned.MO_TRIPLEATTACK ?? 0) > 0) autoList.push(`六合拳 Lv.${learned.MO_TRIPLEATTACK}（普攻觸發）`);
+    else warnList.push("尚未學習「六合拳」，無法起手接續連技");
+    for (let i = 0; i < comboIdx; i++) {
+      const pid = MONK_COMBO_CHAIN[i];
+      if ((learned[pid] ?? 0) > 0) autoList.push(`${PREREQ_LABEL[pid]} Lv.${learned[pid]}`);
+      else warnList.push(`尚未學習前置連技「${PREREQ_LABEL[pid]}」`);
+    }
+  }
+  if (sid === "WS_CARTTERMINATION") {
+    if ((learned.WS_CARTBOOST ?? 0) > 0) autoList.push(`手推車加速 Lv.${learned.WS_CARTBOOST}`);
+    else warnList.push("尚未學習「手推車加速」，無法施放手推車終結技");
+  }
+  if (HIDING_ATTACK_SKILLS.has(sid)) {
+    if ((learned.TF_HIDING ?? 0) > 0) autoList.push(`隱匿 Lv.${learned.TF_HIDING}`);
+    else warnList.push("尚未學習「隱匿」，無法施放此技能");
+  }
+
+  if (!autoList.length && !warnList.length) {
+    box.hidden = true;
+    return;
+  }
+  const parts = [];
+  if (autoList.length) parts.push(`已自動搭配前置／連技：${autoList.join(" → ")}`);
+  if (warnList.length) parts.push(`提醒：${warnList.join("；")}`);
+  box.textContent = parts.join(" ｜ ");
+  box.classList.toggle("is-warn", warnList.length > 0);
+  box.hidden = false;
+}
+
 function fillLevels() {
   const skill = skills.find(entry => entry.id === $("skill").value);
   $("skill-level").replaceChildren(...Array.from({length: skill?.lv ?? 0}, (_, index) =>
     new Option(`Lv ${index + 1}`, index + 1)));
   if (skill) $("skill-level").value = String(skill.lv);
+  updateSkillPrereqHint();
 }
 
 function renderAttackSkillSelector() {
@@ -2278,13 +2498,15 @@ async function loadFromExtension() {
   }
 }
 
-function showDefense(defense, trials) {
+function showDefense(defense, trials, invincible = false) {
   $("defense").hidden = !defense;
   if (!defense) return;
   $("taken").textContent = format(defense.averageDamage);
   $("incoming-dps").textContent = format(defense.damagePerSecond);
-  $("survival").textContent = `存活 ${trials - defense.deaths}／${trials} 次 · 期末平均 HP ${format(defense.endingHp)}` +
-    (defense.averageDeath === null ? "" : ` · 倒下樣本平均撐 ${seconds(defense.averageDeath)}`);
+  $("survival").textContent = invincible
+    ? `角色不死模式（HP 最低維持 1）· 期末平均 HP ${format(defense.endingHp)}`
+    : `存活 ${trials - defense.deaths}／${trials} 次 · 期末平均 HP ${format(defense.endingHp)}` +
+      (defense.averageDeath === null ? "" : ` · 倒下樣本平均撐 ${seconds(defense.averageDeath)}`);
   $("incoming-sources").textContent = defense.received.length
     ? `平均承傷來源：${defense.received.map(({name, average}) => `${name} ${format(average)}`).join(" · ")}`
     : "這些樣本中沒有受到怪物傷害。";
@@ -2335,7 +2557,7 @@ function show(result) {
   $("kpi-combat").textContent = `${format(panel.hit)}% ／ ${format(panel.crit)}% ／ ${format(panel.aspd)}`;
   $("summon-summary").hidden = result.summons.count === 0;
   $("summon-summary").textContent = `召喚物 DPS ${format(result.summons.dps)} · 含召喚物 DPS ${format(result.summons.totalDps)} · ${result.trials} 次合計召喚 ${format(result.summons.count)} 隻、擊倒 ${format(result.summons.kills)} 隻`;
-  $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · ${result.unlimitedSp ? "無限 SP" : `期末平均 SP ${format(result.endingSp)}`}${result.invincible ? " · 角色免傷" : ""}`;
+  $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · ${result.unlimitedSp ? "無限 SP" : `期末平均 SP ${format(result.endingSp)}`}${result.invincible ? " · 角色不死" : ""}`;
   $("combat-stats").textContent = `起始普攻：${element[panel.element] ?? panel.element}屬性 ×${format(panel.modifier / 100)} · 攻擊間隔 ${seconds(panel.interval)}`;
 
   const share = lines.reduce((sum, entry) => sum + entry.share, 0);
@@ -2376,7 +2598,7 @@ function show(result) {
     return row;
   }));
   renderSongEffects(result.songs);
-  showDefense(result.defense, result.trials);
+  showDefense(result.defense, result.trials, result.invincible);
   showTimeline(result.timeline, result.timelineCount);
   $("result").hidden = false;
   $("result").scrollIntoView({behavior: "smooth", block: "nearest"});
@@ -2621,6 +2843,10 @@ $("scenario").addEventListener("input", event => {
   if (event.target.closest("#active-buffs")) syncActiveBuffControls();
   if (event.target.type !== "search") scheduleStats();
 });
+$("monster-statuses").addEventListener("input", event => {
+  if (event.target.type !== "search") scheduleStats();
+  updateMonsterStatusSummary();
+});
 $("quick-active-buffs").onchange = () => setAllActiveBuffs($("quick-active-buffs").checked);
 $("keep-active-buffs").onchange = scheduleStats;
 $("active-buffs-all").onclick = () => setAllActiveBuffs(true);
@@ -2669,6 +2895,7 @@ $("monster").onchange = () => { updateMonsterPreview(); scheduleStats(); };
 $("skill").onchange = fillLevels;
 $("mode").onchange = () => {
   $("skill-fields").hidden = $("mode").value !== "skill";
+  updateSkillPrereqHint();
   scheduleStats();
 };
 $("invincible").onchange = () => { if ($("invincible").checked) $("counterattack").checked = true; };
@@ -2677,9 +2904,15 @@ $("counterattack").onchange = () => { if (!$("counterattack").checked) $("invinc
 $("calculator").addEventListener("invalid", event => {
   const row = event.target.closest(".effect-row");
   if (!row) return;
-  switchTab("buffs");
+  const isStatus = row.parentElement.id === "monster-statuses";
+  if (isStatus) {
+    switchTab("simulate");
+    $("monster-status-details").open = true;
+  } else {
+    switchTab("buffs");
+  }
   if (!row.hidden) return;
-  const type = row.parentElement.id === "extra-buffs" ? "buff" : "status";
+  const type = isStatus ? "status" : "buff";
   $(`${type}-filter`).value = "";
   if (type === "buff") buffCategoryFilter = "all";
   filterEffects(type);

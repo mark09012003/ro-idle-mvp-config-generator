@@ -1,10 +1,18 @@
-"""Add optional incoming damage immunity and HP-loss observations to the pinned engine."""
+"""Add optional undying mode (still recording real incoming damage), HP-loss observations, and monsterAttack export to the pinned engine."""
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
 source = path.read_text()
-declaration = "\nconst damageImmune = new WeakSet<GameState>();\n\nexport function setDamageImmunity(s: GameState) { damageImmune.add(s); }\n\nconst damageObservers = new WeakMap<GameState, (source: string, lostHp: number) => void>();\n\nexport function observeDamage(s: GameState, onDamage: (source: string, lostHp: number) => void) {\n  damageObservers.set(s, onDamage);\n}\n"
+declaration = """
+const damageObservers = new WeakMap<GameState, (source: string, lostHp: number) => void>();
+
+export function setDamageImmunity(s: GameState) { s.gmNoDeath = true; }
+
+export function observeDamage(s: GameState, onDamage: (source: string, lostHp: number) => void) {
+  damageObservers.set(s, onDamage);
+}
+"""
 anchor = "function damagePlayer(s: GameState, emit: Emit, damage:"
 assert source.count(anchor) == 1
 source = source.replace(anchor, declaration + "\n" + anchor)
@@ -15,21 +23,16 @@ def replace_once(old, new):
         raise ValueError(f"Upstream damage path changed: {old}")
     source = source.replace(old, new)
 
-replace_once("  if (!devoted) c.hp = Math.max(hpFloor(s), c.hp - damage);", """  if (damageImmune.has(s)) damage = 0;
-  if (!devoted) {
+replace_once("  if (!devoted) c.hp = Math.max(hpFloor(s), c.hp - damage);", """  if (!devoted) {
     const before = c.hp;
     c.hp = Math.max(hpFloor(s), c.hp - damage);
-    damageObservers.get(s)?.('怪物普攻', before - c.hp);
+    damageObservers.get(s)?.('怪物普攻', s.gmNoDeath ? damage : before - c.hp);
   }""")
-
-replace_once("""  if (basilicaInside(s) && !getMonster(monsterId).boss) return false;
-  if (damage <= 0) return false;""", """  if (basilicaInside(s) && !getMonster(monsterId).boss) return false;
-  if (damage <= 0 || damageImmune.has(s)) return false;""")
 
 replace_once("""  c.hp = Math.max(hpFloor(s), c.hp - damage);
   noteBigHit(s, damage);""", """  const before = c.hp;
   c.hp = Math.max(hpFloor(s), c.hp - damage);
-  damageObservers.get(s)?.(skill ?? '怪物技能', before - c.hp);
+  damageObservers.get(s)?.(skill ?? '怪物技能', s.gmNoDeath ? damage : before - c.hp);
   noteBigHit(s, damage);""")
 
 for label, expression in (
@@ -38,18 +41,22 @@ for label, expression in (
     ("石化", "stoneDamage(d.maxHp, c.hp)"),
 ):
     replace_once(f"c.hp -= {expression};", f"""{{
-      const damage = damageImmune.has(s) ? 0 : {expression};
-      c.hp -= damage;
-      damageObservers.get(s)?.('{label}', damage);
+      const damage = {expression};
+      const before = c.hp;
+      c.hp = Math.max(hpFloor(s), c.hp - damage);
+      damageObservers.get(s)?.('{label}', s.gmNoDeath ? damage : before - c.hp);
     }}""")
 
 replace_once("""    c.hp = Math.max(hpFloor(s), c.hp - dmg);
     emit({ type: 'ailmentDamage', ailment: 'bleeding'""", """    const before = c.hp;
-    if (!damageImmune.has(s)) c.hp = Math.max(hpFloor(s), c.hp - dmg);
-    damageObservers.get(s)?.('出血', before - c.hp);
+    c.hp = Math.max(hpFloor(s), c.hp - dmg);
+    damageObservers.get(s)?.('出血', s.gmNoDeath ? dmg : before - c.hp);
     emit({ type: 'ailmentDamage', ailment: 'bleeding'""")
+
 replace_once("function equipBagAmmo(", "export function equipBagAmmo(")
 replace_once("function autoEquipFor(", "export function autoEquipFor(")
+replace_once("function monsterAttack(", "export function monsterAttack(")
+
 # Preserve the actual skill critical roll in the emitted event for the simulation log.
 damage_path = path.parent.parent / "combat" / "damage.ts"
 damage_source = damage_path.read_text()
