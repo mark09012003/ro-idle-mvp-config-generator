@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RO 放置仙境 · 單怪 DPS 試算</title>
+  <link rel="stylesheet" href="popup.css">
+  <script type="module" src="popup.js"></script>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div>
+        <h1>單怪 DPS 試算</h1>
+        <p id="role">正在初始化…</p>
+      </div>
+      <div class="header-actions">
+        <button id="refresh" type="button">更新角色</button>
+      </div>
+    </header>
+
+    <section id="web-loader" class="card" hidden aria-label="網頁版角色載入">
+      <div id="saved-bar" class="saved-bar" hidden>
+        <label class="saved-select-wrap">已存角色
+          <select id="saved-character"></select>
+        </label>
+        <div class="saved-actions">
+          <button id="export-json" type="button">匯出 JSON</button>
+          <button id="delete-saved" type="button" class="btn-danger">刪除</button>
+        </div>
+      </div>
+
+      <details id="import-panel" open>
+        <summary>從遊戲分頁載入角色／匯入快照</summary>
+        <div class="import-body">
+          <div class="import-method">
+            <h3>方式一：書籤小工具（手機／電腦跨分頁一鍵傳送）</h3>
+            <p class="hint" id="bookmarklet-origin-hint">由於瀏覽器跨網域安全限制，網頁無法直接讀取其他分頁。建立一次書籤後，在 <code>ro-idle.app</code> 遊戲分頁點選該書籤，就會自動讀取目前角色並傳送到本頁。</p>
+            <ol class="steps-list">
+              <li>點「複製書籤程式碼」（電腦也可直接拖曳右側連結到書籤列）。</li>
+              <li>在手機／電腦新增任意書籤，將網址改貼為剛複製的程式碼。</li>
+              <li>切到 <code>ro-idle.app</code> 遊戲分頁執行該書籤（手機 Chrome 可在網址列輸入書籤名稱點選）。</li>
+            </ol>
+            <div class="btn-row">
+              <button id="copy-bookmarklet" type="button" class="btn-primary">複製書籤程式碼</button>
+              <a id="bookmarklet-link" class="btn-link" href="#">拖曳到書籤列：RO DPS 傳送</a>
+              <span id="copy-status" class="copy-status" aria-live="polite"></span>
+            </div>
+          </div>
+
+          <div class="import-method">
+            <h3>方式二：手動貼上遊戲 API JSON 或匯入檔案（免設定）</h3>
+            <div class="api-helper">
+              <a class="btn-link" href="https://ro-idle.app/api/characters" target="_blank" rel="noopener">1. 開啟角色清單（查 ID）</a>
+              <div class="api-id-row">
+                <input id="char-id-input" type="number" min="1" placeholder="輸入角色 ID">
+                <button id="open-char-api" type="button">2. 開啟角色快照</button>
+              </div>
+            </div>
+            <label for="json-input">貼上角色快照 JSON</label>
+            <textarea id="json-input" rows="4" placeholder="全選複製 /api/characters/ID?deferCatchup=1 頁面內容貼上到這裡，或貼上先前匯出的 JSON"></textarea>
+            <div class="btn-row">
+              <button id="import-json" type="button" class="btn-primary">載入貼上的 JSON</button>
+              <label class="btn-link file-label">匯入 JSON 檔<input id="import-file" type="file" accept=".json,application/json" hidden></label>
+            </div>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section id="character-panel" class="card" hidden aria-labelledby="stats-title">
+      <h2 id="stats-title">角色能力</h2>
+      <p id="stats-caption">目前裝備，不套用 Buff</p>
+      <dl id="character-stats"></dl>
+      <details id="equipment-details">
+        <summary>試算裝備與箭矢</summary>
+        <p id="ammo-summary"></p>
+        <ul id="equipment-list"></ul>
+      </details>
+    </section>
+
+    <section id="gear-section" class="card" hidden aria-labelledby="gear-title">
+      <details id="gear-editor-details">
+        <summary class="gear-summary">
+          <span id="gear-title">自訂裝備／精煉／卡片</span>
+          <span id="gear-override-badge" class="badge" hidden></span>
+        </summary>
+        <div class="gear-body">
+          <div class="gear-toolbar">
+            <p class="hint">點選任一部位即可更換裝備、調整精煉（+0～+10）與插卡。已自訂的部位不會被掛機自動換裝覆蓋。</p>
+            <button id="gear-reset-all" type="button" disabled>還原全部裝備</button>
+          </div>
+          <div id="gear-grid" class="gear-grid" role="list"></div>
+          <div id="slot-editor" class="slot-editor" hidden>
+            <div class="slot-editor-head">
+              <h3 id="slot-editor-title">編輯部位</h3>
+              <div class="slot-editor-actions">
+                <button id="slot-unequip" type="button">卸下裝備</button>
+                <button id="slot-reset" type="button">還原此部位</button>
+              </div>
+            </div>
+            <div id="slot-owned-row" class="slot-block" hidden>
+              <label for="slot-owned-select">快速套用背包已有裝備（含原精煉與卡片）</label>
+              <select id="slot-owned-select"></select>
+            </div>
+            <div class="slot-block">
+              <div class="slot-filter-row">
+                <input id="slot-item-search" type="search" placeholder="搜尋裝備名稱、ID 或效果說明" autocomplete="off">
+                <label class="check inline-check"><input id="slot-equippable-only" type="checkbox" checked> 只顯示可裝備</label>
+              </div>
+              <label for="slot-item-select">選擇裝備 <span id="slot-item-count" class="muted"></span></label>
+              <select id="slot-item-select"></select>
+              <p id="slot-item-desc" class="item-desc"></p>
+            </div>
+            <div id="slot-refine-block" class="slot-block" hidden>
+              <label for="slot-refine-select">精煉等級</label>
+              <div class="refine-controls">
+                <button id="slot-refine-minus" type="button" aria-label="減少精煉">−</button>
+                <select id="slot-refine-select"></select>
+                <button id="slot-refine-plus" type="button" aria-label="增加精煉">＋</button>
+              </div>
+            </div>
+            <div id="slot-cards-block" class="slot-block" hidden>
+              <div class="cards-head">
+                <label for="slot-card-search">卡片插槽</label>
+                <button id="slot-cards-fill-all" type="button" hidden>全部插槽套用插槽 1</button>
+              </div>
+              <input id="slot-card-search" type="search" placeholder="篩選卡片名稱、效果或 ID（例如：海葵、人形、ATK）" autocomplete="off">
+              <div id="slot-cards-list" class="cards-list"></div>
+            </div>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <form id="calculator">
+      <fieldset id="fields" disabled>
+        <label for="search">怪物名稱或 ID</label>
+        <input id="search" type="search" placeholder="例如：黃金蟲、1086" autocomplete="off">
+        <label for="monster">目標怪物</label>
+        <select id="monster" required><option value="">請選擇怪物</option></select>
+        <div class="grid">
+          <label>攻擊方式
+            <select id="mode">
+              <option value="auto" selected>依目前掛機施放設定</option>
+              <option value="normal">純普攻</option>
+              <option value="skill">指定技能＋普攻</option>
+            </select>
+          </label>
+          <label>模擬時間
+            <select id="seconds">
+              <option value="30">30 秒</option>
+              <option value="60" selected>60 秒</option>
+              <option value="120">120 秒</option>
+            </select>
+          </label>
+        </div>
+        <div id="skill-fields" class="grid" hidden>
+          <label>攻擊技能 <select id="skill"></select></label>
+          <label>技能等級 <select id="skill-level"></select></label>
+        </div>
+        <label for="ammo-choice">起始箭矢</label>
+        <select id="ammo-choice">
+          <option value="">依掛機換裝、目前裝備與補箭</option>
+        </select>
+        <p class="hint">可手動選箭測試。背包沒有該箭種時，會使用 1,000 支模擬庫存。</p>
+        <label class="check"><input id="counterattack" type="checkbox"> 模擬怪物反擊並計算承傷</label>
+        <label class="check"><input id="invincible" type="checkbox"> 角色免傷，怪物照常施技</label>
+        <label class="check"><input id="unlimited-sp" type="checkbox"> 無限 SP</label>
+        <details id="scenario">
+          <summary>角色 Buff 與怪物狀態</summary>
+          <h2>角色起始 Buff</h2>
+          <input id="buff-filter" type="search" aria-label="篩選 Buff" placeholder="篩選 Buff 名稱或代碼">
+          <div id="extra-buffs" class="effect-list" aria-label="手動 Buff"></div>
+          <p class="filter-count" id="buff-count" aria-live="polite"></p>
+          <details id="snapshot-buff-options">
+            <summary>匯入遊戲身上的 Buff（預設不選）</summary>
+            <div id="active-buffs"></div>
+          </details>
+          <label class="check"><input id="auto-buffs" type="checkbox"> 允許使用 Buff 道具及掛機模式自補 Buff</label>
+          <p>歌舞請填演奏者施放當下的總素質（含裝備與增益）。</p>
+          <h2>怪物起始狀態</h2>
+          <input id="status-filter" type="search" aria-label="篩選怪物狀態" placeholder="篩選怪物狀態名稱或代碼">
+          <div id="monster-statuses" class="effect-list" aria-label="怪物狀態"></div>
+          <p class="filter-count" id="status-count" aria-live="polite"></p>
+          <p>可設定等級與持續時間（秒）。設為 0 秒時不自然到期。消耗或解除仍依遊戲規則。怪物狀態會在每次換上新目標時套用。</p>
+        </details>
+        <button id="calculate" type="submit">開始試算</button>
+      </fieldset>
+    </form>
+
+    <p id="status" role="status" aria-live="polite"></p>
+
+    <section id="result" hidden aria-label="試算結果">
+      <h2 id="target"></h2>
+      <p id="monster-stats"></p>
+      <dl class="metrics">
+        <div><dt>平均 DPS</dt><dd id="dps"></dd></div>
+        <div><dt>單隻首殺時間</dt><dd id="ttk"></dd></div>
+      </dl>
+      <p id="summary"></p>
+      <p id="summon-summary" hidden></p>
+      <p id="combat-stats"></p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th scope="col">傷害來源</th><th scope="col">有效占比</th><th scope="col">單次傷害</th><th scope="col">詠唱／延遲／冷卻</th></tr></thead>
+          <tbody id="damage"></tbody>
+        </table>
+      </div>
+      <details id="song-effects" hidden>
+        <summary>歌舞加成明細</summary>
+        <ul id="song-breakdown"></ul>
+      </details>
+      <section id="defense" hidden aria-label="承傷與生存">
+        <h2>承傷與生存</h2>
+        <dl class="metrics">
+          <div><dt>平均承傷／次</dt><dd id="taken"></dd></div>
+          <div><dt>交戰期間承傷／秒</dt><dd id="incoming-dps"></dd></div>
+        </dl>
+        <p id="survival"></p>
+        <p id="incoming-sources"></p>
+      </section>
+      <details id="timeline-details" open>
+        <summary id="timeline-title">對戰紀錄 · 第 1 次模擬</summary>
+        <ol id="timeline"></ol>
+      </details>
+      <details>
+        <summary>試算條件</summary>
+        <p>以角色快照的 HP、SP、裝備、背包及看得到的 Buff 開始。目標倒下後立刻換上同一隻滿血怪，計入有效傷害。勾選反擊時，雙方在可交戰距離開始。怪物可普攻、施技及打斷詠唱，角色倒下後結束該次模擬。免傷時，怪物仍會施技和召喚，無法扣除角色 HP。範圍攻擊依技能規則命中在範圍內的召喚物。找怪移動、掉落與隊友攻擊不計。手動選入的現有 Buff 會按快照剩餘時間倒數。自訂裝備會以虛擬裝備覆蓋對應部位並鎖定該部位不被掛機換裝覆蓋。角色戰鬥內部狀態以新遭遇起算。</p>
+      </details>
+    </section>
+  </main>
+</body>
+</html>

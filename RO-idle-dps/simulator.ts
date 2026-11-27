@@ -90,8 +90,89 @@ export function scenarioCatalog(snapshot: GameSnapshot) {
   };
 }
 
+const EDITABLE_SLOTS = [
+  "headTop", "headMid", "headLow", "weapon", "shield",
+  "armor", "garment", "shoes", "accessory1", "accessory2",
+] as const;
+type EditableSlot = typeof EDITABLE_SLOTS[number];
+const HEAD_SLOTS: readonly EditableSlot[] = ["headTop", "headMid", "headLow"];
+const TWO_HANDED_WEAPON_TYPES = new Set(["2hSword", "2hSpear", "2hAxe", "2hMace", "2hStaff", "bow", "katar"]);
+
+type EquipOverride = {itemId: number | null; refine?: number; cards?: number[]};
+type EquipOverrides = Partial<Record<EditableSlot, EquipOverride>>;
+
+export function equipmentCatalog(snapshot: GameSnapshot) {
+  registerItemDefs(snapshot.heldItems ?? []);
+  const job = snapshot.character.job;
+  const baseLv = snapshot.character.baseLv;
+  const canDualWield = job === "assassin" || job === "assassin_cross" || (snapshot.character.skills?.AS_LEFT ?? 0) > 0;
+  const stackByUid = new Map(snapshot.inventory.map(item => [item.uid, item]));
+  const equipped = Object.fromEntries(EDITABLE_SLOTS.map(slot => {
+    const uid = snapshot.equipment[slot];
+    const stack = uid !== undefined ? stackByUid.get(uid) : undefined;
+    const def = stack ? ITEMS.get(stack.itemId) : undefined;
+    if (!stack || def?.category !== "equipment") return [slot, null];
+    return [slot, {
+      itemId: stack.itemId,
+      refine: stack.refine ?? 0,
+      cards: (stack.cards ?? []).filter((id): id is number => typeof id === "number" && id > 0),
+      broken: !!stack.broken,
+    }];
+  })) as Record<EditableSlot, {itemId: number; refine: number; cards: number[]; broken: boolean} | null>;
+  const owned = snapshot.inventory.flatMap(stack => {
+    const def = ITEMS.get(stack.itemId);
+    if (def?.category !== "equipment") return [];
+    return [{
+      uid: stack.uid,
+      itemId: stack.itemId,
+      refine: stack.refine ?? 0,
+      cards: (stack.cards ?? []).filter((id): id is number => typeof id === "number" && id > 0),
+      broken: !!stack.broken,
+    }];
+  });
+  const items = [...ITEMS.values()].flatMap(def => {
+    if (def.category !== "equipment") return [];
+    const jobMatch = def.jobs === "all" || def.jobs.includes(job);
+    const equippable = baseLv >= def.equipLevel && jobMatch;
+    return [{
+      id: def.id,
+      name: def.name,
+      slots: [...def.slots],
+      weaponType: def.weaponType ?? null,
+      weaponLevel: def.weaponLevel ?? null,
+      atk: def.atk ?? 0,
+      def: def.def ?? 0,
+      equipLevel: def.equipLevel ?? 0,
+      equippable,
+      jobMatch,
+      cardSlots: def.cardSlots ?? 0,
+      refineable: !!def.refineable,
+      desc: def.desc ?? "",
+    }];
+  }).sort((a, b) => Number(b.equippable) - Number(a.equippable) || a.id - b.id);
+  const cards = [...ITEMS.values()].flatMap(def => {
+    if (def.category !== "card") return [];
+    return [{
+      id: def.id,
+      name: def.name,
+      slotType: def.slotType,
+      desc: def.desc ?? "",
+    }];
+  }).sort((a, b) => a.id - b.id);
+  return {
+    slots: EDITABLE_SLOTS.map(id => ({id, name: SLOT_NAMES[id]})),
+    job,
+    baseLv,
+    canDualWield,
+    equipped,
+    owned,
+    items,
+    cards,
+  };
+}
+
 type Effect = {id: string; level: number; seconds: number; performer?: Partial<PerformerCtx["stats"]> & {lesson?: number}};
-type Scenario = {includeActive?: number[]; buffs?: Effect[]; statuses?: Effect[]; autoBuffs?: boolean; ammoItemId?: number};
+type Scenario = {includeActive?: number[]; buffs?: Effect[]; statuses?: Effect[]; autoBuffs?: boolean; ammoItemId?: number; equipOverrides?: EquipOverrides};
 
 function effectTime(effect: Effect, max: number) {
   if (!Number.isInteger(effect.level) || effect.level < 1 || effect.level > max ||
@@ -166,12 +247,80 @@ type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: st
 type HitRange = {min: number; max: number; count: number};
 type DamageLine = {normal?: HitRange; critical?: HitRange; name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
+function applyEquipOverrides(state: GameState, snapshot: GameSnapshot, overrides?: EquipOverrides): Set<EditableSlot> {
+  const lockedSlots = new Set<EditableSlot>();
+  if (!overrides) return lockedSlots;
+  const entries = EDITABLE_SLOTS.filter(slot => Object.prototype.hasOwnProperty.call(overrides, slot));
+  if (!entries.length) return lockedSlots;
+  const stackByUid = new Map(snapshot.inventory.map(item => [item.uid, item]));
+  for (const slot of entries) {
+    const patch = overrides[slot];
+    if (!patch) continue;
+    lockedSlots.add(slot);
+    if (patch.itemId === null) {
+      delete state.equipment[slot];
+      continue;
+    }
+    const def = ITEMS.get(patch.itemId);
+    if (!def || def.category !== "equipment") {
+      throw new Error(`指定的裝備 #${patch.itemId} 不存在或無法裝備。`);
+    }
+    if (HEAD_SLOTS.includes(slot)) {
+      for (const other of HEAD_SLOTS) {
+        if (other === slot) continue;
+        const otherUid = state.equipment[other];
+        if (otherUid === undefined) continue;
+        const otherStack = state.inventory.items.find(item => item.uid === otherUid);
+        const otherDef = otherStack ? ITEMS.get(otherStack.itemId) : undefined;
+        if (otherDef?.category === "equipment" && otherDef.slots.some(s => def.slots.includes(s))) {
+          delete state.equipment[other];
+          lockedSlots.add(other);
+        }
+      }
+    }
+    if (slot === "weapon" && def.weaponType && TWO_HANDED_WEAPON_TYPES.has(def.weaponType)) {
+      delete state.equipment.shield;
+      lockedSlots.add("shield");
+    }
+    if (slot === "shield" && state.equipment.weapon !== undefined) {
+      const wStack = state.inventory.items.find(item => item.uid === state.equipment.weapon);
+      const wDef = wStack ? ITEMS.get(wStack.itemId) : undefined;
+      if (wDef?.category === "equipment" && wDef.weaponType && TWO_HANDED_WEAPON_TYPES.has(wDef.weaponType)) {
+        delete state.equipment.weapon;
+        lockedSlots.add("weapon");
+      }
+    }
+    const maxCards = def.cardSlots ?? 0;
+    const refine = def.refineable ? Math.max(0, Math.min(10, Math.trunc(patch.refine ?? 0))) : 0;
+    const cards = (patch.cards ?? [])
+      .filter((id): id is number => Number.isInteger(id) && id > 0 && ITEMS.get(id)?.category === "card")
+      .slice(0, maxCards);
+    const originalUid = snapshot.equipment[slot];
+    const originalStack = originalUid !== undefined ? stackByUid.get(originalUid) : undefined;
+    const forged = originalStack && originalStack.itemId === patch.itemId && originalStack.forged
+      ? structuredClone(originalStack.forged)
+      : undefined;
+    const uid = state.inventory.nextUid++;
+    state.inventory.items.push({
+      uid,
+      itemId: patch.itemId,
+      qty: 1,
+      ...(refine > 0 ? {refine} : {}),
+      ...(cards.length > 0 ? {cards} : {}),
+      ...(forged ? {forged} : {}),
+    });
+    state.equipment[slot] = uid;
+  }
+  return lockedSlots;
+}
+
 function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   const state = createGameState(snapshot.character.name, seed, {exp:0, drop:0});
   state.character = structuredClone(snapshot.character);
   state.inventory = {items: structuredClone(snapshot.inventory),
     nextUid: Math.max(0, ...snapshot.inventory.map(item => item.uid)) + 1};
   state.equipment = {...snapshot.equipment};
+  const lockedSlots = applyEquipOverrides(state, snapshot, options.scenario?.equipOverrides);
   state.buffs = initialBuffs(snapshot, options.scenario);
   state.ailments = Object.fromEntries((snapshot.ailments ?? []).map(ailment =>
     [ailment.id, {until: ailment.remainingMs, lv: ailment.lv ?? 1}]));
@@ -217,14 +366,24 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
     state.config.skills = (loaded.skills ?? []).filter(skill =>
       skill.use !== "escape" && (options.scenario?.autoBuffs || skill.use !== "buff"));
     state.config.equipRules = structuredClone(loaded.equipRules ?? []).flatMap(rule => {
-      if (chosenAmmo === undefined) {
-        if (rule.ammo === undefined && rule.ammoId !== undefined) {
-          rule.ammo = state.inventory.items.find(item => item.itemId === rule.ammoId && item.qty > 0)?.uid;
-        }
-        return [rule];
+      if (chosenAmmo !== undefined) {
+        delete rule.ammo;
+        delete rule.ammoId;
+      } else if (rule.ammo === undefined && rule.ammoId !== undefined) {
+        rule.ammo = state.inventory.items.find(item => item.itemId === rule.ammoId && item.qty > 0)?.uid;
       }
-      const {ammo, ammoId, ...other} = rule;
-      return other.weapon || other.shield || other.gear?.length ? [other] : [];
+      if (lockedSlots.has("weapon")) delete rule.weapon;
+      if (lockedSlots.has("shield")) delete rule.shield;
+      if (lockedSlots.size > 0 && rule.gear?.length) {
+        rule.gear = rule.gear.filter(uid => {
+          const stack = state.inventory.items.find(item => item.uid === uid);
+          const def = stack ? ITEMS.get(stack.itemId) : undefined;
+          if (!def || def.category !== "equipment") return false;
+          return !def.slots.some(s => lockedSlots.has(s as EditableSlot));
+        });
+        if (!rule.gear.length) delete rule.gear;
+      }
+      return rule.weapon !== undefined || rule.shield !== undefined || rule.ammo !== undefined || rule.gear?.length ? [rule] : [];
     });
     state.config.combat = loaded.combat ?? config.combat;
   } else if (options.mode === "skill") {
@@ -247,11 +406,14 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario, mo
     const stats = derived(state);
     return {
       ...Object.fromEntries(Object.entries(stats.total).map(([key, value]) => [key.toUpperCase(), value])),
-      "最大 HP":stats.maxHp, "最大 SP":stats.maxSp, ASPD:stats.aspd, HIT:stats.hit, FLEE:stats.flee,
+      "最大 HP":stats.maxHp, "最大 SP":stats.maxSp,
+      ATK:stats.statusAtk + stats.weaponAtk + stats.atkBonus + stats.refineAtk,
+      ASPD:stats.aspd, HIT:stats.hit, FLEE:stats.flee,
       CRIT:stats.crit, DEF:stats.hardDefShown, MDEF:stats.hardMdef,
       "MATK 下限":stats.matkMin, "MATK 上限":stats.matkMax,
     };
   }
+  const hasEquipOverrides = !!scenario?.equipOverrides && Object.keys(scenario.equipOverrides).length > 0;
   const current = setup(snapshot, {...options, scenario}, 1);
   const baseline = setup(snapshot, {...options, scenario:{ammoItemId:scenario?.ammoItemId}}, 1);
   const modifier = prepareEncounter(current, {...options, scenario});
@@ -271,7 +433,7 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario, mo
   const allocated = Object.fromEntries(Object.entries(baseline.character.stats)
     .map(([key, value]) => [key.toUpperCase(), value]));
   return {
-    base, current:current.buffs.length ? panel(current) : null,
+    base, current:current.buffs.length || hasEquipOverrides ? panel(current) : null, hasEquipOverrides,
     names:current.buffs.map(buff => buffDisplayName(buff.id)), allocated, equipment,
     weaponType:stats.weaponType, attackElement:stats.attackElement, missingRuleAmmo,
     ammo:ammo ? {name:ammo.def.name, atk:ammo.def.atk, element:ammo.def.element, quantity:ammo.stack.qty,
