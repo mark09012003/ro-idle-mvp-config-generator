@@ -12,8 +12,8 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="popup.css?v=20261127-6">
-  <script type="module" src="popup.js?v=20261127-6"></script>
+  <link rel="stylesheet" href="popup.css?v=20261127-7">
+  <script type="module" src="popup.js?v=20261127-7"></script>
 </head>
 <body>
   <div class="shell">
@@ -201,7 +201,7 @@
             </div>
           </div>
 
-          <div class="panel">
+          <div class="panel stats-builder-panel">
             <div class="panel-head">
               <div>
                 <h2>六圍屬性配點與雷達圖</h2>
@@ -214,7 +214,7 @@
             </div>
             <div class="stats-builder-layout">
               <div class="radar-card">
-                <svg id="stat-radar" class="stat-radar" viewBox="0 0 320 296" role="img" aria-label="六圍屬性雷達圖"></svg>
+                <svg id="stat-radar" class="stat-radar" viewBox="0 0 360 300" role="img" aria-label="六圍屬性雷達圖"></svg>
                 <div class="radar-legend">
                   <span><i class="legend-swatch swatch-base"></i>內圈：純配點</span>
                   <span><i class="legend-swatch swatch-total"></i>外圈：含加成總值</span>
@@ -234,14 +234,14 @@
                 <p id="skill-points-summary" class="points-pill">已配技能點：—</p>
               </div>
               <div class="panel-head-actions">
-                <div class="view-switch" role="group" aria-label="技能檢視模式">
-                  <button id="skill-view-tree" class="pill is-active" type="button" data-skill-view="tree">技能樹圖</button>
-                  <button id="skill-view-list" class="pill" type="button" data-skill-view="list">清單模式</button>
-                </div>
                 <label class="check inline-check"><input id="build-free-skills" type="checkbox"> 不限技能點</label>
                 <button id="skills-learn-quests" class="btn btn-outline btn-sm" type="button">全學任務技能</button>
                 <button id="skills-reset" class="btn btn-outline btn-sm" type="button">重置技能</button>
               </div>
+            </div>
+            <div class="skill-mode-bar" role="group" aria-label="技能顯示方式">
+              <button id="skill-view-tree" class="mode-tab is-active" type="button" data-skill-view="tree">⊞ 圖示化技能樹（含箭頭）</button>
+              <button id="skill-view-list" class="mode-tab" type="button" data-skill-view="list">☰ 清單模式</button>
             </div>
             <div class="skill-toolbar">
               <input id="skill-tree-search" type="search" placeholder="搜尋技能名稱或說明…" autocomplete="off">
@@ -251,7 +251,7 @@
                 <button class="pill" type="button" data-skill-filter="learned">已學習</button>
               </div>
             </div>
-            <p class="hint">技能樹圖中「點擊技能／＋」會自動補足前置技能等級（綠色實線箭頭＝前置已達成，虛線箭頭＝尚未達成）；右鍵或「−」可降級。</p>
+            <p id="skill-view-hint" class="hint">點擊技能或「＋」會自動補足前置等級（綠色實線箭頭＝已達成，虛線箭頭＝未達成）；右鍵或「−」降級。</p>
 
             <!-- Visual RO Skill Tree Graph View -->
             <div id="skill-tree-graph-wrap" class="skill-graph-wrap">

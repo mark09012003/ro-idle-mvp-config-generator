@@ -1,10 +1,11 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-6";
+const ASSET_VER = "20261127-7";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
 const SAVED_STORAGE_KEY = "ro-idle-dps-saved-characters-v1";
 const THEME_STORAGE_KEY = "ro-idle-dps-theme";
+const SKILL_VIEW_STORAGE_KEY = "ro-idle-dps-skill-view";
 const number = new Intl.NumberFormat("zh-TW", {maximumFractionDigits: 2});
 const format = value => Number.isFinite(value) ? number.format(value) : "—";
 const seconds = ms => `${format(ms / 1000)} 秒`;
@@ -59,7 +60,14 @@ let currentRebirths = 1;
 let currentRebirthBonus = 52;
 let currentFirstJobLv = 50;
 let skillFilterMode = "all";
-let skillViewMode = "tree";
+let skillViewMode = (() => {
+  try {
+    const saved = localStorage.getItem(SKILL_VIEW_STORAGE_KEY);
+    return saved === "list" || saved === "tree" ? saved : "tree";
+  } catch {
+    return "tree";
+  }
+})();
 let selectedSkillId = null;
 let buffCategoryFilter = "all";
 let lastPreview = null;
@@ -581,7 +589,7 @@ function renderStatRadar() {
   const totals = STAT_KEYS.map((k, i) => Math.max(1, panelTotals?.[k.toUpperCase()] ?? bases[i]));
   const maxVal = Math.max(100, Math.ceil(Math.max(...totals, ...bases, 100) / 20) * 20);
 
-  const cx = 160, cy = 148, R = 92;
+  const cx = 180, cy = 150, R = 88;
   const point = (idx, ratio) => {
     const angle = (-90 + idx * 60) * Math.PI / 180;
     return [cx + Math.cos(angle) * R * ratio, cy + Math.sin(angle) * R * ratio];
@@ -594,7 +602,7 @@ function renderStatRadar() {
     const pts = STAT_KEYS.map((_, i) => point(i, frac).map(n => n.toFixed(1)).join(",")).join(" ");
     nodes.push(el("polygon", {points: pts, class: "radar-grid-ring"}));
     const [tx, ty] = point(0, frac);
-    nodes.push(el("text", {x: tx + 11, y: ty + 3, class: "radar-tick"}, String(Math.round(maxVal * frac))));
+    nodes.push(el("text", {x: tx + 12, y: ty + 3, class: "radar-tick"}, String(Math.round(maxVal * frac))));
   }
   // Axes
   for (let i = 0; i < 6; i++) {
@@ -610,17 +618,17 @@ function renderStatRadar() {
   for (let i = 0; i < 6; i++) {
     const [tx, ty] = point(i, Math.min(1, totals[i] / maxVal));
     const [bx, by] = point(i, Math.min(1, bases[i] / maxVal));
-    nodes.push(el("circle", {cx: tx.toFixed(1), cy: ty.toFixed(1), r: 3.4, class: "radar-dot-total"}));
-    nodes.push(el("circle", {cx: bx.toFixed(1), cy: by.toFixed(1), r: 3.1, class: "radar-dot-base"}));
+    nodes.push(el("circle", {cx: tx.toFixed(1), cy: ty.toFixed(1), r: 3.6, class: "radar-dot-total"}));
+    nodes.push(el("circle", {cx: bx.toFixed(1), cy: by.toFixed(1), r: 3.2, class: "radar-dot-base"}));
 
     const [lx, ly] = point(i, 1.24);
     const anchor = i === 0 || i === 3 ? "middle" : i < 3 ? "start" : "end";
-    const xAdj = i === 0 || i === 3 ? lx : i < 3 ? lx - 4 : lx + 4;
-    const yAdj = i === 0 ? ly - 4 : i === 3 ? ly + 6 : ly;
+    const xAdj = i === 0 || i === 3 ? lx : i < 3 ? lx - 2 : lx + 2;
+    const yAdj = i === 0 ? ly - 6 : i === 3 ? ly + 8 : ly;
     const bonus = totals[i] - bases[i];
     const bonusStr = bonus === 0 ? "" : bonus > 0 ? `+${bonus}` : `−${Math.abs(bonus)}`;
     nodes.push(el("text", {x: xAdj.toFixed(1), y: (yAdj - 3).toFixed(1), "text-anchor": anchor, class: "radar-label-stat"}, STAT_KEYS[i].toUpperCase()));
-    nodes.push(el("text", {x: xAdj.toFixed(1), y: (yAdj + 10).toFixed(1), "text-anchor": anchor, class: "radar-label-val"}, `${bases[i]}${bonusStr}`));
+    nodes.push(el("text", {x: xAdj.toFixed(1), y: (yAdj + 11).toFixed(1), "text-anchor": anchor, class: "radar-label-val"}, `${bases[i]}${bonusStr}`));
   }
   svg.replaceChildren(...nodes);
 }
@@ -650,6 +658,10 @@ function renderStatAllocator() {
 
     const row = document.createElement("div");
     row.className = "stat-row";
+    row.dataset.stat = key;
+
+    const top = document.createElement("div");
+    top.className = "stat-top";
 
     const meta = document.createElement("div");
     meta.className = "stat-meta";
@@ -658,8 +670,15 @@ function renderStatAllocator() {
     code.textContent = upperKey;
     const tot = document.createElement("span");
     tot.className = "stat-total";
-    tot.textContent = `${val} ${bonus < 0 ? "−" : "+"} ${Math.abs(bonus)} ＝ ${totalShown}`;
+    const strongTot = document.createElement("strong");
+    strongTot.textContent = String(totalShown);
+    tot.append(`${val}${bonus === 0 ? "" : bonus > 0 ? `+${bonus}` : `−${Math.abs(bonus)}`} ＝ `, strongTot);
     meta.append(code, tot);
+
+    const cost = document.createElement("span");
+    cost.className = "stat-cost";
+    cost.textContent = val >= 99 ? "MAX" : `+1 耗 ${cost1}`;
+    top.append(meta, cost);
 
     const controls = document.createElement("div");
     controls.className = "stat-controls";
@@ -689,11 +708,14 @@ function renderStatAllocator() {
 
     controls.append(mkBtn("−10", -10), mkBtn("−1", -1), input, mkBtn("+1", 1), mkBtn("+10", 10));
 
-    const cost = document.createElement("span");
-    cost.className = "stat-cost";
-    cost.textContent = val >= 99 ? "已達上限" : `+1 耗 ${cost1} 點`;
+    const bar = document.createElement("div");
+    bar.className = "stat-bar";
+    const fill = document.createElement("div");
+    fill.className = "stat-bar-fill";
+    fill.style.width = `${Math.round(val / 99 * 100)}%`;
+    bar.append(fill);
 
-    row.append(meta, controls, cost);
+    row.append(top, controls, bar);
     return row;
   }));
 }
@@ -1299,6 +1321,14 @@ function renderSkillTree() {
   const matchSet = new Set(filtered.map(s => s.id));
 
   const isTree = skillViewMode === "tree";
+  for (const b of document.querySelectorAll("[data-skill-view]")) {
+    b.classList.toggle("is-active", b.dataset.skillView === skillViewMode);
+  }
+  if ($("skill-view-hint")) {
+    $("skill-view-hint").textContent = isTree
+      ? "點擊技能或「＋」會自動補足前置等級（綠色實線箭頭＝已達成，虛線箭頭＝未達成）；右鍵或「−」降級。"
+      : "清單模式：點擊「＋／滿」同樣會自動補足前置技能等級；已學的主動攻擊技能可勾選「掛機施放」。";
+  }
   $("skill-tree-graph-wrap").hidden = !isTree;
   $("skill-tree-list").hidden = isTree;
   if (isTree) {
@@ -1354,10 +1384,14 @@ function renderSkillTree() {
     }
     titleWrap.append(nameEl, badges);
 
+    const left = document.createElement("div");
+    left.className = "skill-card-left";
+    left.append(createSkillIconEl(entry), titleWrap);
+
     const lvBadge = document.createElement("span");
     lvBadge.className = "skill-lv-badge";
     lvBadge.textContent = `Lv ${lv}/${entry.maxLv}`;
-    head.append(titleWrap, lvBadge);
+    head.append(left, lvBadge);
 
     const desc = document.createElement("p");
     desc.className = "skill-desc";
@@ -2494,7 +2528,7 @@ $("revert-imported-char").onclick = () => {
 for (const viewBtn of document.querySelectorAll("[data-skill-view]")) {
   viewBtn.onclick = () => {
     skillViewMode = viewBtn.dataset.skillView;
-    for (const b of document.querySelectorAll("[data-skill-view]")) b.classList.toggle("is-active", b === viewBtn);
+    try { localStorage.setItem(SKILL_VIEW_STORAGE_KEY, skillViewMode); } catch {}
     renderSkillTree();
   };
 }
