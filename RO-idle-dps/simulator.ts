@@ -69,7 +69,7 @@ export function scenarioCatalog(snapshot: GameSnapshot) {
 }
 
 type Effect = {id: string; level: number; seconds: number; performer?: Partial<PerformerCtx["stats"]> & {lesson?: number}};
-type Scenario = {excludeActive?: number[]; buffs?: Effect[]; statuses?: Effect[]; autoBuffs?: boolean};
+type Scenario = {includeActive?: number[]; buffs?: Effect[]; statuses?: Effect[]; autoBuffs?: boolean};
 
 function effectTime(effect: Effect, max: number) {
   if (!Number.isInteger(effect.level) || effect.level < 1 || effect.level > max ||
@@ -82,10 +82,10 @@ function effectTime(effect: Effect, max: number) {
 function songParameters(effect: Effect) {
   const entry = SONGS[effect.id];
   const stats = {str:1, agi:1, vit:1, int:1, dex:1, luk:1};
-  const lesson = effect.performer?.lesson ?? 0;
+  const lesson = effect.performer?.lesson ?? 10;
   if (!Number.isInteger(lesson) || lesson < 0 || lesson > 10) throw new Error("操控樂器或練習舞蹈等級須為 0～10。");
   for (const key of songStats[effect.id]) {
-    const value = effect.performer?.[key] ?? 1;
+    const value = effect.performer?.[key] ?? 90;
     if (!Number.isInteger(value) || value < 0 || value > 999) throw new Error(`演奏者 ${key.toUpperCase()} 須為 0～999。`);
     stats[key] = value;
   }
@@ -100,7 +100,7 @@ function buffGroup(id: string, level = 1) {
 
 function initialBuffs(snapshot: GameSnapshot, scenario?: Scenario): ActiveBuff[] {
   const buffs = previewBuffs(snapshot).flatMap((buff, index) => {
-    if (scenario?.excludeActive?.includes(index) || !isKnownBuff(buff.id)) return [];
+    if (!scenario?.includeActive?.includes(index) || !isKnownBuff(buff.id)) return [];
     const remaining = "remainingMs" in buff ? Number(buff.remainingMs) : NEVER;
     return Number.isFinite(remaining) && remaining > 0 ? [{...structuredClone(buff), until: remaining}] : [];
   });
@@ -163,14 +163,14 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
     statsAddAuto: {...config.statsAddAuto, enabled: false},
     hpPotion: loaded.hpPotion ?? config.hpPotion,
     spPotion: loaded.spPotion ?? config.spPotion,
-    buffPotion: options.scenario?.autoBuffs === false ? {...config.buffPotion, enabled:false} : loaded.buffPotion ?? config.buffPotion,
+    buffPotion: options.scenario?.autoBuffs ? loaded.buffPotion ?? config.buffPotion : {...config.buffPotion, enabled:false},
     autoBerserk: loaded.autoBerserk,
     recovery: loaded.recovery ?? config.recovery,
     sit: options.mode === "auto" ? loaded.sit ?? config.sit : {...config.sit, enabled: false},
   };
   if (options.mode === "auto") {
     state.config.skills = (loaded.skills ?? []).filter(skill =>
-      skill.use !== "escape" && (options.scenario?.autoBuffs !== false || skill.use !== "buff"));
+      skill.use !== "escape" && (options.scenario?.autoBuffs || skill.use !== "buff"));
     state.config.equipRules = loaded.equipRules;
     state.config.combat = loaded.combat ?? config.combat;
   } else if (options.mode === "skill") {
@@ -180,7 +180,27 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
     }
     state.config.skills = [{skill:selected.id, lv:options.level!, use:"attack", percent:0}];
   }
+  const stats = derived(state);
+  state.character.hp = Math.min(state.character.hp, stats.maxHp);
+  state.character.sp = Math.min(state.character.sp, stats.maxSp);
   return state;
+}
+
+export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario) {
+  registerItemDefs(snapshot.heldItems ?? []);
+  const options: Options = {monsterId:0, mode:"normal", seconds:30};
+  function panel(state: GameState) {
+    const stats = derived(state);
+    return {
+      ...Object.fromEntries(Object.entries(stats.total).map(([key, value]) => [key.toUpperCase(), value])),
+      "最大 HP":stats.maxHp, "最大 SP":stats.maxSp, ASPD:stats.aspd, HIT:stats.hit, FLEE:stats.flee,
+      CRIT:stats.crit, DEF:stats.hardDefShown, MDEF:stats.hardMdef,
+      "MATK 下限":stats.matkMin, "MATK 上限":stats.matkMax,
+    };
+  }
+  const current = setup(snapshot, {...options, scenario}, 1);
+  const base = panel(setup(snapshot, options, 1));
+  return {base, current:current.buffs.length ? panel(current) : null, names:current.buffs.map(buff => buffDisplayName(buff.id))};
 }
 
 function replaceTarget(state: GameState, target: MonsterDef, options: Options): ActiveMonster {
@@ -217,7 +237,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   let total = 0, kills = 0, casts = 0, endingSp = 0;
   const killTimes: number[] = [];
   const deathTimes: number[] = [];
-  const timeline: {at: number; text: string; hp: number}[] = [];
+  const timeline: {at: number; text: string; hp: number; kind: string}[] = [];
   let timelineCount = 0;
   const received = new Map<string, number>();
   let damageTaken = 0, timeExposed = 0, endingHp = 0;
@@ -227,17 +247,17 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     let current = replaceTarget(state, monster, options);
     const pulses = songs.filter(song => song.heal > 0).map(song => ({...song, at:song.interval,
       buff:state.buffs.find(buff => buff.id === song.id)}));
-    function record(text: string) {
-      if (!options.counterattack || run !== 0) return;
+    function record(text: string, kind = "system") {
+      if (run !== 0) return;
       timelineCount++;
-      if (timeline.length < 200) timeline.push({at:state.time, text, hp:state.character.hp});
+      if (timeline.length < 1000) timeline.push({at:state.time, text, hp:state.character.hp, kind});
     }
     if (options.counterattack) observeDamage(state, (id, damage) => {
       if (damage <= 0) return;
       const name = SKILLS.get(id)?.name ?? id;
       damageTaken += damage;
       received.set(name, (received.get(name) ?? 0) + damage);
-      record(`${name} · 受到 ${damage} 傷害`);
+      record(`${name} · 受到 ${damage} 傷害`, "incoming");
     });
     record(`對戰開始 · ${monster.name}`);
     let firstKill = false;
@@ -274,10 +294,34 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           const def = SKILLS.get(event.skill);
           entry.cooldownMs += atLv(def?.cooldownMs ?? [], event.lv) ?? 0;
           casts++;
-          record(`角色施放 ${entry.name}（詠唱 ${event.castMs / 1000} 秒）`);
+          record(`角色開始施放 ${entry.name}（詠唱 ${event.castMs / 1000} 秒）`, "player");
         }
         if (event.type === "mobSkillCast") {
-          record(`怪物詠唱 ${SKILLS.get(event.skill)?.name ?? event.skill}`);
+          record(`${MONSTERS.get(event.monsterId)?.name ?? "怪物"} 開始詠唱 ${SKILLS.get(event.skill)?.name ?? event.skill}（${event.castMs / 1000} 秒）`, "monster");
+        }
+        if (event.type === "mobSkill") {
+          const name = MONSTERS.get(event.monsterId)?.name ?? "怪物";
+          const skill = SKILLS.get(event.skill)?.name ?? event.skill;
+          const outcome = event.result === "miss" ? "（未命中）" : event.heal ? `（回復 ${event.heal} HP）` : "";
+          record(`${name} 使用 ${skill}${outcome}`, "monster");
+        }
+        if (event.type === "monsterAttack") {
+          const name = MONSTERS.get(event.monsterId)?.name ?? "怪物";
+          const outcome = event.damage > 0 ? "命中" : event.result === "blocked" ? "被擋下" : event.result === "miss" ? "未命中" : "未造成傷害";
+          record(`${name} 普攻 · ${outcome}`, "monster");
+        }
+        if (event.type === "statusStart" || event.type === "statusEnd") {
+          const name = MONSTERS.get(event.monsterId)?.name ?? "怪物";
+          record(`${name} ${event.type === "statusStart" ? "受到" : "解除"} ${STATUS_NAMES[event.status] ?? event.status}`, "monster");
+        }
+        if (event.type === "monsterLeave") {
+          record(`${MONSTERS.get(event.monsterId)?.name ?? "怪物"} 離開戰鬥`, "monster");
+        }
+        if (event.type === "buffStart" || event.type === "buffEnd") {
+          record(`角色 ${buffDisplayName(event.buffId)} ${event.type === "buffStart" ? "生效" : "結束"}`);
+        }
+        if (event.type === "playerAttack" && event.uid === current.uid && !event.damage) {
+          record(`角色普攻 · ${event.result === "miss" ? "未命中" : "未造成傷害"}`, "player");
         }
         if (event.type === "skillInterrupt") {
           record(`詠唱中斷 · ${SKILLS.get(event.skill)?.name ?? event.skill}`);
@@ -296,7 +340,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           credited += damage;
           entry.damage += damage;
           entry.hits++;
-          record(`${entry.name} · 造成 ${damage} 傷害`);
+          record(`${entry.name} · ${event.result === "crit" ? "爆擊 " : ""}造成 ${damage} 傷害`, "player");
         }
       });
       if (current.hp <= 0 && !state.monsters.includes(current)) {
@@ -312,6 +356,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           break;
         }
         current = replaceTarget(state, monster, options);
+        record(`下一隻 ${monster.name} 進入戰鬥`, "monster");
         credited = 0;
       } else if (!state.monsters.includes(current) || current.monsterId !== monster.id) break;
       if (steps === 14999) throw new Error("模擬事件超過上限，請改用較短的試算時間。");
@@ -329,11 +374,10 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     averageDeath: deathTimes.length ? deathTimes.reduce((sum, time) => sum + time, 0) / deathTimes.length : null,
     received: [...received].map(([name, amount]) => ({name, average: amount / trials}))
       .sort((a, b) => b.average - a.average),
-    timeline, timelineCount,
   } : null;
   return {monster: {name:monster.name, lv:monster.lv, hp:monster.hp, element:monster.element,
     elementLv:monster.elementLv, race:monster.race, size:monster.size}, panel,
-    defense, songs, dps: total / trials / options.seconds,
+    defense, songs, timeline, timelineCount, dps: total / trials / options.seconds,
     averageKill: killTimes.length ? killTimes.reduce((sum, t) => sum + t, 0) / killTimes.length : null,
     killedTrials: killTimes.length, kills, casts, endingSp:endingSp / trials, trials, seconds:options.seconds,
     lines: [...lines.values()].sort((a,b) => b.damage - a.damage)

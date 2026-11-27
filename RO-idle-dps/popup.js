@@ -155,7 +155,7 @@ function renderScenario() {
     label.className = "check";
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.checked = true;
+    input.checked = false;
     input.value = String(index);
     label.append(input, level ? `${name} Lv ${level}` : name);
     return label;
@@ -192,7 +192,7 @@ function addScenarioEffect(type) {
   const remove = document.createElement("button");
   remove.type = "button";
   remove.textContent = "移除";
-  remove.onclick = () => row.remove();
+  remove.onclick = () => { row.remove(); scheduleStats(); };
   row.append(name, level, seconds, remove);
   if (definition.stats) {
     const performer = document.createElement("div");
@@ -206,7 +206,7 @@ function addScenarioEffect(type) {
       input.dataset.stat = key;
       input.min = "0";
       input.max = key === "lesson" ? "10" : "999";
-      input.value = key === "lesson" ? "0" : "1";
+      input.value = key === "lesson" ? "10" : "90";
       input.required = true;
       label.append(input);
       performer.append(label);
@@ -214,6 +214,7 @@ function addScenarioEffect(type) {
     row.append(performer);
   }
   container.append(row);
+  scheduleStats();
 }
 
 function readEffects(container) {
@@ -226,12 +227,62 @@ function readEffects(container) {
   }));
 }
 
+function readScenario() {
+  return {
+    includeActive: [...$("active-buffs").querySelectorAll("input:checked")].map(input => Number(input.value)),
+    buffs: readEffects("extra-buffs"),
+    statuses: readEffects("monster-statuses"),
+    autoBuffs: $("auto-buffs").checked,
+  };
+}
+
+let statsVersion = 0;
+let statsTimeout;
+function scheduleStats() {
+  clearTimeout(statsTimeout);
+  statsTimeout = setTimeout(() => { void showStats(); }, 180);
+}
+
+async function showStats() {
+  if (!snapshot) return;
+  const version = ++statsVersion;
+  try {
+    const {base, current, names} = await engine("character", readScenario());
+    if (version !== statsVersion) return;
+    $("character-panel").hidden = false;
+    $("stats-caption").textContent = current ? `模擬起始 Buff：${names.join("、")}` : "目前裝備 · 無起始 Buff";
+    $("character-stats").replaceChildren(...Object.entries(base).map(([key, original]) => {
+      const cell = document.createElement("div");
+      const label = document.createElement("dt");
+      label.textContent = key;
+      const value = document.createElement("dd");
+      const active = current?.[key] ?? original;
+      value.textContent = format(active);
+      if (active !== original) {
+        const difference = document.createElement("small");
+        difference.textContent = `${active > original ? "+" : ""}${format(active - original)}`;
+        difference.dataset.direction = active > original ? "up" : "down";
+        value.title = `無 Buff ${format(original)}`;
+        value.append(difference);
+      }
+      cell.append(label, value);
+      return cell;
+    }));
+  } catch (error) {
+    if (version === statsVersion) $("stats-caption").textContent = error.message;
+  }
+}
+
+$("scenario").addEventListener("input", scheduleStats);
+
 $("add-buff").onclick = () => addScenarioEffect("buff");
 $("add-status").onclick = () => addScenarioEffect("status");
 
 async function load() {
   $("fields").disabled = $("refresh").disabled = true;
   $("open-floating").hidden = true;
+  $("character-panel").hidden = true;
+  statsVersion++;
   gameTabId = undefined;
   $("result").hidden = true;
   $("status").textContent = "正在讀取角色資料…";
@@ -248,6 +299,7 @@ async function load() {
     fillMonsters();
     $("fields").disabled = false;
     $("status").textContent = "";
+    await showStats();
   } catch (error) {
     snapshot = null;
     $("role").textContent = "尚未讀取角色";
@@ -268,12 +320,24 @@ function showDefense(defense, trials) {
   $("incoming-sources").textContent = defense.received.length
     ? `平均承傷來源　${defense.received.map(({name, average}) => `${name} ${format(average)}`).join(" · ")}`
     : "這些樣本中沒有受到怪物傷害。";
-  $("timeline-title").textContent = defense.timelineCount > defense.timeline.length
-    ? `第 1 次模擬的對戰過程（前 ${defense.timeline.length} 筆）`
-    : "第 1 次模擬的對戰過程";
-  $("timeline").replaceChildren(...defense.timeline.map(({at, text, hp}) => {
+}
+
+function showTimeline(timeline, total) {
+  $("timeline-title").textContent = total > timeline.length
+    ? `對戰紀錄 · 第 1 次模擬（前 ${timeline.length} 筆）`
+    : "對戰紀錄 · 第 1 次模擬";
+  $("timeline").replaceChildren(...timeline.map(({at, text, hp, kind}) => {
     const row = document.createElement("li");
-    row.textContent = `${seconds(at)} · ${text} · HP ${format(hp)}`;
+    row.dataset.kind = kind;
+    const time = document.createElement("time");
+    const stamp = (at / 1000).toFixed(2);
+    time.textContent = stamp.padStart(6, "0");
+    const content = document.createElement("span");
+    content.textContent = text;
+    const health = document.createElement("span");
+    health.className = "log-hp";
+    health.textContent = `HP ${format(hp)}`;
+    row.append(time, content, health);
     return row;
   }));
 }
@@ -317,6 +381,7 @@ function show(result) {
   }));
   renderSongEffects(result.songs);
   showDefense(result.defense, result.trials);
+  showTimeline(result.timeline, result.timelineCount);
   $("result").hidden = false;
 }
 
@@ -331,12 +396,7 @@ $("calculator").onsubmit = async event => {
     monsterId:Number($("monster").value), mode:$("mode").value,
     skill:$("skill").value, level:Number($("skill-level").value), seconds:Number($("seconds").value),
     counterattack:$("counterattack").checked,
-    scenario: {
-      excludeActive: [...$("active-buffs").querySelectorAll("input:not(:checked)")].map(input => Number(input.value)),
-      buffs: readEffects("extra-buffs"),
-      statuses: readEffects("monster-statuses"),
-      autoBuffs: $("auto-buffs").checked,
-    },
+    scenario: readScenario(),
   };
   $("fields").disabled = $("refresh").disabled = $("open-floating").disabled = true;
   $("result").hidden = true;

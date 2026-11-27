@@ -18,6 +18,11 @@
       <button id="refresh" type="button">更新角色</button>
     </div>
   </header>
+  <section id="character-panel" class="card" hidden aria-labelledby="stats-title">
+    <h2 id="stats-title">角色能力</h2>
+    <p id="stats-caption">目前裝備，不套用 Buff</p>
+    <dl id="character-stats"></dl>
+  </section>
   <form id="calculator">
     <fieldset id="fields" disabled>
       <label for="search">怪物名稱或 ID</label>
@@ -48,8 +53,11 @@
       <details id="scenario">
         <summary>角色 Buff 與怪物狀態</summary>
         <h2>角色起始 Buff</h2>
-        <div id="active-buffs"></div>
-        <label class="check"><input id="auto-buffs" type="checkbox" checked> 允許使用 Buff 道具及掛機模式自補 Buff</label>
+        <details id="snapshot-buff-options">
+          <summary>匯入遊戲身上的 Buff（預設不選）</summary>
+          <div id="active-buffs"></div>
+        </details>
+        <label class="check"><input id="auto-buffs" type="checkbox"> 允許使用 Buff 道具及掛機模式自補 Buff</label>
         <div class="effect-picker">
           <select id="buff-choice" aria-label="額外角色 Buff"></select>
           <button id="add-buff" type="button">加入 Buff</button>
@@ -95,14 +103,14 @@
       </dl>
       <p id="survival"></p>
       <p id="incoming-sources"></p>
-      <details id="timeline-details">
-        <summary id="timeline-title">第 1 次模擬的對戰過程</summary>
-        <ol id="timeline"></ol>
-      </details>
     </section>
+    <details id="timeline-details" open>
+      <summary id="timeline-title">對戰紀錄 · 第 1 次模擬</summary>
+      <ol id="timeline"></ol>
+    </details>
     <details>
       <summary>試算條件</summary>
-      <p>以角色快照的 HP、SP、裝備、背包及看得到的 Buff 開始。目標倒下後立刻換上同一隻滿血怪，計入有效傷害。勾選反擊時，雙方在可交戰距離開始。怪物可普攻、施技及打斷詠唱，角色倒下後結束該次模擬。找怪移動、掉落與隊友攻擊不計。隊友給的現有 Buff 會倒數，但模擬中沒有隊友補放。角色戰鬥內部狀態以新遭遇起算。</p>
+      <p>以角色快照的 HP、SP、裝備、背包及看得到的 Buff 開始。目標倒下後立刻換上同一隻滿血怪，計入有效傷害。勾選反擊時，雙方在可交戰距離開始。怪物可普攻、施技及打斷詠唱，角色倒下後結束該次模擬。找怪移動、掉落與隊友攻擊不計。手動選入的現有 Buff 會按快照剩餘時間倒數。角色戰鬥內部狀態以新遭遇起算。</p>
     </details>
   </section>
 </body>

@@ -36,8 +36,6 @@ summary { cursor: pointer; }
 .check input { width: auto; margin: 0; }
 #defense { border-top: 1px solid var(--line); margin: 12px 0; padding-top: 10px; }
 #survival, #incoming-sources { font-size: 12px; margin-bottom: 7px; }
-#timeline { max-height: 175px; overflow: auto; padding-left: 24px; }
-#timeline li { margin: 4px 0; }
 #scenario { margin-bottom: 10px; padding: 7px; border: 1px solid var(--line); border-radius: 6px; }
 #scenario h2 { margin: 9px 0 5px; font-size: 13px; }
 .effect-picker, .effect-row { display: grid; align-items: center; gap: 5px; }
@@ -48,3 +46,20 @@ summary { cursor: pointer; }
 #song-effects ul { padding-left: 20px; }
 body.floating { width: auto; box-sizing: border-box; }
 .header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+#stats-caption { font-size: 12px; }
+#character-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; margin: 8px 0 0; }
+#character-stats > div { background: var(--tint); border-radius: 4px; padding: 4px; }
+#character-stats dt { font-size: 10px; }
+#character-stats dd { font-size: 12px; }
+#character-stats small { display: inline-block; font-size: 10px; margin-left: 3px; }
+#character-stats small[data-direction="up"] { color: light-dark(#11693b, #8ee3aa); }
+#character-stats small[data-direction="down"] { color: light-dark(#a42420, #ffaaa3); }
+#snapshot-buff-options { margin: 4px 0 8px; }
+#timeline-details { margin: 10px 0; }
+#timeline { max-height: 250px; overflow: auto; list-style: none; background: #141a24; color: #e5eaf2; border-radius: 6px; padding: 6px 8px; }
+#timeline li { display: grid; grid-template-columns: 48px 1fr auto; align-items: baseline; gap: 6px; margin: 3px 0; }
+#timeline time, .log-hp { font-variant-numeric: tabular-nums; color: #bdc9dc; }
+#timeline li[data-kind="monster"] { color: #ffd186; }
+#timeline li[data-kind="incoming"] { color: #ffaaa3; }
+#timeline li[data-kind="player"] { color: #abe7fe; }
