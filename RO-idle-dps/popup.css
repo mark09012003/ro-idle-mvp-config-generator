@@ -63,3 +63,6 @@ summary { cursor: pointer; }
 #timeline li[data-kind="monster"] { color: #ffd186; }
 #timeline li[data-kind="incoming"] { color: #ffaaa3; }
 #timeline li[data-kind="player"] { color: #abe7fe; }
+#equipment-details { margin-top: 9px; }
+#equipment-list { padding-left: 19px; margin: 6px 0 0; }
+#equipment-list li { margin: 3px 0; }

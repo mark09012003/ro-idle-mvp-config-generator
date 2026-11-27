@@ -233,22 +233,47 @@ function scheduleStats() {
   statsTimeout = setTimeout(() => { void showStats(); }, 180);
 }
 
+function showEquipment({equipment, ammo, weaponType, attackElement}) {
+  const arrow = ammo
+    ? `${ammo.name} ×${format(ammo.quantity)} · 箭矢 ATK ${format(ammo.atk)} · ${element[ammo.element] ?? ammo.element}屬性`
+    : weaponType === "bow" ? "目前使用弓，箭矢欄為空。" : "箭矢欄為空。";
+  $("ammo-summary").textContent = `${arrow}　｜　起始普攻：${element[attackElement] ?? attackElement}屬性`;
+  $("equipment-list").replaceChildren(...equipment.map(({slot, name, refine, broken, cards}) => {
+    const row = document.createElement("li");
+    row.textContent = `${slot} · ${refine ? `+${refine} ` : ""}${name}${broken ? "（損壞）" : ""}` +
+      (cards.length ? ` · ${cards.join("、")}` : "");
+    return row;
+  }));
+}
+
 async function showStats() {
   if (!snapshot) return;
   const version = ++statsVersion;
   try {
-    const {base, current, names} = await engine("character", readScenario());
+    const preview = await engine("character", readScenario());
+    const {base, current, names, allocated} = preview;
     if (version !== statsVersion) return;
     $("character-panel").hidden = false;
-    $("stats-caption").textContent = current ? `無 Buff → 勾選後 · ${names.join("、")}` : "目前裝備 · 無起始 Buff";
+    $("stats-caption").textContent = current
+      ? `基本素質＋額外加成 · ${names.join("、")}`
+      : "基本素質＋額外加成 · 無起始 Buff";
     $("character-stats").replaceChildren(...Object.entries(base).map(([key, original]) => {
       const cell = document.createElement("div");
       const label = document.createElement("dt");
       label.textContent = key;
       const value = document.createElement("dd");
       const active = current?.[key] ?? original;
-      value.textContent = format(original);
-      if (active !== original) {
+      if (Object.hasOwn(allocated, key)) {
+        const split = total => {
+          const extra = total - allocated[key];
+          return `${format(allocated[key])} ${extra < 0 ? "−" : "+"} ${format(Math.abs(extra))}`;
+        };
+        value.textContent = split(active);
+        value.title = `無 Buff：${split(original)} ＝ ${format(original)}${active !== original ? `。勾選後合計：${format(active)}` : ""}`;
+      } else {
+        value.textContent = format(original);
+      }
+      if (active !== original && !Object.hasOwn(allocated, key)) {
         const updated = document.createElement("small");
         updated.textContent = `→ ${format(active)}`;
         updated.dataset.direction = active > original ? "up" : "down";
@@ -257,6 +282,7 @@ async function showStats() {
       cell.append(label, value);
       return cell;
     }));
+    showEquipment(preview);
   } catch (error) {
     if (version === statsVersion) $("stats-caption").textContent = error.message;
   }

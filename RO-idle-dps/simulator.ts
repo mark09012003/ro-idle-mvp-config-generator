@@ -11,7 +11,8 @@ import { monsterDefender, playerHitRate, playerCritRate } from "./src/game/comba
 import { effectiveMonster, POISON_INTERVAL_MS, STATUS_NAMES, type MobStatusId, type MobStatuses } from "./src/game/combat/monsterStatus";
 import { buffDisplayName, getBuff, isKnownBuff } from "./src/game/data/buffs";
 import { elementModifier } from "./src/game/data/elements";
-import { getItem, registerItemDefs } from "./src/game/data/items";
+import { getItem, ITEMS, registerItemDefs } from "./src/game/data/items";
+import { getAmmo, getEquipped, SLOT_NAMES } from "./src/game/items/equipment";
 import { withPetBuff } from "./src/game/sim/pet";
 import { AILMENT_NAMES, BLEEDING_TICK_MS } from "./src/game/combat/ailments";
 import { randInt } from "./src/game/core/rng";
@@ -204,8 +205,22 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario) {
     };
   }
   const current = setup(snapshot, {...options, scenario}, 1);
-  const base = panel(setup(snapshot, options, 1));
-  return {base, current:current.buffs.length ? panel(current) : null, names:current.buffs.map(buff => buffDisplayName(buff.id))};
+  const baseline = setup(snapshot, options, 1);
+  const base = panel(baseline);
+  const equipment = getEquipped(baseline.inventory, baseline.equipment).map(({slot, stack, def}) => ({
+    slot:SLOT_NAMES[slot], name:def.name, refine:stack.refine ?? 0, broken:!!stack.broken,
+    cards:(stack.cards ?? []).filter(Boolean).map(id => ITEMS.get(id)?.name ?? `#${id}`),
+  }));
+  const ammo = getAmmo(baseline.inventory, baseline.equipment);
+  const stats = derived(current);
+  const allocated = Object.fromEntries(Object.entries(baseline.character.stats)
+    .map(([key, value]) => [key.toUpperCase(), value]));
+  return {
+    base, current:current.buffs.length ? panel(current) : null,
+    names:current.buffs.map(buff => buffDisplayName(buff.id)), allocated, equipment,
+    weaponType:stats.weaponType, attackElement:stats.attackElement,
+    ammo:ammo ? {name:ammo.def.name, atk:ammo.def.atk, element:ammo.def.element, quantity:ammo.stack.qty} : null,
+  };
 }
 
 function replaceTarget(state: GameState, target: MonsterDef, options: Options): ActiveMonster {
