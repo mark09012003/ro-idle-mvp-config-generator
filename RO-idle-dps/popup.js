@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-13";
+const ASSET_VER = "20261127-14";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -336,6 +336,7 @@ function updateHeaderRole() {
 // =========================================================================
 
 function buffCategoryOf(def) {
+  if (def.id === "PA_GOSPEL" || def.id.startsWith("nativeInc") || def.id === "nativeScResist") return "gospel";
   if (def.stats) return "song";
   if (ELEMENT_BUFF_IDS.has(def.id)) return "element";
   if (ITEM_BUFF_PREFIXES.some(p => def.id.startsWith(p))) return "item";

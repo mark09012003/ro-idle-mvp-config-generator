@@ -133,6 +133,19 @@ export function attackSkills(snapshot: GameSnapshot) {
   });
 }
 
+const GOSPEL_PULSE_ID = "PA_GOSPEL";
+const GOSPEL_FIXED_BUFFS: Record<string, {name: string; bonuses: Record<string, unknown>}> = {
+  nativeIncAtkRate: {name: "聖音：ATK +100%", bonuses: {atkRate: 100}},
+  nativeIncAllStatus: {name: "聖音：全素質 +20", bonuses: {stats: {str: 20, agi: 20, vit: 20, int: 20, dex: 20, luk: 20}}},
+  nativeIncMhpRate: {name: "聖音：最大 HP +100%", bonuses: {maxHpRate: 100}},
+  nativeIncMspRate: {name: "聖音：最大 SP +100%", bonuses: {maxSpRate: 100}},
+  nativeIncHit: {name: "聖音：命中 HIT +50", bonuses: {hit: 50}},
+  nativeIncFlee: {name: "聖音：迴避 FLEE +50", bonuses: {flee: 50}},
+  nativeIncDefRate: {name: "聖音：DEF +25%", bonuses: {defRate: 25}},
+  nativeScResist: {name: "聖音：全異常免疫", bonuses: {resEff: Object.fromEntries(Object.keys(AILMENT_NAMES).map(k => [k, 10000]))}},
+};
+const gospelBuffIds = [GOSPEL_PULSE_ID, ...Object.keys(GOSPEL_FIXED_BUFFS)];
+
 const manualBuffIds = [
   "AL_BLESSING", "AL_INCAGI", "AL_ANGELUS", "AC_CONCENTRATION", "SN_SIGHT", "SN_WINDWALK",
   "PR_IMPOSITIO", "PR_SUFFRAGIUM", "PR_ASPERSIO", "PR_BENEDICTIO", "PR_GLORIA", "PR_MAGNIFICAT", "PR_KYRIE", "HP_ASSUMPTIO",
@@ -156,10 +169,14 @@ const manualStatuses: Partial<Record<MobStatusId, number>> = {
   aeterna:1, provoke:10, quagmire:5, crucis:10, decagi:10, mindBreaker:5,
   freeze:1, stone:1, stun:1, sleep:1, silence:1, blind:1, poison:1, deadlyPoison:1, bleeding:1,
   spiderweb:1, fogwall:1,
+  gospelDef:1, gospelAtk:1, gospelFlee:1, gospelSlow:1,
   armorChange:5, keeping:1, safetywall:10, pneuma:1, magicMirror:5, barrier:1,
   agiup:1, incagi:10, autoguard:10, defender:5, assumptio:5, reflectShield:10, powerup:1,
 };
-const maximumBuffLevel = (id: string) => SKILLS.get(id)?.maxLv ?? 1;
+const maximumBuffLevel = (id: string) => id === GOSPEL_PULSE_ID ? 10 : Object.hasOwn(GOSPEL_FIXED_BUFFS, id) ? 1 : (SKILLS.get(id)?.maxLv ?? 1);
+const manualBuffLabel = (id: string) => id === GOSPEL_PULSE_ID
+  ? "聖音（隊友每 10 秒隨機祝福／減益）"
+  : GOSPEL_FIXED_BUFFS[id]?.name ?? buffDisplayName(id);
 const previewBuffs = (snapshot: GameSnapshot) => snapshot.buffs ?? [];
 
 function ammoChoices(snapshot: GameSnapshot) {
@@ -190,14 +207,18 @@ export function scenarioCatalog(snapshot: GameSnapshot) {
       remainingMs: "remainingMs" in buff ? Number(buff.remainingMs) : undefined,
       group: buffGroup({...buff, until: NEVER} as ActiveBuff),
     })),
-    buffs: [...manualBuffIds, ...songIds].map(id => ({
-      id, name:buffDisplayName(id), max:maximumBuffLevel(id),
-      group: buffGroup({id, lv: maximumBuffLevel(id), until: NEVER} as ActiveBuff),
+    buffs: [...manualBuffIds, ...songIds, ...gospelBuffIds].map(id => ({
+      id, name: manualBuffLabel(id), max: maximumBuffLevel(id),
+      group: id === GOSPEL_PULSE_ID || Object.hasOwn(GOSPEL_FIXED_BUFFS, id) ? undefined : buffGroup({id, lv: maximumBuffLevel(id), until: NEVER} as ActiveBuff),
       ...(songIds.includes(id) && {stats:songStats[id], lessonName:id.startsWith("DC_") ? "練習舞蹈等級" : "操控樂器等級"}),
     })),
     statuses: Object.entries(manualStatuses).map(([id, max]) => ({
       id,
-      name: id === "armorChange" ? "石膚（鋼筋鐵骨）" : STATUS_NAMES[id as MobStatusId],
+      name: id === "armorChange" ? "石膚（鋼筋鐵骨）"
+        : id === "gospelDef" ? "聖音降防（DEF 歸 0）"
+        : id === "gospelAtk" ? "聖音降攻（ATK 歸 0）"
+        : id === "gospelFlee" ? "聖音降迴避（FLEE 歸 0）"
+        : STATUS_NAMES[id as MobStatusId],
       max,
     })),
   };
@@ -334,6 +355,15 @@ function initialBuffs(snapshot: GameSnapshot, scenario?: Scenario): ActiveBuff[]
     }
   }
   for (const effect of scenario?.buffs ?? []) {
+    if (effect.id === GOSPEL_PULSE_ID) {
+      effectTime(effect, 10);
+      continue;
+    }
+    if (Object.hasOwn(GOSPEL_FIXED_BUFFS, effect.id)) {
+      const until = effectTime(effect, 1) || NEVER;
+      add({id: effect.id, lv: 10, until, bonuses: structuredClone(GOSPEL_FIXED_BUFFS[effect.id].bonuses) as ActiveBuff["bonuses"]});
+      continue;
+    }
     if (!manualBuffIds.includes(effect.id) && !songIds.includes(effect.id)) throw new Error("所選 Buff 不支援手動加入。");
     const until = effectTime(effect, maximumBuffLevel(effect.id)) || NEVER;
     const song = songIds.includes(effect.id) ? songParameters(effect) : null;
@@ -779,7 +809,7 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario, mo
       arrowAtk: stats.arrowAtk,
       masteryAtk: stats.passive.masteryAtk,
     },
-    names:current.buffs.map(buff => buffDisplayName(buff.id)), allocated, equipment,
+    names:current.buffs.map(buff => GOSPEL_FIXED_BUFFS[buff.id]?.name ?? buffDisplayName(buff.id)), allocated, equipment,
     weaponType:stats.weaponType, attackElement:stats.attackElement, missingRuleAmmo,
     ammo:ammo ? {name:ammo.def.name, atk:ammo.def.atk, element:ammo.def.element, quantity:ammo.stack.qty,
       fromBag:ammo.stack.uid !== snapshot.equipment.ammo, manual:scenario?.ammoItemId !== undefined,
@@ -917,6 +947,8 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     effectTime(effect, maximumBuffLevel(effect.id));
     return {id:effect.id, name:buffDisplayName(effect.id), ...songParameters(effect)};
   });
+  const gospelSpec = (options.scenario?.buffs ?? []).find(effect => effect.id === GOSPEL_PULSE_ID);
+  const gospelConfig = gospelSpec ? {lv: gospelSpec.level, until: effectTime(gospelSpec, 10) || NEVER} : null;
   const lines = new Map<string, DamageLine>();
   const line = (id: string) => {
     if (!lines.has(id)) lines.set(id, {name: skillDisplayName(id), damage:0, hits:0, casts:0, castMs:0, delayMs:0, cooldownMs:0});
@@ -981,6 +1013,89 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     let credited = 0;
     const defenseTickMs = Math.max(500, monster.attackDelay);
     let nextDefenseCheckAt = !counterattack && mobDefense ? state.time + defenseTickMs : NEVER;
+    let nextGospelAt = gospelConfig ? state.time : NEVER;
+    function applyGospelPulse() {
+      if (!gospelConfig) return;
+      const lv = gospelConfig.lv;
+      const chance = 50 + 5 * lv;
+      const pushOrReplaceBuff = (id: string, durationMs: number, bonuses?: ActiveBuff["bonuses"], buffLv = lv) => {
+        const until = state.time + durationMs;
+        const candidate = {id, lv: buffLv, until, ...(bonuses ? {bonuses} : {})} as ActiveBuff;
+        const grp = bonuses ? undefined : buffGroup(candidate);
+        state.buffs = state.buffs.filter(b => b.id !== id && (!grp || buffGroup(b) !== grp));
+        state.buffs.push(candidate);
+      };
+      // Ally Gospel roll (identical to engine qh())
+      if (randInt(state.rng.combat, 0, 99) < chance) {
+        const roll = randInt(state.rng.combat, 0, 12);
+        if (roll === 0) {
+          const healed = receiveHealing(state, 1000 + randInt(state.rng.combat, 0, 8999));
+          record(`聖音 Lv.${lv}（友方）· 回復 ${healed} HP`, "player");
+        } else if (roll === 1) {
+          state.ailments = {};
+          record(`聖音 Lv.${lv}（友方）· 解除全部異常狀態`, "player");
+        } else if (roll === 6 || roll === 7 || roll === 8 || roll === 9) {
+          const bid = roll === 6 ? "AL_BLESSING" : roll === 7 ? "AL_INCAGI" : roll === 8 ? "PR_ASPERSIO" : "PR_BENEDICTIO";
+          const blv = roll < 8 ? 10 : 1;
+          pushOrReplaceBuff(bid, 60000, undefined, blv);
+          record(`聖音 Lv.${lv}（友方）· 獲得 ${buffDisplayName(bid)} Lv.${blv}`, "player");
+        } else if (roll === 12) {
+          pushOrReplaceBuff("nativeIncHit", 60000, {hit: 50});
+          pushOrReplaceBuff("nativeIncFlee", 60000, {flee: 50});
+          record(`聖音 Lv.${lv}（友方）· 獲得 命中 +50、迴避 +50`, "player");
+        } else {
+          const map: Record<number, {id: string; ms: number}> = {
+            2: {id: "nativeScResist", ms: 60000},
+            3: {id: "nativeIncMhpRate", ms: 60000},
+            4: {id: "nativeIncMspRate", ms: 60000},
+            5: {id: "nativeIncAllStatus", ms: 60000},
+            10: {id: "nativeIncDefRate", ms: 10000},
+            11: {id: "nativeIncAtkRate", ms: 60000},
+          };
+          const chosen = map[roll];
+          if (chosen) {
+            const def = GOSPEL_FIXED_BUFFS[chosen.id];
+            pushOrReplaceBuff(chosen.id, chosen.ms, structuredClone(def.bonuses) as ActiveBuff["bonuses"]);
+            record(`聖音 Lv.${lv}（友方）· 獲得 ${def.name}`, "player");
+          }
+        }
+      }
+      // Enemy Gospel roll (identical to engine qh())
+      if (current.hp > 0 && state.monsters.includes(current) && randInt(state.rng.combat, 0, 99) < chance) {
+        const roll = randInt(state.rng.combat, 0, 9);
+        const eff = effectiveMonster(monster, current.status);
+        if (roll < 2) {
+          let dmg = roll === 0 ? 3000 + randInt(state.rng.combat, 0, 4999) : 1500 + randInt(state.rng.combat, 0, 3999);
+          if (roll === 0) {
+            dmg = Math.max(0, dmg - Math.floor((dmg * eff.def) / 100) - Math.floor((eff.stats.vit * (eff.vitDefRate ?? 100)) / 100));
+          }
+          const dealt = Math.min(current.hp, dmg);
+          if (dealt > 0) {
+            current.hp -= dealt;
+            const entry = line(GOSPEL_PULSE_ID);
+            const effDmg = Math.min(dealt, Math.max(0, monster.hp - credited));
+            noteHit(entry, false, dealt);
+            credited += effDmg;
+            entry.damage += effDmg;
+            entry.hits++;
+            record(`聖音 Lv.${lv}（敵方）· 造成 ${dealt} 傷害`, "player");
+            if (current.hp <= 0) {
+              state.monsters = state.monsters.filter(m => m !== current);
+            }
+          }
+        } else if (roll < 5) {
+          if (!eff.boss) {
+            const st = (roll === 2 ? "curse" : roll === 3 ? "blind" : "poison") as MobStatusId;
+            (current.status ??= {})[st] = {until: state.time + 1800000, lv};
+            record(`聖音 Lv.${lv}（敵方）· 目標陷入 ${STATUS_NAMES[st]}`, "monster");
+          }
+        } else if (roll !== 5 || !eff.boss) {
+          const st = (roll === 5 ? "provoke" : roll === 6 ? "gospelDef" : roll === 7 ? "gospelAtk" : roll === 8 ? "gospelFlee" : "gospelSlow") as MobStatusId;
+          (current.status ??= {})[st] = {until: roll === 5 ? NEVER : state.time + 20000, lv: roll === 5 ? 10 : 1};
+          record(`聖音 Lv.${lv}（敵方）· 目標陷入 ${STATUS_NAMES[st]}`, "monster");
+        }
+      }
+    }
     if (!panel) {
       const stats = derived(state);
       const target = effectiveMonster(monster, current.status);
@@ -996,13 +1111,33 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     for (let steps = 0; steps < 15000; steps++) {
       const pulse = pulses.find(entry => entry.buff && state.buffs.includes(entry.buff) && entry.at < entry.buff.until);
       const engineTime = nextEventTime(state);
-      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt);
+      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt, nextGospelAt);
       if (next > duration || state.activity.kind === "stopped" || state.activity.kind === "dead") break;
       moveTime(state, Math.max(state.time, next));
       if (pulse && pulse.at <= next && pulse.at < engineTime) {
         const healed = receiveHealing(state, pulse.heal);
         if (healed > 0) record(`${pulse.name} · HP +${healed}`);
         pulse.at += pulse.interval;
+        continue;
+      }
+      if (gospelConfig && nextGospelAt <= next && nextGospelAt < engineTime) {
+        const nextAt = state.time + 10000;
+        nextGospelAt = nextAt < gospelConfig.until ? nextAt : NEVER;
+        applyGospelPulse();
+        if (current.hp <= 0 && !state.monsters.includes(current)) {
+          total += monster.hp;
+          kills++;
+          if (!firstKill) {
+            killTimes.push(state.time);
+            firstKill = true;
+          }
+          record(`擊倒 ${monster.name}`);
+          record(`下一隻 ${monster.name} 進入戰鬥`, "monster");
+          current = replaceTarget(state, monster, options, logMobDefenseEvent);
+          summonHp.clear();
+          nextDefenseCheckAt = !counterattack && mobDefense ? state.time + defenseTickMs : NEVER;
+          credited = 0;
+        }
         continue;
       }
       if (!counterattack && mobDefense && nextDefenseCheckAt <= next && nextDefenseCheckAt < engineTime) {
