@@ -46,3 +46,5 @@ summary { cursor: pointer; }
 .effect-row select, .effect-row input, .effect-picker select { margin: 3px 0; }
 .performer-fields { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 6px; padding: 6px; background: var(--tint); border-radius: 5px; }
 #song-effects ul { padding-left: 20px; }
+body.floating { width: auto; box-sizing: border-box; }
+.header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }

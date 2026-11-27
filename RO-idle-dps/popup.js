@@ -1,5 +1,8 @@
 const $ = id => document.getElementById(id);
 const host = "https://ro-idle.app";
+const gameTab = new URL(location.href).searchParams.get("gameTab");
+const floating = gameTab !== null;
+document.body.classList.toggle("floating", floating);
 const number = new Intl.NumberFormat("zh-TW", {maximumFractionDigits: 2});
 const format = value => Number.isFinite(value) ? number.format(value) : "—";
 const seconds = ms => `${format(ms / 1000)} 秒`;
@@ -12,7 +15,7 @@ const race = {
   demon:"惡魔", demihuman:"人形", angel:"天使", dragon:"龍",
 };
 const size = {small:"小型", medium:"中型", large:"大型"};
-let worker, snapshot, scenario, targets = [], skills = [], sequence = 0;
+let worker, snapshot, scenario, gameTabId, targets = [], skills = [], sequence = 0;
 const requests = new Map();
 
 function getWorker() {
@@ -52,10 +55,19 @@ function engine(action, options) {
 
 async function readCharacter() {
   if (!globalThis.chrome?.scripting) throw new Error("請從 Chrome 工具列開啟已安裝的擴充。");
-  const [tab] = await chrome.tabs.query({currentWindow:true, active:true});
+  let tab;
+  if (floating) {
+    const id = Number(gameTab);
+    if (!/^\d+$/.test(gameTab) || !Number.isSafeInteger(id)) throw new Error("找不到原本的遊戲分頁。");
+    try { tab = await chrome.tabs.get(id); }
+    catch { throw new Error("原本的遊戲分頁已關閉，請到遊戲分頁重新開啟 DPS 試算。"); }
+  } else {
+    [tab] = await chrome.tabs.query({currentWindow:true, active:true});
+  }
   if (!tab?.url || new URL(tab.url).origin !== host || new URL(tab.url).pathname.startsWith("/info")) {
     throw new Error("請先到 ro-idle.app 進入角色，再開啟擴充。");
   }
+  gameTabId = tab.id;
   const [reply] = await chrome.scripting.executeScript({
     target:{tabId:tab.id},
     func: async allowedOrigin => {
@@ -98,6 +110,27 @@ async function readCharacter() {
   }
   return result.snapshot;
 }
+
+async function openFloating() {
+  if (floating || gameTabId === undefined) return;
+  const button = $("open-floating");
+  button.disabled = true;
+  try {
+    const url = new URL(chrome.runtime.getURL("popup.html"));
+    url.searchParams.set("gameTab", String(gameTabId));
+    const windows = await chrome.windows.getAll({populate:true, windowTypes:["popup"]});
+    const existing = windows.find(candidate => candidate.tabs?.some(tab => tab.url === url.href));
+    if (existing) await chrome.windows.update(existing.id, {focused:true, state:"normal"});
+    else await chrome.windows.create({url:url.href, type:"popup", width:480, height:730, focused:true});
+    window.close();
+  } catch (error) {
+    $("status").textContent = `無法開啟懸浮視窗。${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("open-floating").onclick = openFloating;
 
 function fillMonsters() {
   const term = $("search").value.trim().normalize("NFKC").toLowerCase();
@@ -198,6 +231,8 @@ $("add-status").onclick = () => addScenarioEffect("status");
 
 async function load() {
   $("fields").disabled = $("refresh").disabled = true;
+  $("open-floating").hidden = true;
+  gameTabId = undefined;
   $("result").hidden = true;
   $("status").textContent = "正在讀取角色資料…";
   try {
@@ -219,6 +254,7 @@ async function load() {
     $("status").textContent = error.message;
   } finally {
     $("refresh").disabled = false;
+    $("open-floating").hidden = floating || gameTabId === undefined;
   }
 }
 
@@ -302,7 +338,7 @@ $("calculator").onsubmit = async event => {
       autoBuffs: $("auto-buffs").checked,
     },
   };
-  $("fields").disabled = $("refresh").disabled = true;
+  $("fields").disabled = $("refresh").disabled = $("open-floating").disabled = true;
   $("result").hidden = true;
   $("status").textContent = "正在本機模擬戰鬥…";
   try {
@@ -311,7 +347,7 @@ $("calculator").onsubmit = async event => {
   } catch (error) {
     $("status").textContent = error.message;
   } finally {
-    $("fields").disabled = $("refresh").disabled = false;
+    $("fields").disabled = $("refresh").disabled = $("open-floating").disabled = false;
   }
 };
 void load();
