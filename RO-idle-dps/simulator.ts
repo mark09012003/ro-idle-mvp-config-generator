@@ -25,6 +25,23 @@ export const targets = [...MONSTERS.values()].filter(monster => monster.hp > 0)
   .map(({id, name, lv, hp, element, elementLv, race, size, def, mdef, boss}) =>
     ({id, name, lv, hp, element, elementLv, race, size, def, mdef, boss: !!boss}));
 
+const MONSTER_SKILL_NAMES = new Map<string, string>();
+for (const mob of MONSTERS.values()) {
+  for (const entry of mob.skills ?? []) {
+    if (entry.skill && entry.name && !MONSTER_SKILL_NAMES.has(entry.skill)) {
+      MONSTER_SKILL_NAMES.set(entry.skill, entry.name);
+    }
+  }
+}
+
+function skillDisplayName(id: string, monsterId?: number) {
+  if (monsterId !== undefined) {
+    const mobSkill = MONSTERS.get(monsterId)?.skills?.find(entry => entry.skill === id && entry.name);
+    if (mobSkill?.name) return mobSkill.name;
+  }
+  return SKILLS.get(id)?.name ?? MONSTER_SKILL_NAMES.get(id) ?? id;
+}
+
 export function builderCatalog() {
   const jobs = Object.values(JOBS).map(job => {
     const from = job.jobChange?.from ?? null;
@@ -541,7 +558,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   });
   const lines = new Map<string, DamageLine>();
   const line = (id: string) => {
-    if (!lines.has(id)) lines.set(id, {name: SKILLS.get(id)?.name ?? id, damage:0, hits:0, casts:0, castMs:0, delayMs:0, cooldownMs:0});
+    if (!lines.has(id)) lines.set(id, {name: skillDisplayName(id), damage:0, hits:0, casts:0, castMs:0, delayMs:0, cooldownMs:0});
     return lines.get(id)!;
   };
   function noteHit(entry: DamageLine, critical: boolean, raw: number) {
@@ -579,7 +596,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     const summonHp = new Map<number, number>();
     if (counterattack) observeDamage(state, (id, damage) => {
       if (damage <= 0) return;
-      const name = SKILLS.get(id)?.name ?? id;
+      const name = skillDisplayName(id);
       damageTaken += damage;
       received.set(name, (received.get(name) ?? 0) + damage);
       record(`${name} · 受到 ${damage} 傷害`, "incoming");
@@ -624,11 +641,11 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           record(`角色開始施放 ${entry.name}（詠唱 ${event.castMs / 1000} 秒）`, "player");
         }
         if (event.type === "mobSkillCast") {
-          record(`${MONSTERS.get(event.monsterId)?.name ?? "怪物"} 開始詠唱 ${SKILLS.get(event.skill)?.name ?? event.skill}（${event.castMs / 1000} 秒）`, "monster");
+          record(`${MONSTERS.get(event.monsterId)?.name ?? "怪物"} 開始詠唱 ${skillDisplayName(event.skill, event.monsterId)}（${event.castMs / 1000} 秒）`, "monster");
         }
         if (event.type === "mobSkill") {
           const name = MONSTERS.get(event.monsterId)?.name ?? "怪物";
-          const skill = SKILLS.get(event.skill)?.name ?? event.skill;
+          const skill = skillDisplayName(event.skill, event.monsterId);
           const outcome = event.result === "miss" ? "（未命中）" : event.heal ? `（回復 ${event.heal} HP）` : "";
           record(`${name} 使用 ${skill}${outcome}`, "monster");
           if (event.summoned?.length) {
@@ -659,7 +676,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           record(`角色普攻 · ${event.result === "miss" ? "未命中" : "未造成傷害"}`, "player");
         }
         if (event.type === "skillInterrupt") {
-          record(`詠唱中斷 · ${SKILLS.get(event.skill)?.name ?? event.skill}`);
+          record(`詠唱中斷 · ${skillDisplayName(event.skill)}`);
         }
         if (event.type === "ailmentStart") {
           record(`狀態 · ${AILMENT_NAMES[event.ailment] ?? event.ailment}`);
