@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261128-1";
+const ASSET_VER = "20261128-2";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -22,7 +22,7 @@ const ELEMENT_BUFF_IDS = new Set([
   "PR_ASPERSIO", "AS_ENCHANTPOISON", "SA_FLAMELAUNCHER", "SA_FROSTWEAPON",
   "SA_LIGHTNINGLOADER", "SA_SEISMICWEAPON", "itemEndowWater",
 ]);
-const ITEM_BUFF_PREFIXES = ["aspdPotion", "resist", "strFood", "agiFood", "vitFood", "intFood", "dexFood", "lukFood"];
+const ITEM_BUFF_PREFIXES = ["atkPotion", "matkPotion", "speedup", "aspdPotion", "resist", "strFood", "agiFood", "vitFood", "intFood", "dexFood", "lukFood"];
 
 let worker, snapshot;
 let scenario, targets = [], skills = [], sequence = 0;

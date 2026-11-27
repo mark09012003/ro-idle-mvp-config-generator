@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261128-1";
+const ASSET_VER = "20261128-2";
 const MAX_REBIRTHS = 11;
 const EXTRA_STAT_PER_REBIRTH = 20;
 const host = "https://ro-idle.app";
@@ -45,7 +45,7 @@ const ELEMENT_BUFF_IDS = new Set([
   "PR_ASPERSIO", "AS_ENCHANTPOISON", "SA_FLAMELAUNCHER", "SA_FROSTWEAPON",
   "SA_LIGHTNINGLOADER", "SA_SEISMICWEAPON", "itemEndowWater",
 ]);
-const ITEM_BUFF_PREFIXES = ["aspdPotion", "resist", "strFood", "agiFood", "vitFood", "intFood", "dexFood", "lukFood"];
+const ITEM_BUFF_PREFIXES = ["atkPotion", "matkPotion", "speedup", "aspdPotion", "resist", "strFood", "agiFood", "vitFood", "intFood", "dexFood", "lukFood"];
 
 let worker, snapshot, originalImportedSnapshot = null;
 let scenario, equipCatalog, builderInfo, targets = [], skills = [], sequence = 0;

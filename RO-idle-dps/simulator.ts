@@ -6,9 +6,9 @@ import { defaultAutoConfig } from "./src/game/ai/config";
 import { MONSTERS, type MonsterDef } from "./src/game/data/monsters";
 import { MAPS } from "./src/game/data/maps";
 import { JOBS } from "./src/game/data/jobs";
-import { isUpper } from "./src/game/data/jobFamily";
+import { baseJobOf, isUpper } from "./src/game/data/jobFamily";
 import { SKILLS, atLv } from "./src/game/data/skills";
-import { canAttackWithSkill, SUPPORT_SCOPE } from "./src/game/combat/skillEffects";
+import { canAttackWithSkill, kyrieShield, safetywallHits, SAGE_FIELDS, SKILL_BUFFS, SUPPORT_SCOPE } from "./src/game/combat/skillEffects";
 import { cardfixPermille, monsterDefender, playerHitRate, playerCritRate } from "./src/game/combat/damage";
 import { effectiveMonster, POISON_INTERVAL_MS, STATUS_NAMES, type MobStatusId, type MobStatuses } from "./src/game/combat/monsterStatus";
 import { buffDisplayName, getBuff, isKnownBuff } from "./src/game/data/buffs";
@@ -148,15 +148,28 @@ const GOSPEL_FIXED_BUFFS: Record<string, {name: string; bonuses: Record<string, 
 };
 const gospelBuffIds = [GOSPEL_PULSE_ID, ...Object.keys(GOSPEL_FIXED_BUFFS)];
 
-const manualBuffIds = [
-  "AL_BLESSING", "AL_INCAGI", "AL_ANGELUS", "AC_CONCENTRATION", "SN_SIGHT", "SN_WINDWALK",
-  "PR_IMPOSITIO", "PR_SUFFRAGIUM", "PR_ASPERSIO", "PR_BENEDICTIO", "PR_GLORIA", "PR_MAGNIFICAT", "PR_KYRIE", "HP_ASSUMPTIO",
-  "MG_ENERGYCOAT", "BS_ADRENALINE", "BS_WEAPONPERFECT", "BS_OVERTHRUST", "BS_MAXIMIZE",
-  "KN_TWOHANDQUICKEN", "AS_ENCHANTPOISON", "ASC_EDP", "SA_FLAMELAUNCHER", "SA_FROSTWEAPON",
-  "SA_LIGHTNINGLOADER", "SA_SEISMICWEAPON", "itemEndowWater",
+const manualItemBuffIds = [
+  "itemEndowWater", "atkPotion20", "matkPotion20", "speedup25",
   "aspdPotion1", "aspdPotion2", "aspdPotion3", "resistFire", "resistWater", "resistWind", "resistEarth",
   "strFood5", "agiFood5", "vitFood5", "intFood5", "dexFood5", "lukFood5",
 ].filter(isKnownBuff);
+// These effects depend on a live caster link, a placed field, or a preceding attack.
+const contextualBuffs = new Set([
+  "CG_MARIONETTE", "CR_DEVOTION", "HP_BASILICA", "HW_GRAVITATION", "MO_BLADESTOP", "MO_EXTREMITYFIST", "SA_LANDPROTECTOR",
+]);
+const jobBuffSkills = new Map(Object.values(JOBS).map(job => [job.id, new Set(job.skillTree.map(skill => skill.id))]));
+const manualSkillBuffIds = Object.keys(SKILL_BUFFS).filter(id =>
+  SKILLS.has(id) && !Object.hasOwn(SONGS, id) && !contextualBuffs.has(id) &&
+  (Object.hasOwn(SUPPORT_SCOPE, id) || [...jobBuffSkills.values()].some(skills => skills.has(id))));
+
+function manualBuffIdsFor(job: GameSnapshot["character"]["job"]) {
+  const own = jobBuffSkills.get(job);
+  return [
+    ...manualSkillBuffIds.filter(id => id === "CR_PROVIDENCE" ? baseJobOf(job) !== "crusader" :
+      Object.hasOwn(SUPPORT_SCOPE, id) || own?.has(id)),
+    ...manualItemBuffIds,
+  ];
+}
 const songStats: Record<string, readonly (keyof PerformerCtx["stats"])[]> = {
   BA_WHISTLE:["agi", "luk"],
   BA_ASSASSINCROSS:["agi"],
@@ -212,7 +225,7 @@ export function scenarioCatalog(snapshot: GameSnapshot) {
       remainingMs: "remainingMs" in buff ? Number(buff.remainingMs) : undefined,
       group: buffGroup({...buff, until: NEVER} as ActiveBuff),
     })),
-    buffs: [...manualBuffIds, ...songIds, ...gospelBuffIds].map(id => ({
+    buffs: [...manualBuffIdsFor(snapshot.character.job), ...songIds, ...gospelBuffIds].map(id => ({
       id, name: manualBuffLabel(id), max: maximumBuffLevel(id),
       group: id === GOSPEL_PULSE_ID || Object.hasOwn(GOSPEL_FIXED_BUFFS, id) ? undefined : buffGroup({id, lv: maximumBuffLevel(id), until: NEVER} as ActiveBuff),
       ...(id === GOSPEL_PULSE_ID && {maxCasters: MAX_GOSPEL_CASTERS}),
@@ -339,6 +352,7 @@ function songParameters(effect: Effect) {
 function buffGroup(active: ActiveBuff) {
   if (active.id === "BS_OVERTHRUST" || active.id === "WS_OVERTHRUSTMAX") return "overthrust";
   if (active.id === "PR_KYRIE" || active.id === "HP_ASSUMPTIO") return "kyrie-assumptio";
+  if (SAGE_FIELDS.includes(active.id)) return "sage-field";
   const definition = getBuff(active.id, active.lv, active.party);
   if ((active.bonuses ?? definition.bonuses).attackElement) return "attack-element";
   return definition.group;
@@ -346,6 +360,8 @@ function buffGroup(active: ActiveBuff) {
 
 function initialBuffs(snapshot: GameSnapshot, scenario?: Scenario): ActiveBuff[] {
   const buffs: ActiveBuff[] = [];
+  const job = snapshot.character.job;
+  const manualIds = new Set(manualBuffIdsFor(job));
   function add(buff: ActiveBuff) {
     const group = buffGroup(buff);
     for (let index = buffs.length - 1; index >= 0; index--) {
@@ -370,10 +386,22 @@ function initialBuffs(snapshot: GameSnapshot, scenario?: Scenario): ActiveBuff[]
       add({id: effect.id, lv: 10, until, bonuses: structuredClone(GOSPEL_FIXED_BUFFS[effect.id].bonuses) as ActiveBuff["bonuses"]});
       continue;
     }
-    if (!manualBuffIds.includes(effect.id) && !songIds.includes(effect.id)) throw new Error("所選 Buff 不支援手動加入。");
+    if (!manualIds.has(effect.id) && !songIds.includes(effect.id)) throw new Error("所選 Buff 不適用於目前職業或不支援手動加入。");
     const until = effectTime(effect, maximumBuffLevel(effect.id)) || NEVER;
     const song = songIds.includes(effect.id) ? songParameters(effect) : null;
-    add({id:effect.id, lv:effect.level, until, ...(song && {party:true, bonuses:song.bonuses})});
+    const id = effect.id;
+    const lv = effect.level;
+    const buff: ActiveBuff = {id, lv, until};
+    if (song) Object.assign(buff, {party:true, bonuses:song.bonuses});
+    if ((id === "BS_ADRENALINE" || id === "BS_OVERTHRUST") && !jobBuffSkills.get(job)?.has(id)) buff.party = true;
+    if (id === "MO_CALLSPIRITS") buff.sphereUntil = Array(lv).fill(until);
+    if (id === "PF_MEMORIZE" || id === "PA_SACRIFICE") buff.count = 5;
+    if (id === "ST_REJECTSWORD") buff.count = 3;
+    if (id === "AS_POISONREACT") buff.count = Math.max(1, Math.floor(lv / 2));
+    if (id === "MG_SAFETYWALL") buff.count = safetywallHits(lv);
+    if (id === "PR_SANCTUARY") buff.nextTick = 1000;
+    if (id === "LK_BERSERK" || id === "LK_TENSIONRELAX") buff.nextTick = 10000;
+    add(buff);
   }
   return buffs;
 }
@@ -477,6 +505,12 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   state.buffs = initialBuffs(snapshot, options.scenario);
   state.ailments = Object.fromEntries((snapshot.ailments ?? []).map(ailment =>
     [ailment.id, {until: ailment.remainingMs, lv: ailment.lv ?? 1}]));
+  const shield = state.buffs.find(buff => buff.id === "PR_KYRIE" && buff.shield === undefined);
+  if (shield) {
+    const barrier = kyrieShield(shield.lv ?? 1, derived(state).maxHp);
+    shield.shield = barrier.hp;
+    shield.count = barrier.hits;
+  }
   if (snapshot.cart) state.cart = {items: [], nextUid: 1};
   if (snapshot.pet?.mob) {
     const petDef = petOf(snapshot.pet.mob);
