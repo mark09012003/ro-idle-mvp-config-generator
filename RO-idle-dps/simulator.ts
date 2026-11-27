@@ -93,26 +93,31 @@ function songParameters(effect: Effect) {
   return {bonuses:entry.party!(effect.level, ctx), heal:entry.heal?.(effect.level, ctx) ?? 0, interval:entry.drainSec * 1000};
 }
 
-function buffGroup(id: string, level = 1) {
-  const buff = getBuff(id, level);
-  return buff.bonuses.attackElement ? "attack-element" : buff.group;
+function buffGroup(active: ActiveBuff) {
+  const definition = getBuff(active.id, active.lv, active.party);
+  if ((active.bonuses ?? definition.bonuses).attackElement) return "attack-element";
+  return definition.group;
 }
 
 function initialBuffs(snapshot: GameSnapshot, scenario?: Scenario): ActiveBuff[] {
-  const buffs = previewBuffs(snapshot).flatMap((buff, index) => {
-    if (!scenario?.includeActive?.includes(index) || !isKnownBuff(buff.id)) return [];
+  const buffs: ActiveBuff[] = [];
+  function add(buff: ActiveBuff) {
+    const group = buffGroup(buff);
+    for (let index = buffs.length - 1; index >= 0; index--) {
+      if (buffs[index].id === buff.id || (group && buffGroup(buffs[index]) === group)) buffs.splice(index, 1);
+    }
+    buffs.push(buff);
+  }
+  for (const [index, buff] of previewBuffs(snapshot).entries()) {
+    if (!scenario?.includeActive?.includes(index) || !isKnownBuff(buff.id)) continue;
     const remaining = "remainingMs" in buff ? Number(buff.remainingMs) : NEVER;
-    return Number.isFinite(remaining) && remaining > 0 ? [{...structuredClone(buff), until: remaining}] : [];
-  });
+    if (Number.isFinite(remaining) && remaining > 0) add({...structuredClone(buff), until:remaining});
+  }
   for (const effect of scenario?.buffs ?? []) {
     if (!manualBuffIds.includes(effect.id) && !songIds.includes(effect.id)) throw new Error("所選 Buff 不支援手動加入。");
     const until = effectTime(effect, maximumBuffLevel(effect.id)) || NEVER;
-    const group = buffGroup(effect.id, effect.level);
-    for (let index = buffs.length - 1; index >= 0; index--) {
-      if (buffs[index].id === effect.id || (group && buffGroup(buffs[index].id) === group)) buffs.splice(index, 1);
-    }
     const song = songIds.includes(effect.id) ? songParameters(effect) : null;
-    buffs.push({id:effect.id, lv:effect.level, until, ...(song && {party:true, bonuses:song.bonuses})});
+    add({id:effect.id, lv:effect.level, until, ...(song && {party:true, bonuses:song.bonuses})});
   }
   return buffs;
 }
@@ -164,7 +169,7 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
     hpPotion: loaded.hpPotion ?? config.hpPotion,
     spPotion: loaded.spPotion ?? config.spPotion,
     buffPotion: options.scenario?.autoBuffs ? loaded.buffPotion ?? config.buffPotion : {...config.buffPotion, enabled:false},
-    autoBerserk: loaded.autoBerserk,
+    autoBerserk: options.scenario?.autoBuffs ? loaded.autoBerserk : false,
     recovery: loaded.recovery ?? config.recovery,
     sit: options.mode === "auto" ? loaded.sit ?? config.sit : {...config.sit, enabled: false},
   };

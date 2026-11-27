@@ -92,7 +92,10 @@ async function readCharacter() {
         if (currentName() !== name || view.characterId !== id || view.snapshot?.character?.name !== name) {
           throw new Error("角色已切換，請更新角色後重試。");
         }
-        return {snapshot:view.snapshot};
+        // The server's derived panel already includes its active effects. Only
+        // forward the base character and the inputs the local engine can recompute.
+        const {character, inventory, equipment, buffs, ailments, cart, config, mapId, heldItems, pet} = view.snapshot;
+        return {snapshot:{character, inventory, equipment, buffs, ailments, cart, config, mapId, heldItems, pet}};
       } catch (error) {
         return {error: error.name === "TimeoutError" ? "讀取角色逾時。" : error.message};
       }
@@ -237,20 +240,19 @@ async function showStats() {
     const {base, current, names} = await engine("character", readScenario());
     if (version !== statsVersion) return;
     $("character-panel").hidden = false;
-    $("stats-caption").textContent = current ? `模擬起始 Buff：${names.join("、")}` : "目前裝備 · 無起始 Buff";
+    $("stats-caption").textContent = current ? `無 Buff → 勾選後 · ${names.join("、")}` : "目前裝備 · 無起始 Buff";
     $("character-stats").replaceChildren(...Object.entries(base).map(([key, original]) => {
       const cell = document.createElement("div");
       const label = document.createElement("dt");
       label.textContent = key;
       const value = document.createElement("dd");
       const active = current?.[key] ?? original;
-      value.textContent = format(active);
+      value.textContent = format(original);
       if (active !== original) {
-        const difference = document.createElement("small");
-        difference.textContent = `${active > original ? "+" : ""}${format(active - original)}`;
-        difference.dataset.direction = active > original ? "up" : "down";
-        value.title = `無 Buff ${format(original)}`;
-        value.append(difference);
+        const updated = document.createElement("small");
+        updated.textContent = `→ ${format(active)}`;
+        updated.dataset.direction = active > original ? "up" : "down";
+        value.append(updated);
       }
       cell.append(label, value);
       return cell;
