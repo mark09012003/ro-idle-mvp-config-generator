@@ -41,6 +41,7 @@
         <label>攻擊技能 <select id="skill"></select></label>
         <label>技能等級 <select id="skill-level"></select></label>
       </div>
+      <label class="check"><input id="counterattack" type="checkbox"> 模擬怪物反擊並計算承傷</label>
       <button id="calculate" type="submit">開始試算</button>
     </fieldset>
   </form>
@@ -60,9 +61,22 @@
         <tbody id="damage"></tbody>
       </table>
     </div>
+    <section id="defense" hidden aria-label="承傷與生存">
+      <h2>承傷與生存</h2>
+      <dl class="metrics">
+        <div><dt>平均承傷／次</dt><dd id="taken"></dd></div>
+        <div><dt>交戰期間承傷／秒</dt><dd id="incoming-dps"></dd></div>
+      </dl>
+      <p id="survival"></p>
+      <p id="incoming-sources"></p>
+      <details id="timeline-details">
+        <summary id="timeline-title">第 1 次模擬的對戰過程</summary>
+        <ol id="timeline"></ol>
+      </details>
+    </section>
     <details>
       <summary>試算條件</summary>
-      <p>以角色快照的 HP、SP、裝備、背包及看得到的 Buff 開始。目標倒下後立刻換上同一隻滿血怪，計入有效傷害。怪物主動反擊、找怪移動、掉落與隊友攻擊不計。隊友給的現有 Buff 會倒數，但模擬中沒有隊友補放。角色戰鬥內部狀態以新遭遇起算。</p>
+      <p>以角色快照的 HP、SP、裝備、背包及看得到的 Buff 開始。目標倒下後立刻換上同一隻滿血怪，計入有效傷害。勾選反擊時，雙方在可交戰距離開始。怪物可普攻、施技及打斷詠唱，角色倒下後結束該次模擬。找怪移動、掉落與隊友攻擊不計。隊友給的現有 Buff 會倒數，但模擬中沒有隊友補放。角色戰鬥內部狀態以新遭遇起算。</p>
     </details>
   </section>
 </body>

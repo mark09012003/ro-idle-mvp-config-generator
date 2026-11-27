@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import { createGameState, type GameState, type ActiveMonster } from "./src/game/sim/state";
-import { derived, moveTime, nextEventTime, processAt } from "./src/game/sim/engine";
+import { derived, moveTime, nextEventTime, observeDamage, processAt } from "./src/game/sim/engine";
 import { defaultAutoConfig } from "./src/game/ai/config";
 import { MONSTERS, type MonsterDef } from "./src/game/data/monsters";
 import { MAPS } from "./src/game/data/maps";
@@ -8,8 +8,10 @@ import { SKILLS, atLv } from "./src/game/data/skills";
 import { canAttackWithSkill } from "./src/game/combat/skillEffects";
 import { monsterDefender, playerHitRate, playerCritRate } from "./src/game/combat/damage";
 import { elementModifier } from "./src/game/data/elements";
-import { registerItemDefs } from "./src/game/data/items";
+import { getItem, registerItemDefs } from "./src/game/data/items";
 import { withPetBuff } from "./src/game/sim/pet";
+import { AILMENT_NAMES } from "./src/game/combat/ailments";
+import { randInt } from "./src/game/core/rng";
 import { NEVER } from "./src/game/config/gameplay";
 import type { GameSnapshot } from "./src/game/view";
 
@@ -23,7 +25,7 @@ export function attackSkills(snapshot: GameSnapshot) {
   });
 }
 
-type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number};
+type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean};
 type DamageLine = {name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
 function setup(snapshot: GameSnapshot, options: Options, seed: number) {
@@ -73,11 +75,12 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   return state;
 }
 
-function replaceTarget(state: GameState, target: MonsterDef): ActiveMonster {
+function replaceTarget(state: GameState, target: MonsterDef, counterattack = false): ActiveMonster {
   const monster: ActiveMonster = {
     uid: state.nextMonsterUid++, monsterId: target.id, hp: target.hp, distance: 1,
-    aggro: false, arriveAt: state.time, engageAt: state.time, nextAttackAt: NEVER,
-    skillReadyAt: Object.fromEntries((target.skills ?? []).map((_, index) => [index, NEVER])),
+    aggro: counterattack, arriveAt: state.time, engageAt: state.time,
+    nextAttackAt: counterattack ? state.time + randInt(state.rng.encounter, 100, 500) : NEVER,
+    ...(!counterattack && {skillReadyAt: Object.fromEntries((target.skills ?? []).map((_, index) => [index, NEVER]))}),
   };
   state.monsters = [monster];
   state.targetUid = monster.uid;
@@ -99,10 +102,28 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   };
   let total = 0, kills = 0, casts = 0, endingSp = 0;
   const killTimes: number[] = [];
+  const deathTimes: number[] = [];
+  const timeline: {at: number; text: string; hp: number}[] = [];
+  let timelineCount = 0;
+  const received = new Map<string, number>();
+  let damageTaken = 0, timeExposed = 0, endingHp = 0;
   let panel;
   for (let run = 0; run < trials; run++) {
     const state = setup(snapshot, options, 91237 + 7919 * run);
-    let current = replaceTarget(state, monster);
+    let current = replaceTarget(state, monster, options.counterattack);
+    function record(text: string) {
+      if (!options.counterattack || run !== 0) return;
+      timelineCount++;
+      if (timeline.length < 200) timeline.push({at:state.time, text, hp:state.character.hp});
+    }
+    if (options.counterattack) observeDamage(state, (id, damage) => {
+      if (damage <= 0) return;
+      const name = SKILLS.get(id)?.name ?? id;
+      damageTaken += damage;
+      received.set(name, (received.get(name) ?? 0) + damage);
+      record(`${name} · 受到 ${damage} 傷害`);
+    });
+    record(`對戰開始 · ${monster.name}`);
     let firstKill = false;
     let credited = 0;
     if (!panel) {
@@ -128,7 +149,21 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           const def = SKILLS.get(event.skill);
           entry.cooldownMs += atLv(def?.cooldownMs ?? [], event.lv) ?? 0;
           casts++;
+          record(`角色施放 ${entry.name}（詠唱 ${event.castMs / 1000} 秒）`);
         }
+        if (event.type === "mobSkillCast") {
+          record(`怪物詠唱 ${SKILLS.get(event.skill)?.name ?? event.skill}`);
+        }
+        if (event.type === "skillInterrupt") {
+          record(`詠唱中斷 · ${SKILLS.get(event.skill)?.name ?? event.skill}`);
+        }
+        if (event.type === "ailmentStart") {
+          record(`狀態 · ${AILMENT_NAMES[event.ailment] ?? event.ailment}`);
+        }
+        if (event.type === "useItem" && (event.hp > 0 || event.sp > 0)) {
+          record(`使用 ${getItem(event.itemId).name} · HP +${event.hp}／SP +${event.sp}`);
+        }
+        if (event.type === "death") record("角色倒下");
         if ((event.type === "playerAttack" || event.type === "skillHit" || event.type === "homunAttack") &&
             event.uid === current.uid && event.damage > 0) {
           const entry = line(event.type === "playerAttack" ? "普攻" : event.type === "homunAttack" ? "生命體" : event.skill);
@@ -136,6 +171,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           credited += damage;
           entry.damage += damage;
           entry.hits++;
+          record(`${entry.name} · 造成 ${damage} 傷害`);
         }
       });
       if (current.hp <= 0 && !state.monsters.includes(current)) {
@@ -145,17 +181,34 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           killTimes.push(state.time);
           firstKill = true;
         }
-        current = replaceTarget(state, monster);
+        record(`擊倒 ${monster.name}`);
+        if (state.character.hp <= 0) {
+          current.hp = monster.hp;
+          break;
+        }
+        current = replaceTarget(state, monster, options.counterattack);
         credited = 0;
       } else if (!state.monsters.includes(current) || current.monsterId !== monster.id) break;
       if (steps === 14999) throw new Error("模擬事件超過上限，請改用較短的試算時間。");
     }
     total += Math.max(0, monster.hp - current.hp);
     endingSp += state.character.sp;
+    endingHp += Math.max(0, state.character.hp);
+    if (state.activity.kind === "dead" || state.character.hp <= 0) deathTimes.push(state.time);
+    timeExposed += state.activity.kind === "dead" || state.activity.kind === "stopped" || !state.monsters.includes(current)
+      ? Math.min(duration, state.time) : duration;
   }
+  const defense = options.counterattack ? {
+    averageDamage: damageTaken / trials, damagePerSecond: timeExposed ? damageTaken * 1000 / timeExposed : 0,
+    endingHp: endingHp / trials, deaths: deathTimes.length,
+    averageDeath: deathTimes.length ? deathTimes.reduce((sum, time) => sum + time, 0) / deathTimes.length : null,
+    received: [...received].map(([name, amount]) => ({name, average: amount / trials}))
+      .sort((a, b) => b.average - a.average),
+    timeline, timelineCount,
+  } : null;
   return {monster: {name:monster.name, lv:monster.lv, hp:monster.hp, element:monster.element,
     elementLv:monster.elementLv, race:monster.race, size:monster.size}, panel,
-    dps: total / trials / options.seconds,
+    defense, dps: total / trials / options.seconds,
     averageKill: killTimes.length ? killTimes.reduce((sum, t) => sum + t, 0) / killTimes.length : null,
     killedTrials: killTimes.length, kills, casts, endingSp:endingSp / trials, trials, seconds:options.seconds,
     lines: [...lines.values()].sort((a,b) => b.damage - a.damage)

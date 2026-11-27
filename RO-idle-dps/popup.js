@@ -141,6 +141,26 @@ async function load() {
   }
 }
 
+function showDefense(defense, trials) {
+  $("defense").hidden = !defense;
+  if (!defense) return;
+  $("taken").textContent = format(defense.averageDamage);
+  $("incoming-dps").textContent = format(defense.damagePerSecond);
+  $("survival").textContent = `存活 ${trials - defense.deaths}／${trials} 次 · 期末平均 HP ${format(defense.endingHp)}` +
+    (defense.averageDeath === null ? "" : ` · 倒下樣本平均撐 ${seconds(defense.averageDeath)}`);
+  $("incoming-sources").textContent = defense.received.length
+    ? `平均承傷來源　${defense.received.map(({name, average}) => `${name} ${format(average)}`).join(" · ")}`
+    : "這些樣本中沒有受到怪物傷害。";
+  $("timeline-title").textContent = defense.timelineCount > defense.timeline.length
+    ? `第 1 次模擬的對戰過程（前 ${defense.timeline.length} 筆）`
+    : "第 1 次模擬的對戰過程";
+  $("timeline").replaceChildren(...defense.timeline.map(({at, text, hp}) => {
+    const row = document.createElement("li");
+    row.textContent = `${seconds(at)} · ${text} · HP ${format(hp)}`;
+    return row;
+  }));
+}
+
 function show(result) {
   const {monster,panel,lines} = result;
   $("target").textContent = `${monster.name} · Lv ${monster.lv}`;
@@ -162,6 +182,7 @@ function show(result) {
     }
     return row;
   }));
+  showDefense(result.defense, result.trials);
   $("result").hidden = false;
 }
 
@@ -175,6 +196,7 @@ $("calculator").onsubmit = async event => {
   const options = {
     monsterId:Number($("monster").value), mode:$("mode").value,
     skill:$("skill").value, level:Number($("skill-level").value), seconds:Number($("seconds").value),
+    counterattack:$("counterattack").checked,
   };
   $("fields").disabled = $("refresh").disabled = true;
   $("result").hidden = true;

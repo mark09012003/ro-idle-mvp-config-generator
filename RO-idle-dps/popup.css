@@ -32,3 +32,9 @@ th, td { padding: 4px; border-bottom: 1px solid var(--line); }
 details { font-size: 12px; }
 summary { cursor: pointer; }
 #status:empty { display: none; }
+.check { display: flex; align-items: center; gap: 7px; margin: 3px 0 10px; }
+.check input { width: auto; margin: 0; }
+#defense { border-top: 1px solid var(--line); margin: 12px 0; padding-top: 10px; }
+#survival, #incoming-sources { font-size: 12px; margin-bottom: 7px; }
+#timeline { max-height: 175px; overflow: auto; padding-left: 24px; }
+#timeline li { margin: 4px 0; }
