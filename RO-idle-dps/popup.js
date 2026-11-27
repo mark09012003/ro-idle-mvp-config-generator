@@ -377,7 +377,7 @@ function show(result) {
   $("monster-stats").textContent = `HP ${format(monster.hp)} · ${element[panel.elementTarget] ?? panel.elementTarget} ${panel.elementLvTarget} · ${race[monster.race] ?? monster.race} · ${size[monster.size]} · DEF ${format(panel.def)}／MDEF ${format(panel.mdef)}`;
   $("dps").textContent = format(result.dps);
   $("ttk").textContent = result.averageKill == null ? "未擊殺" : seconds(result.averageKill);
-  $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · 期末平均 SP ${format(result.endingSp)}`;
+  $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · ${result.unlimitedSp ? "無限 SP" : `期末平均 SP ${format(result.endingSp)}`}`;
   $("combat-stats").textContent = `起始普攻：${element[panel.element] ?? panel.element}屬性 ×${format(panel.modifier / 100)} · ASPD ${format(panel.aspd)}／間隔 ${seconds(panel.interval)} · 命中 ${format(panel.hit)}% · 爆擊 ${format(panel.crit)}%`;
   const share = lines.reduce((sum, entry) => sum + entry.share, 0);
   const displayed = result.dps > 0 && share < 0.999 ? [...lines, {name:"其他傷害", share:1-share, casts:0}] : lines;
@@ -418,6 +418,7 @@ $("calculator").onsubmit = async event => {
     monsterId:Number($("monster").value), mode:$("mode").value,
     skill:$("skill").value, level:Number($("skill-level").value), seconds:Number($("seconds").value),
     counterattack:$("counterattack").checked,
+    unlimitedSp:$("unlimited-sp").checked,
     scenario: readScenario(),
   };
   $("fields").disabled = $("refresh").disabled = true;

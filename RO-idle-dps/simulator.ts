@@ -141,7 +141,7 @@ function initialStatuses(effects: Effect[], time: number): MobStatuses {
   return status;
 }
 
-type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; scenario?: Scenario};
+type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; unlimitedSp?: boolean; scenario?: Scenario};
 type DamageLine = {name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
 function setup(snapshot: GameSnapshot, options: Options, seed: number) {
@@ -168,7 +168,7 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
     autoBuy: {...config.autoBuy, enabled: false},
     statsAddAuto: {...config.statsAddAuto, enabled: false},
     hpPotion: loaded.hpPotion ?? config.hpPotion,
-    spPotion: loaded.spPotion ?? config.spPotion,
+    spPotion: options.unlimitedSp ? {...config.spPotion, enabled:false} : loaded.spPotion ?? config.spPotion,
     buffPotion: options.scenario?.autoBuffs ? loaded.buffPotion ?? config.buffPotion : {...config.buffPotion, enabled:false},
     autoBerserk: options.scenario?.autoBuffs ? loaded.autoBerserk : false,
     recovery: loaded.recovery ?? config.recovery,
@@ -188,7 +188,7 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   }
   const stats = derived(state);
   state.character.hp = Math.min(state.character.hp, stats.maxHp);
-  state.character.sp = Math.min(state.character.sp, stats.maxSp);
+  state.character.sp = options.unlimitedSp ? stats.maxSp : Math.min(state.character.sp, stats.maxSp);
   return state;
 }
 
@@ -305,6 +305,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
         pulse.at += pulse.interval;
         continue;
       }
+      if (options.unlimitedSp) state.character.sp = derived(state).maxSp;
       processAt(state, event => {
         if (event.type === "skillCast") {
           const entry = line(event.skill);
@@ -363,6 +364,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           record(`${entry.name} · ${event.result === "crit" ? "爆擊 " : ""}造成 ${damage} 傷害`, "player");
         }
       });
+      if (options.unlimitedSp && state.character.hp > 0) state.character.sp = derived(state).maxSp;
       if (current.hp <= 0 && !state.monsters.includes(current)) {
         total += monster.hp;
         kills++;
@@ -399,7 +401,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     elementLv:monster.elementLv, race:monster.race, size:monster.size}, panel,
     defense, songs, timeline, timelineCount, dps: total / trials / options.seconds,
     averageKill: killTimes.length ? killTimes.reduce((sum, t) => sum + t, 0) / killTimes.length : null,
-    killedTrials: killTimes.length, kills, casts, endingSp:endingSp / trials, trials, seconds:options.seconds,
+    killedTrials: killTimes.length, kills, casts, endingSp:endingSp / trials, unlimitedSp:options.unlimitedSp ?? false, trials, seconds:options.seconds,
     lines: [...lines.values()].sort((a,b) => b.damage - a.damage)
       .map(entry => ({...entry, share:total ? entry.damage / total : 0})),
   };
