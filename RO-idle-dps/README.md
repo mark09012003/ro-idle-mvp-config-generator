@@ -11,3 +11,5 @@
 ## 對應原始碼及重建
 
 `engine.js` 以本資料夾的 `simulator.ts` 和 [RO 放置仙境公開客戶端原始碼 df6277909](https://ro-idle.app/source/ro-idle-client-src-df6277909.tar.gz) 建置，並用 `instrument-engine.py` 記錄引擎實際扣除的 HP。執行 `bash build.sh` 可重新下載對應原始碼並產生相同模擬引擎。引擎依 GPL-3.0 授權，授權與上游聲明見同資料夾的 LICENSE、THIRD_PARTY_NOTICES、ASSET_NOTICES。
+
+「角色 Buff 與怪物狀態」可取消快照中的起始 Buff，或加入指定等級和持續秒數的 Buff 與怪物狀態。怪物狀態視為已施加，不額外擲成功率；每隻新目標會帶著同一組設定開場。0 秒代表不自然到期，像天使之怒或冰凍仍會依引擎規則被攻擊消耗或解除。可關閉自補 Buff 避免掛機技能或 Buff 道具改變比較條件。

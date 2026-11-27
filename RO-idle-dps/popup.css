@@ -38,3 +38,9 @@ summary { cursor: pointer; }
 #survival, #incoming-sources { font-size: 12px; margin-bottom: 7px; }
 #timeline { max-height: 175px; overflow: auto; padding-left: 24px; }
 #timeline li { margin: 4px 0; }
+#scenario { margin-bottom: 10px; padding: 7px; border: 1px solid var(--line); border-radius: 6px; }
+#scenario h2 { margin: 9px 0 5px; font-size: 13px; }
+.effect-picker, .effect-row { display: grid; align-items: center; gap: 5px; }
+.effect-picker { grid-template-columns: 1fr auto; }
+.effect-row { grid-template-columns: minmax(0, 1fr) 66px 55px auto; }
+.effect-row select, .effect-row input, .effect-picker select { margin: 3px 0; }

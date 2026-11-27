@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-import { createGameState, type GameState, type ActiveMonster } from "./src/game/sim/state";
+import { createGameState, type GameState, type ActiveMonster, type ActiveBuff } from "./src/game/sim/state";
 import { derived, moveTime, nextEventTime, observeDamage, processAt } from "./src/game/sim/engine";
 import { defaultAutoConfig } from "./src/game/ai/config";
 import { MONSTERS, type MonsterDef } from "./src/game/data/monsters";
@@ -7,10 +7,12 @@ import { MAPS } from "./src/game/data/maps";
 import { SKILLS, atLv } from "./src/game/data/skills";
 import { canAttackWithSkill } from "./src/game/combat/skillEffects";
 import { monsterDefender, playerHitRate, playerCritRate } from "./src/game/combat/damage";
+import { effectiveMonster, POISON_INTERVAL_MS, STATUS_NAMES, type MobStatusId, type MobStatuses } from "./src/game/combat/monsterStatus";
+import { buffDisplayName, getBuff, isKnownBuff } from "./src/game/data/buffs";
 import { elementModifier } from "./src/game/data/elements";
 import { getItem, registerItemDefs } from "./src/game/data/items";
 import { withPetBuff } from "./src/game/sim/pet";
-import { AILMENT_NAMES } from "./src/game/combat/ailments";
+import { AILMENT_NAMES, BLEEDING_TICK_MS } from "./src/game/combat/ailments";
 import { randInt } from "./src/game/core/rng";
 import { NEVER } from "./src/game/config/gameplay";
 import type { GameSnapshot } from "./src/game/view";
@@ -25,7 +27,86 @@ export function attackSkills(snapshot: GameSnapshot) {
   });
 }
 
-type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean};
+const manualBuffIds = [
+  "AL_BLESSING", "AL_INCAGI", "AL_ANGELUS", "AC_CONCENTRATION", "SN_SIGHT", "SN_WINDWALK",
+  "PR_IMPOSITIO", "PR_SUFFRAGIUM", "PR_ASPERSIO", "PR_BENEDICTIO", "HP_ASSUMPTIO",
+  "MG_ENERGYCOAT", "BS_ADRENALINE", "BS_WEAPONPERFECT", "BS_OVERTHRUST", "BS_MAXIMIZE",
+  "KN_TWOHANDQUICKEN", "AS_ENCHANTPOISON", "SA_FLAMELAUNCHER", "SA_FROSTWEAPON",
+  "SA_LIGHTNINGLOADER", "SA_SEISMICWEAPON", "itemEndowWater",
+  "aspdPotion1", "aspdPotion2", "aspdPotion3", "resistFire", "resistWater", "resistWind", "resistEarth",
+  "strFood5", "agiFood5", "vitFood5", "intFood5", "dexFood5", "lukFood5",
+].filter(isKnownBuff);
+const manualStatuses: Partial<Record<MobStatusId, number>> = {
+  aeterna:1, provoke:10, quagmire:5, crucis:10, decagi:10, mindBreaker:5,
+  freeze:1, stone:1, stun:1, sleep:1, silence:1, blind:1, poison:1, deadlyPoison:1, bleeding:1,
+  spiderweb:1, fogwall:1, agiup:1, autoguard:10, defender:5, assumptio:5, reflectShield:10, powerup:1,
+};
+const maximumBuffLevel = (id: string) => SKILLS.get(id)?.maxLv ?? 1;
+const previewBuffs = (snapshot: GameSnapshot) => withPetBuff(snapshot.buffs ?? [], snapshot);
+
+export function scenarioCatalog(snapshot: GameSnapshot) {
+  return {
+    active: previewBuffs(snapshot).map((buff, index) => ({
+      index, name: buffDisplayName(buff.id), level: "lv" in buff ? buff.lv : undefined,
+    })),
+    buffs: manualBuffIds.map(id => ({id, name:buffDisplayName(id), max:maximumBuffLevel(id)})),
+    statuses: Object.entries(manualStatuses).map(([id, max]) => ({id, name:STATUS_NAMES[id as MobStatusId], max})),
+  };
+}
+
+type Effect = {id: string; level: number; seconds: number};
+type Scenario = {excludeActive?: number[]; buffs?: Effect[]; statuses?: Effect[]; autoBuffs?: boolean};
+
+function effectTime(effect: Effect, max: number) {
+  if (!Number.isInteger(effect.level) || effect.level < 1 || effect.level > max ||
+      !Number.isInteger(effect.seconds) || effect.seconds < 0 || effect.seconds > 120) {
+    throw new Error("請確認效果等級及持續秒數。");
+  }
+  return effect.seconds * 1000;
+}
+
+function buffGroup(id: string, level = 1) {
+  const buff = getBuff(id, level);
+  return buff.bonuses.attackElement ? "attack-element" : buff.group;
+}
+
+function initialBuffs(snapshot: GameSnapshot, scenario?: Scenario): ActiveBuff[] {
+  const buffs = previewBuffs(snapshot).flatMap((buff, index) => {
+    if (scenario?.excludeActive?.includes(index) || !isKnownBuff(buff.id)) return [];
+    const remaining = "remainingMs" in buff ? Number(buff.remainingMs) : NEVER;
+    return Number.isFinite(remaining) && remaining > 0 ? [{...structuredClone(buff), until: remaining}] : [];
+  });
+  for (const effect of scenario?.buffs ?? []) {
+    if (!manualBuffIds.includes(effect.id)) throw new Error("所選 Buff 不支援手動加入。");
+    const until = effectTime(effect, maximumBuffLevel(effect.id)) || NEVER;
+    const group = buffGroup(effect.id, effect.level);
+    for (let index = buffs.length - 1; index >= 0; index--) {
+      if (buffs[index].id === effect.id || (group && buffGroup(buffs[index].id) === group)) buffs.splice(index, 1);
+    }
+    buffs.push({id:effect.id, lv:effect.level, until});
+  }
+  return buffs;
+}
+
+function initialStatuses(effects: Effect[], time: number): MobStatuses {
+  const status: MobStatuses = {};
+  for (const effect of effects) {
+    const id = effect.id as MobStatusId;
+    const max = manualStatuses[id];
+    if (!max) throw new Error("所選怪物狀態不支援手動加入。");
+    const duration = effectTime(effect, max);
+    if ((id === "stone" && status.freeze) || (id === "freeze" && status.stone)) {
+      throw new Error("冰凍與石化請擇一設定。");
+    }
+    const nextTick = id === "poison" || id === "deadlyPoison" ? POISON_INTERVAL_MS
+      : id === "bleeding" ? BLEEDING_TICK_MS : 0;
+    status[id] = {lv:effect.level, until:duration ? time + duration : NEVER,
+      ...(nextTick && {nextTick:time + nextTick})};
+  }
+  return status;
+}
+
+type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; scenario?: Scenario};
 type DamageLine = {name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
 function setup(snapshot: GameSnapshot, options: Options, seed: number) {
@@ -34,10 +115,7 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   state.inventory = {items: structuredClone(snapshot.inventory),
     nextUid: Math.max(0, ...snapshot.inventory.map(item => item.uid)) + 1};
   state.equipment = {...snapshot.equipment};
-  state.buffs = withPetBuff(snapshot.buffs ?? [], snapshot).map(buff => ({
-    ...structuredClone(buff),
-    until: "remainingMs" in buff ? Math.max(0, Number(buff.remainingMs)) : NEVER,
-  }));
+  state.buffs = initialBuffs(snapshot, options.scenario);
   state.ailments = Object.fromEntries((snapshot.ailments ?? []).map(ailment =>
     [ailment.id, {until: ailment.remainingMs, lv: ailment.lv ?? 1}]));
   if (snapshot.cart) state.cart = {items: [], nextUid: 1};
@@ -56,13 +134,14 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
     statsAddAuto: {...config.statsAddAuto, enabled: false},
     hpPotion: loaded.hpPotion ?? config.hpPotion,
     spPotion: loaded.spPotion ?? config.spPotion,
-    buffPotion: loaded.buffPotion ?? config.buffPotion,
+    buffPotion: options.scenario?.autoBuffs === false ? {...config.buffPotion, enabled:false} : loaded.buffPotion ?? config.buffPotion,
     autoBerserk: loaded.autoBerserk,
     recovery: loaded.recovery ?? config.recovery,
     sit: options.mode === "auto" ? loaded.sit ?? config.sit : {...config.sit, enabled: false},
   };
   if (options.mode === "auto") {
-    state.config.skills = (loaded.skills ?? []).filter(skill => skill.use !== "escape");
+    state.config.skills = (loaded.skills ?? []).filter(skill =>
+      skill.use !== "escape" && (options.scenario?.autoBuffs !== false || skill.use !== "buff"));
     state.config.equipRules = loaded.equipRules;
     state.config.combat = loaded.combat ?? config.combat;
   } else if (options.mode === "skill") {
@@ -75,9 +154,11 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   return state;
 }
 
-function replaceTarget(state: GameState, target: MonsterDef, counterattack = false): ActiveMonster {
+function replaceTarget(state: GameState, target: MonsterDef, options: Options): ActiveMonster {
+  const counterattack = options.counterattack ?? false;
   const monster: ActiveMonster = {
     uid: state.nextMonsterUid++, monsterId: target.id, hp: target.hp, distance: 1,
+    status: initialStatuses(options.scenario?.statuses ?? [], state.time),
     aggro: counterattack, arriveAt: state.time, engageAt: state.time,
     nextAttackAt: counterattack ? state.time + randInt(state.rng.encounter, 100, 500) : NEVER,
     ...(!counterattack && {skillReadyAt: Object.fromEntries((target.skills ?? []).map((_, index) => [index, NEVER]))}),
@@ -110,7 +191,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   let panel;
   for (let run = 0; run < trials; run++) {
     const state = setup(snapshot, options, 91237 + 7919 * run);
-    let current = replaceTarget(state, monster, options.counterattack);
+    let current = replaceTarget(state, monster, options);
     function record(text: string) {
       if (!options.counterattack || run !== 0) return;
       timelineCount++;
@@ -128,12 +209,13 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     let credited = 0;
     if (!panel) {
       const stats = derived(state);
-      const defender = monsterDefender(monster);
+      const target = effectiveMonster(monster, current.status);
+      const defender = monsterDefender(target);
       panel = {
         element: stats.attackElement, interval: stats.attackIntervalMs, aspd: stats.aspd,
-        hit: playerHitRate(stats, monster), crit: playerCritRate(stats, monster),
-        modifier: elementModifier(stats.attackElement, monster.element, monster.elementLv),
-        def: monster.def, mdef: defender.mdef, map: MAPS.get(state.mapId)?.name,
+        hit: playerHitRate(stats, target), crit: playerCritRate(stats, target),
+        modifier: elementModifier(stats.attackElement, target.element, target.elementLv),
+        def: target.def, mdef: defender.mdef, elementTarget:target.element, elementLvTarget:target.elementLv, map: MAPS.get(state.mapId)?.name,
       };
     }
     for (let steps = 0; steps < 15000; steps++) {
@@ -186,7 +268,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           current.hp = monster.hp;
           break;
         }
-        current = replaceTarget(state, monster, options.counterattack);
+        current = replaceTarget(state, monster, options);
         credited = 0;
       } else if (!state.monsters.includes(current) || current.monsterId !== monster.id) break;
       if (steps === 14999) throw new Error("模擬事件超過上限，請改用較短的試算時間。");

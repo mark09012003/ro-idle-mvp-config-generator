@@ -12,7 +12,7 @@ const race = {
   demon:"惡魔", demihuman:"人形", angel:"天使", dragon:"龍",
 };
 const size = {small:"小型", medium:"中型", large:"大型"};
-let worker, snapshot, targets = [], skills = [], sequence = 0;
+let worker, snapshot, scenario, targets = [], skills = [], sequence = 0;
 const requests = new Map();
 
 function getWorker() {
@@ -116,13 +116,73 @@ function fillLevels() {
   if (skill) $("skill-level").value = String(skill.lv);
 }
 
+function renderScenario() {
+  $("active-buffs").replaceChildren(...scenario.active.map(({index, name, level}) => {
+    const label = document.createElement("label");
+    label.className = "check";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = true;
+    input.value = String(index);
+    label.append(input, level ? `${name} Lv ${level}` : name);
+    return label;
+  }));
+  if (!scenario.active.length) $("active-buffs").textContent = "角色目前沒有 Buff。";
+  $("buff-choice").replaceChildren(...scenario.buffs.map(({name,id}) => new Option(name,id)));
+  $("status-choice").replaceChildren(...scenario.statuses.map(({name,id}) => new Option(name,id)));
+}
+
+function addScenarioEffect(type) {
+  const buff = type === "buff";
+  const id = $(buff ? "buff-choice" : "status-choice").value;
+  const container = $(buff ? "extra-buffs" : "monster-statuses");
+  const definition = (buff ? scenario.buffs : scenario.statuses).find(effect => effect.id === id);
+  if (!definition || [...container.children].some(row => row.dataset.effect === id)) return;
+  const row = document.createElement("div");
+  row.className = "effect-row";
+  row.dataset.effect = id;
+  const name = document.createElement("strong");
+  name.textContent = definition.name;
+  const level = document.createElement("select");
+  level.className = "effect-level";
+  level.setAttribute("aria-label", `${definition.name} 等級`);
+  level.replaceChildren(...Array.from({length:definition.max}, (_, i) => new Option(`Lv ${i+1}`, i+1)));
+  level.value = String(definition.max);
+  const seconds = document.createElement("input");
+  seconds.type = "number";
+  seconds.className = "effect-seconds";
+  seconds.min = "0";
+  seconds.max = "120";
+  seconds.required = true;
+  seconds.value = "0";
+  seconds.setAttribute("aria-label", `${definition.name} 持續秒數`);
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "移除";
+  remove.onclick = () => row.remove();
+  row.append(name, level, seconds, remove);
+  container.append(row);
+}
+
+function readEffects(container) {
+  return [...$(container).children].map(row => ({
+    id: row.dataset.effect,
+    level: Number(row.querySelector(".effect-level").value),
+    seconds: Number(row.querySelector(".effect-seconds").value),
+  }));
+}
+
+$("add-buff").onclick = () => addScenarioEffect("buff");
+$("add-status").onclick = () => addScenarioEffect("status");
+
 async function load() {
   $("fields").disabled = $("refresh").disabled = true;
   $("result").hidden = true;
   $("status").textContent = "正在讀取角色資料…";
   try {
     [snapshot, targets] = await Promise.all([readCharacter(), engine("targets")]);
-    skills = await engine("skills");
+    [skills, scenario] = await Promise.all([engine("skills"), engine("scenario")]);
+    renderScenario();
     $("role").textContent = `${snapshot.character.name} · Base ${snapshot.character.baseLv}／Job ${snapshot.character.jobLv}`;
     $("skill").replaceChildren(...skills.map(({id,name}) => new Option(name,id)));
     $("mode").options[1].disabled = !skills.length;
@@ -164,7 +224,7 @@ function showDefense(defense, trials) {
 function show(result) {
   const {monster,panel,lines} = result;
   $("target").textContent = `${monster.name} · Lv ${monster.lv}`;
-  $("monster-stats").textContent = `HP ${format(monster.hp)} · ${element[monster.element] ?? monster.element} ${monster.elementLv} · ${race[monster.race] ?? monster.race} · ${size[monster.size]} · DEF ${format(panel.def)}／MDEF ${format(panel.mdef)}`;
+  $("monster-stats").textContent = `HP ${format(monster.hp)} · ${element[panel.elementTarget] ?? panel.elementTarget} ${panel.elementLvTarget} · ${race[monster.race] ?? monster.race} · ${size[monster.size]} · DEF ${format(panel.def)}／MDEF ${format(panel.mdef)}`;
   $("dps").textContent = format(result.dps);
   $("ttk").textContent = result.averageKill == null ? "未擊殺" : seconds(result.averageKill);
   $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · 期末平均 SP ${format(result.endingSp)}`;
@@ -197,6 +257,12 @@ $("calculator").onsubmit = async event => {
     monsterId:Number($("monster").value), mode:$("mode").value,
     skill:$("skill").value, level:Number($("skill-level").value), seconds:Number($("seconds").value),
     counterattack:$("counterattack").checked,
+    scenario: {
+      excludeActive: [...$("active-buffs").querySelectorAll("input:not(:checked)")].map(input => Number(input.value)),
+      buffs: readEffects("extra-buffs"),
+      statuses: readEffects("monster-statuses"),
+      autoBuffs: $("auto-buffs").checked,
+    },
   };
   $("fields").disabled = $("refresh").disabled = true;
   $("result").hidden = true;

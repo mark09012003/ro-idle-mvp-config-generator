@@ -1,10 +1,11 @@
-import {attackSkills, simulate, targets} from "./engine.js";
+import {attackSkills, scenarioCatalog, simulate, targets} from "./engine.js";
 
 self.onmessage = ({data: {id, action, snapshot, options}}) => {
   try {
     const result = {
       targets: () => targets,
       skills: () => attackSkills(snapshot),
+      scenario: () => scenarioCatalog(snapshot),
       simulate: () => simulate(snapshot, options),
     }[action]();
     self.postMessage({id, result});
