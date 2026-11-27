@@ -43,4 +43,5 @@ replace_once("""    c.hp = Math.max(hpFloor(s), c.hp - dmg);
     c.hp = Math.max(hpFloor(s), c.hp - dmg);
     damageObservers.get(s)?.('出血', before - c.hp);
     emit({ type: 'ailmentDamage', ailment: 'bleeding'""")
+replace_once("function equipBagAmmo(", "export function equipBagAmmo(")
 path.write_text(source)

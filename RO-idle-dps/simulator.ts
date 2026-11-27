@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import { createGameState, type GameState, type ActiveMonster, type ActiveBuff } from "./src/game/sim/state";
-import { derived, moveTime, nextEventTime, observeDamage, processAt, receiveHealing } from "./src/game/sim/engine";
+import { derived, equipBagAmmo, moveTime, nextEventTime, observeDamage, processAt, receiveHealing } from "./src/game/sim/engine";
 import { SONGS, type PerformerCtx } from "./src/game/combat/songs";
 import { defaultAutoConfig } from "./src/game/ai/config";
 import { MONSTERS, type MonsterDef } from "./src/game/data/monsters";
@@ -165,7 +165,12 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
     lockMap: map,
     autoLoot: false,
     stopOnOverweight: false,
-    autoBuy: {...config.autoBuy, enabled: false},
+    autoBuy: {
+      ...config.autoBuy, enabled:false,
+      arrows: {...config.autoBuy.arrows, itemId:loaded.autoBuy?.arrows?.itemId ?? config.autoBuy.arrows.itemId},
+      quivers: loaded.autoBuy?.quivers ?? [],
+      quiverBelow: loaded.autoBuy?.quiverBelow ?? 0,
+    },
     statsAddAuto: {...config.statsAddAuto, enabled: false},
     hpPotion: loaded.hpPotion ?? config.hpPotion,
     spPotion: options.unlimitedSp ? {...config.spPotion, enabled:false} : loaded.spPotion ?? config.spPotion,
@@ -185,6 +190,10 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
       throw new Error("請選擇角色已學會的攻擊技能和等級。");
     }
     state.config.skills = [{skill:selected.id, lv:options.level!, use:"attack", percent:0}];
+  }
+  const weaponType = derived(state).weaponType;
+  if (["bow", "instrument", "whip"].includes(weaponType) && !getAmmo(state.inventory, state.equipment)) {
+    equipBagAmmo(state, () => {});
   }
   const stats = derived(state);
   state.character.hp = Math.min(state.character.hp, stats.maxHp);
@@ -219,7 +228,8 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario) {
     base, current:current.buffs.length ? panel(current) : null,
     names:current.buffs.map(buff => buffDisplayName(buff.id)), allocated, equipment,
     weaponType:stats.weaponType, attackElement:stats.attackElement,
-    ammo:ammo ? {name:ammo.def.name, atk:ammo.def.atk, element:ammo.def.element, quantity:ammo.stack.qty} : null,
+    ammo:ammo ? {name:ammo.def.name, atk:ammo.def.atk, element:ammo.def.element, quantity:ammo.stack.qty,
+      fromBag:ammo.stack.uid !== snapshot.equipment.ammo} : null,
   };
 }
 
