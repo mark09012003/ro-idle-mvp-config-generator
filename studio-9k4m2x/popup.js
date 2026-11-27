@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-15";
+const ASSET_VER = "20261127-16";
 const MAX_REBIRTHS = 11;
 const EXTRA_STAT_PER_REBIRTH = 20;
 const host = "https://ro-idle.app";
@@ -2582,7 +2582,7 @@ function showTimeline(timeline, total) {
   $("timeline-title").textContent = total > timeline.length
     ? `對戰紀錄 · 第 1 次模擬（前 ${timeline.length} 筆）`
     : "對戰紀錄 · 第 1 次模擬";
-  $("timeline").replaceChildren(...timeline.map(({at, text, hp, kind}) => {
+  $("timeline").replaceChildren(...timeline.map(({at, text, hp, sp, kind}) => {
     const row = document.createElement("li");
     row.dataset.kind = kind;
     const time = document.createElement("time");
@@ -2591,7 +2591,7 @@ function showTimeline(timeline, total) {
     content.textContent = text;
     const health = document.createElement("span");
     health.className = "log-hp";
-    health.textContent = `HP ${format(hp)}`;
+    health.textContent = `HP ${format(hp)} · SP ${format(sp)}`;
     row.append(time, content, health);
     return row;
   }));
@@ -2623,7 +2623,7 @@ function show(result) {
   $("kpi-combat").textContent = `${format(panel.hit)}% ／ ${format(panel.crit)}% ／ ${format(panel.aspd)}`;
   $("summon-summary").hidden = result.summons.count === 0;
   $("summon-summary").textContent = `召喚物 DPS ${format(result.summons.dps)} · 含召喚物 DPS ${format(result.summons.totalDps)} · ${result.trials} 次合計召喚 ${format(result.summons.count)} 隻、擊倒 ${format(result.summons.kills)} 隻`;
-  $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · ${result.unlimitedSp ? "無限 SP" : `期末平均 SP ${format(result.endingSp)}`}${result.mobDefense ? " · 含怪物防禦技" : " · 關閉怪物防禦技"}${result.invincible ? " · 角色不死" : ""}`;
+  $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · 期末平均 SP ${format(result.endingSp)}${result.mobDefense ? " · 含怪物防禦技" : " · 關閉怪物防禦技"}${result.invincible ? " · 角色不死" : ""}`;
   $("combat-stats").textContent = `起始普攻：${element[panel.element] ?? panel.element}屬性 ×${format(panel.modifier / 100)} · 攻擊間隔 ${seconds(panel.interval)}`;
 
   const share = lines.reduce((sum, entry) => sum + entry.share, 0);
@@ -2991,6 +2991,15 @@ $("mode").onchange = () => {
   scheduleStats();
 };
 $("invincible").onchange = () => { if ($("invincible").checked) $("counterattack").checked = true; };
+function syncSoulChangeFields() {
+  const disabled = !$("soul-change").checked;
+  $("soul-change-options").hidden = disabled;
+  $("soul-change-interval").disabled = disabled;
+  $("soul-change-sp").disabled = disabled;
+}
+$("soul-change").addEventListener("change", syncSoulChangeFields);
+syncSoulChangeFields();
+
 $("counterattack").onchange = () => { if (!$("counterattack").checked) $("invincible").checked = false; };
 
 $("calculator").addEventListener("invalid", event => {
@@ -3026,7 +3035,10 @@ $("calculator").onsubmit = async event => {
     mobDefense: $("mob-defense").checked,
     counterattack: $("counterattack").checked,
     invincible: $("invincible").checked,
-    unlimitedSp: $("unlimited-sp").checked,
+    soulChange: $("soul-change").checked ? {
+      interval: Number($("soul-change-interval").value),
+      casterSp: Number($("soul-change-sp").value),
+    } : undefined,
     scenario: readScenario(),
   };
   $("fields").disabled = true;

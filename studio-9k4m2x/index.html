@@ -12,8 +12,8 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="popup.css?v=20261127-15">
-  <script type="module" src="popup.js?v=20261127-15"></script>
+  <link rel="stylesheet" href="popup.css?v=20261127-16">
+  <script type="module" src="popup.js?v=20261127-16"></script>
 </head>
 <body>
   <div class="shell">
@@ -486,10 +486,19 @@
                   <input id="quick-active-buffs" type="checkbox">
                   <span id="quick-active-buffs-label">套用角色目前身上的 Buff</span>
                 </label>
-                <label class="check"><input id="unlimited-sp" type="checkbox"> 無限 SP</label>
+                <label class="check"><input id="soul-change" type="checkbox"> 智者定時施放心神互換</label>
                 <label class="check"><input id="mob-defense" type="checkbox" checked> 模擬怪物防禦／自體技能（如鋼筋鐵骨、自動防禦、聖母、光壁）</label>
                 <label class="check"><input id="counterattack" type="checkbox"> 模擬怪物反擊並計算承傷</label>
                 <label class="check"><input id="invincible" type="checkbox"> 角色不死（HP 最低為 1，照常計算承傷）</label>
+              </div>
+
+              <div id="soul-change-options" class="form-grid-2" hidden>
+                <label>互換間隔（秒）
+                  <input id="soul-change-interval" type="number" min="1" max="120" value="10" required disabled>
+                </label>
+                <label>智者每次施放前的 SP
+                  <input id="soul-change-sp" type="number" min="5" max="99999" value="1000" required disabled>
+                </label>
               </div>
 
               <button id="calculate" class="btn btn-primary btn-lg btn-full" type="submit">開始模擬計算 DPS</button>

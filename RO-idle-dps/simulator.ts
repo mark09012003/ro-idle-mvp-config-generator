@@ -392,7 +392,7 @@ function initialStatuses(effects: Effect[], time: number): MobStatuses {
   return status;
 }
 
-type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; unlimitedSp?: boolean; scenario?: Scenario};
+type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; soulChange?: {interval: number; casterSp: number}; scenario?: Scenario};
 type HitRange = {min: number; max: number; count: number};
 type DamageLine = {normal?: HitRange; critical?: HitRange; name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
@@ -519,7 +519,7 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
     },
     statsAddAuto: {...config.statsAddAuto, enabled: false},
     hpPotion: loaded.hpPotion ?? config.hpPotion,
-    spPotion: options.unlimitedSp ? {...config.spPotion, enabled:false} : loaded.spPotion ?? config.spPotion,
+    spPotion: loaded.spPotion ?? config.spPotion,
     buffPotion: options.scenario?.autoBuffs ? loaded.buffPotion ?? config.buffPotion : {...config.buffPotion, enabled:false},
     autoBerserk: options.scenario?.autoBuffs ? loaded.autoBerserk : false,
     recovery: loaded.recovery ?? config.recovery,
@@ -558,7 +558,7 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   }
   const stats = derived(state);
   state.character.hp = Math.min(state.character.hp, stats.maxHp);
-  state.character.sp = options.unlimitedSp ? stats.maxSp : Math.min(state.character.sp, stats.maxSp);
+  state.character.sp = Math.min(state.character.sp, stats.maxSp);
   return state;
 }
 
@@ -976,10 +976,13 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   const mobDefense = options.mobDefense !== false;
   const killTimes: number[] = [];
   const deathTimes: number[] = [];
-  const timeline: {at: number; text: string; hp: number; kind: string}[] = [];
+  const timeline: {at: number; text: string; hp: number; sp: number; kind: string}[] = [];
   let timelineCount = 0;
   const received = new Map<string, number>();
   let damageTaken = 0, timeExposed = 0, endingHp = 0;
+  const soulChange = options.soulChange;
+  const soulChangeInterval = soulChange ? Math.max(1, soulChange.interval) * 1000 : NEVER;
+  const soulChangeSp = soulChange ? Math.max(0, soulChange.casterSp - (SKILLS.get("PF_SOULCHANGE")?.sp[0] ?? 5)) : 0;
   let panel;
   for (let run = 0; run < trials; run++) {
     const state = setup(snapshot, options, 91237 + 7919 * run);
@@ -987,7 +990,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     function record(text: string, kind = "system") {
       if (run !== 0) return;
       timelineCount++;
-      if (timeline.length < 1000) timeline.push({at:state.time, text, hp:state.character.hp, kind});
+      if (timeline.length < 1000) timeline.push({at:state.time, text, hp:state.character.hp, sp:state.character.sp, kind});
     }
     function logMobDefenseEvent(ev: Record<string, unknown>) {
       if (ev.type === "mobSkillCast") {
@@ -1019,6 +1022,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     let credited = 0;
     const defenseTickMs = Math.max(500, monster.attackDelay);
     let nextDefenseCheckAt = !counterattack && mobDefense ? state.time + defenseTickMs : NEVER;
+    let nextSoulChangeAt = state.time + soulChangeInterval;
     let nextGospelAt = gospelConfig ? state.time : NEVER;
     function applyGospelPulse() {
       if (!gospelConfig) return;
@@ -1117,9 +1121,19 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     for (let steps = 0; steps < 15000; steps++) {
       const pulse = pulses.find(entry => entry.buff && state.buffs.includes(entry.buff) && entry.at < entry.buff.until);
       const engineTime = nextEventTime(state);
-      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt, nextGospelAt);
+      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt, nextGospelAt, nextSoulChangeAt);
       if (next > duration || state.activity.kind === "stopped" || state.activity.kind === "dead") break;
       moveTime(state, Math.max(state.time, next));
+      if (nextSoulChangeAt === next) {
+        nextSoulChangeAt += soulChangeInterval;
+        const oldSp = state.character.sp;
+        const receivedSp = Math.min(derived(state).maxSp, soulChangeSp);
+        if (receivedSp > oldSp) {
+          state.character.sp = receivedSp;
+          record(`智者施放 心神互換 · SP +${receivedSp - oldSp}`, "player");
+        }
+        continue;
+      }
       if (pulse && pulse.at <= next && pulse.at < engineTime) {
         const healed = receiveHealing(state, pulse.heal);
         if (healed > 0) record(`${pulse.name} · HP +${healed}`);
@@ -1153,7 +1167,6 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
         }
         continue;
       }
-      if (options.unlimitedSp) state.character.sp = derived(state).maxSp;
       processAt(state, event => {
         if (event.type === "skillCast") {
           const entry = line(event.skill);
@@ -1238,7 +1251,6 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           record(`擊倒召喚物 ${MONSTERS.get(event.monsterId)?.name ?? "小怪"}`, "player");
         }
       });
-      if (options.unlimitedSp && state.character.hp > 0) state.character.sp = derived(state).maxSp;
       if (current.hp <= 0 && !state.monsters.includes(current)) {
         total += monster.hp;
         kills++;
@@ -1279,7 +1291,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     summons: {count:summonCount, kills:summonKills, dps:summonDamage / trials / options.seconds,
       totalDps:(total + summonDamage) / trials / options.seconds},
     averageKill: killTimes.length ? killTimes.reduce((sum, t) => sum + t, 0) / killTimes.length : null,
-    killedTrials: killTimes.length, kills, casts, endingSp:endingSp / trials, unlimitedSp:options.unlimitedSp ?? false, trials, seconds:options.seconds,
+    killedTrials: killTimes.length, kills, casts, endingSp:endingSp / trials, trials, seconds:options.seconds,
     lines: [...lines.values()].sort((a,b) => b.damage - a.damage)
       .map(entry => ({...entry, share:total ? entry.damage / total : 0})),
   };
