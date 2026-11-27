@@ -67,7 +67,26 @@ damage_source = damage_source.replace(old_return,
     old_return.replace("hits: o.hits };", "hits: o.hits, crit: critical };"))
 old_type = "hits: number; baseMiss?: true };"
 assert damage_source.count(old_type) == 1
-damage_path.write_text(damage_source.replace(old_type, "hits: number; baseMiss?: true; crit?: boolean };"))
+damage_source = damage_source.replace(old_type, "hits: number; baseMiss?: true; crit?: boolean };")
+
+# Keep the real pre-defense hand totals and the proc roll, even on misses or blocks.
+attack_start = damage_source.index("export function playerAttack(")
+attack_end = damage_source.index("\nfunction handDamage(", attack_start)
+attack = damage_source[attack_start:attack_end]
+for old, new in [
+    ("return { kind: 'miss' };", "return { kind: 'miss', ...(double ? { doubleAttack: true as const } : {}) };"),
+    ("dual: { right: r, left: l } };", "dual: { right: r, left: l }, ...(double ? { doubleAttack: true as const } : {}) };"),
+    ("...(double ? { hits } : {})", "...(double ? { hits, doubleAttack: true as const } : {})"),
+]:
+    assert attack.count(old) == 1
+    attack = attack.replace(old, new)
+damage_source = damage_source[:attack_start] + attack + damage_source[attack_end:]
+damage_source = damage_source.replace("| { kind: 'miss' }\n  | { kind: 'perfectDodge' }", "| { kind: 'miss'; doubleAttack?: true }\n  | { kind: 'perfectDodge' }", 1)
+damage_source = damage_source.replace("hits?: number; dual?:", "hits?: number; doubleAttack?: true; dual?:", 1)
+damage_path.write_text(damage_source)
+replace_once("    // 雙刀的左右手、拳刃的附加傷害明細：", """    ...('doubleAttack' in raw && raw.doubleAttack ? { doubleAttack: true } : {}),
+    ...(out.kind === 'hit' && out.dual ? { dualBeforeDefense: out.dual } : {}),
+    // 雙刀的左右手、拳刃的附加傷害明細：""")
 replace_once("""      type: 'skillHit', skill: id, lv, uid: m.uid, monsterId: m.monsterId, result: id === 'ASC_BREAKER' && damage > 0 ? 'hit' : guarded || prot.blocked ? 'miss' : out.kind,
       damage,""", """      type: 'skillHit', skill: id, lv, uid: m.uid, monsterId: m.monsterId, result: id === 'ASC_BREAKER' && damage > 0 ? 'hit' : guarded || prot.blocked ? 'miss' : out.kind,
       ...(out.kind === 'hit' && 'crit' in out && out.crit && !guarded && !prot.blocked && damage > 0 ? { crit: true } : {}),

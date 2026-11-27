@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261128-2";
+const ASSET_VER = "20261128-3";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -1075,6 +1075,16 @@ function show(result) {
   $("summon-summary").textContent = `${result.trials} 次合計召喚 ${format(result.summons.count)} 隻、擊倒 ${format(result.summons.kills)} 隻`;
   $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · 期末平均 SP ${format(result.endingSp)}${result.mobDefense ? " · 含怪物防禦技" : " · 關閉怪物防禦技"}${result.invincible ? " · 角色不死" : ""}`;
   $("combat-stats").textContent = `起始普攻：${element[panel.element] ?? panel.element}屬性 ×${format(panel.modifier / 100)} · 攻擊間隔 ${seconds(panel.interval)}`;
+  const normalAttacks = result.normalAttacks;
+  if (normalAttacks?.doubleProcs) {
+    $("combat-stats").append(document.createElement("br"),
+      `二刀連擊：觸發 ${format(normalAttacks.doubleProcs)} 次，命中 ${format(normalAttacks.doubleLanded)} 次（${result.trials} 次試算合計）`);
+  }
+  if (normalAttacks?.right && normalAttacks.left) {
+    const handRange = ({min, max}) => min === max ? format(min) : `${format(min)}～${format(max)}`;
+    $("combat-stats").append(document.createElement("br"),
+      `雙持單次傷害（防禦技能結算前）：右手 ${handRange(normalAttacks.right)} ／ 左手 ${handRange(normalAttacks.left)}`);
+  }
 
   const share = lines.reduce((sum, entry) => sum + entry.share, 0);
   const displayed = result.dps > 0 && share < 0.999 ? [...lines, {name: "其他傷害", share: 1 - share, casts: 0}] : lines;

@@ -426,6 +426,7 @@ function initialStatuses(effects: Effect[], time: number): MobStatuses {
 
 type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; soulChange?: ({interval: number; spBelow?: never} | {spBelow: number; interval?: never}) & {casterDex: number; casterMaxHp: number; casterMaxSp: number; casterMinSp: number; healAmount?: number; healInterval?: number}; scenario?: Scenario};
 type HitRange = {min: number; max: number; count: number};
+type AttackDetails = {doubleAttack?: true; dualBeforeDefense?: {right: number; left: number}};
 type DamageLine = {normal?: HitRange; critical?: HitRange; name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
 function applyEquipOverrides(state: GameState, snapshot: GameSnapshot, overrides?: EquipOverrides): Set<EditableSlot> {
@@ -998,16 +999,16 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     if (!lines.has(id)) lines.set(id, {name: skillDisplayName(id), damage:0, hits:0, casts:0, castMs:0, delayMs:0, cooldownMs:0});
     return lines.get(id)!;
   };
-  function noteHit(entry: DamageLine, critical: boolean, raw: number) {
-    const slot = critical ? "critical" : "normal";
-    const range = entry[slot];
-    if (!range) entry[slot] = {min:raw, max:raw, count:1};
-    else {
-      range.min = Math.min(range.min, raw);
-      range.max = Math.max(range.max, raw);
-      range.count++;
-    }
+  function addHit(range: HitRange | undefined, damage: number): HitRange {
+    if (!range) return {min:damage, max:damage, count:1};
+    range.min = Math.min(range.min, damage);
+    range.max = Math.max(range.max, damage);
+    range.count++;
+    return range;
   }
+  const normalAttacks: {doubleProcs: number; doubleLanded: number; right?: HitRange; left?: HitRange} = {
+    doubleProcs: 0, doubleLanded: 0,
+  };
   let total = 0, kills = 0, casts = 0, endingSp = 0;
   let summonCount = 0, summonKills = 0, summonDamage = 0;
   const counterattack = !!(options.counterattack || options.invincible);
@@ -1159,7 +1160,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
             current.hp -= dealt;
             const entry = line(GOSPEL_PULSE_ID);
             const effDmg = Math.min(dealt, Math.max(0, monster.hp - credited));
-            noteHit(entry, false, dealt);
+            entry.normal = addHit(entry.normal, dealt);
             credited += effDmg;
             entry.damage += effDmg;
             entry.hits++;
@@ -1355,8 +1356,22 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           if (dispelled) schedulePartyBuff(event.buffId);
           record(`角色 ${buffDisplayName(event.buffId)} ${dispelled ? "被解除" : event.type === "buffStart" ? "生效" : "結束"}`);
         }
-        if (event.type === "playerAttack" && event.uid === current.uid && !event.damage) {
-          record(`角色普攻 · ${event.result === "miss" ? "未命中" : "未造成傷害"}`, "player");
+        const attack = event.type === "playerAttack" ? event as typeof event & AttackDetails : undefined;
+        if (attack?.uid === current.uid && !attack.splash) {
+          if (attack.doubleAttack) {
+            normalAttacks.doubleProcs++;
+            if (attack.result === "hit" && attack.damage > 0) normalAttacks.doubleLanded++;
+          }
+          if (attack.dualBeforeDefense) {
+            const {right, left} = attack.dualBeforeDefense;
+            normalAttacks.right = addHit(normalAttacks.right, right);
+            normalAttacks.left = addHit(normalAttacks.left, left);
+          }
+        }
+        if (attack?.uid === current.uid && !attack.damage) {
+          const name = attack.doubleAttack ? "二刀連擊" : "角色普攻";
+          const outcome = attack.result === "miss" ? "未命中" : attack.result === "guard" ? "被擋下" : "未造成傷害";
+          record(`${name} · ${outcome}`, "player");
         }
         if (event.type === "skillInterrupt") {
           record(`詠唱中斷 · ${skillDisplayName(event.skill)}`);
@@ -1374,12 +1389,16 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           if (event.uid === current.uid) {
             const damage = Math.min(event.damage, Math.max(0, monster.hp - credited));
             const critical = event.result === "crit" || ("crit" in event && event.crit === true);
-            noteHit(entry, critical, event.damage);
+            const slot = critical ? "critical" : "normal";
+            entry[slot] = addHit(entry[slot], event.damage);
             credited += damage;
             entry.damage += damage;
             entry.hits++;
             const effective = damage < event.damage ? `（有效 ${damage}）` : "";
-            record(`${entry.name} · ${critical ? "爆擊 " : ""}造成 ${event.damage} 傷害${effective}`, "player");
+            const name = attack?.doubleAttack ? "二刀連擊" : entry.name;
+            const hands = attack?.dualBeforeDefense;
+            const split = hands ? ` · 右手 ${hands.right}＋左手 ${hands.left}${event.damage !== hands.right + hands.left ? "（防禦技能結算前）" : ""}` : "";
+            record(`${name} · ${critical ? "爆擊 " : ""}造成 ${event.damage} 傷害${split}${effective}`, "player");
           } else {
             const prior = summonHp.get(event.uid);
             if (prior === undefined) return;
@@ -1432,7 +1451,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   } : null;
   return {monster: {name:monster.name, lv:monster.lv, hp:monster.hp, element:monster.element,
     elementLv:monster.elementLv, race:monster.race, size:monster.size}, panel,
-    defense, songs, timeline, timelineCount, invincible:!!options.invincible, mobDefense, dps: total / trials / options.seconds,
+    defense, songs, timeline, timelineCount, normalAttacks, invincible:!!options.invincible, mobDefense, dps: total / trials / options.seconds,
     summons: {count:summonCount, kills:summonKills, dps:summonDamage / trials / options.seconds,
       totalDps:(total + summonDamage) / trials / options.seconds},
     averageKill: killTimes.length ? killTimes.reduce((sum, t) => sum + t, 0) / killTimes.length : null,
