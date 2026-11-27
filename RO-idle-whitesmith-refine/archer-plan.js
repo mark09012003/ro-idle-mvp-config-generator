@@ -3,6 +3,7 @@
   const jobs = globalThis.roArcherTree;
   const firstJob = [["AC_DOUBLE",5],["AC_SHOWER",10],["AC_OWL",10],["AC_VULTURE",1],
     ["AC_CONCENTRATION",10],["AC_VULTURE",4]];
+  const firstJobOverflow = [["AC_VULTURE",10],["AC_DOUBLE",10]];
   const sniper = [["SN_SHARPSHOOTING",5],["AC_VULTURE",10],["HT_BEASTBANE",1],["HT_FALCON",1],["SN_SIGHT",10]];
   const destinations = {novice:"archer", novice_high:"archer_high", archer:"hunter", archer_high:"sniper"};
   const fee = 1285000;
@@ -63,8 +64,11 @@
       ready = (levels.NV_BASIC ?? 0) >= 9 && (levels.NV_FIRSTAID ?? 0) >= 1;
     } else if (job === "archer" || job === "archer_high") {
       ready = applyOrder(firstJob);
-      if (ready && points > 0) {
-        return {stop: true, message: "一轉技能已有額外配點，請確認後再轉職。"};
+      if (ready && jobLv > jobs[destinations[job]].jobChange.minJobLv && points > 0) {
+        applyOrder(firstJobOverflow);
+      }
+      if (ready && points > 0 && skills.length === 0) {
+        return {stop: true, message: "仍有一轉技能點，但目前沒有可自動分配的技能。"};
       }
     } else if (job === "hunter") {
       fillRemaining();
