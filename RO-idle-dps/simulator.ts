@@ -392,7 +392,7 @@ function initialStatuses(effects: Effect[], time: number): MobStatuses {
   return status;
 }
 
-type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; soulChange?: {interval: number; casterSp: number}; scenario?: Scenario};
+type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; soulChange?: ({interval: number; spBelow?: never} | {spBelow: number; interval?: never}) & {casterSp: number}; scenario?: Scenario};
 type HitRange = {min: number; max: number; count: number};
 type DamageLine = {normal?: HitRange; critical?: HitRange; name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
@@ -981,8 +981,12 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   const received = new Map<string, number>();
   let damageTaken = 0, timeExposed = 0, endingHp = 0;
   const soulChange = options.soulChange;
-  const soulChangeInterval = soulChange ? Math.max(1, soulChange.interval) * 1000 : NEVER;
-  const soulChangeSp = soulChange ? Math.max(0, soulChange.casterSp - (SKILLS.get("PF_SOULCHANGE")?.sp[0] ?? 5)) : 0;
+  const soulChangeSkill = SKILLS.get("PF_SOULCHANGE");
+  const soulChangeInterval = soulChange?.interval === undefined ? NEVER : Math.max(1, soulChange.interval) * 1000;
+  const soulChangeSp = soulChange ? Math.max(0, soulChange.casterSp - (soulChangeSkill?.sp[0] ?? 5)) : 0;
+  const soulChangeThreshold = soulChange?.spBelow;
+  const soulChangeCastMs = soulChangeSkill?.castMs[0] ?? 3000;
+  const soulChangeDelayMs = soulChangeSkill?.delayMs[0] ?? 5000;
   let panel;
   for (let run = 0; run < trials; run++) {
     const state = setup(snapshot, options, 91237 + 7919 * run);
@@ -1023,6 +1027,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     const defenseTickMs = Math.max(500, monster.attackDelay);
     let nextDefenseCheckAt = !counterattack && mobDefense ? state.time + defenseTickMs : NEVER;
     let nextSoulChangeAt = state.time + soulChangeInterval;
+    let soulChangeReadyAt = state.time;
     let nextGospelAt = gospelConfig ? state.time : NEVER;
     function applyGospelPulse() {
       if (!gospelConfig) return;
@@ -1121,11 +1126,25 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     for (let steps = 0; steps < 15000; steps++) {
       const pulse = pulses.find(entry => entry.buff && state.buffs.includes(entry.buff) && entry.at < entry.buff.until);
       const engineTime = nextEventTime(state);
-      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt, nextGospelAt, nextSoulChangeAt);
+      let soulChangeCheckAt = NEVER;
+      if (soulChangeThreshold !== undefined && nextSoulChangeAt >= NEVER) {
+        const maxSp = derived(state).maxSp;
+        const sp = state.character.sp;
+        if (sp < Math.min(maxSp, soulChangeSp) && sp * 100 < soulChangeThreshold * maxSp) {
+          soulChangeCheckAt = Math.max(state.time, soulChangeReadyAt);
+        }
+      }
+      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt, nextGospelAt, nextSoulChangeAt, soulChangeCheckAt);
       if (next > duration || state.activity.kind === "stopped" || state.activity.kind === "dead") break;
       moveTime(state, Math.max(state.time, next));
+      if (soulChangeCheckAt === next) {
+        nextSoulChangeAt = state.time + soulChangeCastMs;
+        record("智者開始詠唱 心神互換", "player");
+        continue;
+      }
       if (nextSoulChangeAt === next) {
-        nextSoulChangeAt += soulChangeInterval;
+        nextSoulChangeAt = state.time + soulChangeInterval;
+        soulChangeReadyAt = state.time + soulChangeDelayMs;
         const oldSp = state.character.sp;
         const receivedSp = Math.min(derived(state).maxSp, soulChangeSp);
         if (receivedSp > oldSp) {

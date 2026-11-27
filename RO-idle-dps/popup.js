@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-16";
+const ASSET_VER = "20261127-17";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -1202,10 +1202,18 @@ $("invincible").onchange = () => { if ($("invincible").checked) $("counterattack
 function syncSoulChangeFields() {
   const disabled = !$("soul-change").checked;
   $("soul-change-options").hidden = disabled;
-  $("soul-change-interval").disabled = disabled;
+  const trigger = $("soul-change-trigger");
+  trigger.disabled = disabled;
+  const threshold = trigger.value === "threshold";
+  for (const [id, show] of [["soul-change-interval", !threshold], ["soul-change-threshold", threshold]]) {
+    const input = $(id);
+    input.parentElement.hidden = !show;
+    input.disabled = disabled || !show;
+  }
   $("soul-change-sp").disabled = disabled;
 }
 $("soul-change").addEventListener("change", syncSoulChangeFields);
+$("soul-change-trigger").addEventListener("change", syncSoulChangeFields);
 syncSoulChangeFields();
 
 $("counterattack").onchange = () => { if (!$("counterattack").checked) $("invincible").checked = false; };
@@ -1244,7 +1252,9 @@ $("calculator").onsubmit = async event => {
     counterattack: $("counterattack").checked,
     invincible: $("invincible").checked,
     soulChange: $("soul-change").checked ? {
-      interval: Number($("soul-change-interval").value),
+      ...($("soul-change-trigger").value === "threshold"
+        ? {spBelow: Number($("soul-change-threshold").value)}
+        : {interval: Number($("soul-change-interval").value)}),
       casterSp: Number($("soul-change-sp").value),
     } : undefined,
     scenario: readScenario(),
