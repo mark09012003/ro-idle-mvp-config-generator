@@ -75,7 +75,17 @@ summary { cursor: pointer; font-weight: 600; }
 .effect-list { max-height: 230px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; }
 .effect-row { padding: 4px 6px; }
 .effect-row + .effect-row { border-top: 1px solid var(--line); }
-.effect-row .check { margin: 0; cursor: pointer; }
+.effect-row .check { margin: 0; cursor: pointer; flex-wrap: wrap; }
+.effect-row.is-active-from-snapshot { background: color-mix(in srgb, var(--accent-bg) 55%, Canvas); }
+.effect-active-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-bg);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, Canvas);
+  color: var(--accent);
+  font-weight: 600;
+}
 .effect-parameters { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 5px; margin: 5px 0 0; padding: 5px; background: var(--tint); font-size: 11px; }
 .effect-parameters input { margin: 3px 0 0; }
 .filter-count { font-size: 12px; }

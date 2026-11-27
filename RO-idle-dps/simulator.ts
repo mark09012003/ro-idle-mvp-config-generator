@@ -80,11 +80,13 @@ export function scenarioCatalog(snapshot: GameSnapshot) {
   return {
     ammo: ammoChoices(snapshot),
     active: previewBuffs(snapshot).map((buff, index) => ({
-      index, name: buffDisplayName(buff.id), level: "lv" in buff ? buff.lv : undefined,
+      index, id: buff.id, name: buffDisplayName(buff.id), level: "lv" in buff ? buff.lv : undefined,
       remainingMs: "remainingMs" in buff ? Number(buff.remainingMs) : undefined,
+      group: buffGroup({...buff, until: NEVER} as ActiveBuff),
     })),
     buffs: [...manualBuffIds, ...songIds].map(id => ({
       id, name:buffDisplayName(id), max:maximumBuffLevel(id),
+      group: buffGroup({id, lv: maximumBuffLevel(id), until: NEVER} as ActiveBuff),
       ...(songIds.includes(id) && {stats:songStats[id], lessonName:id.startsWith("DC_") ? "練習舞蹈等級" : "操控樂器等級"}),
     })),
     statuses: Object.entries(manualStatuses).map(([id, max]) => ({id, name:STATUS_NAMES[id as MobStatusId], max})),
@@ -198,6 +200,8 @@ function songParameters(effect: Effect) {
 }
 
 function buffGroup(active: ActiveBuff) {
+  if (active.id === "BS_OVERTHRUST" || active.id === "WS_OVERTHRUSTMAX") return "overthrust";
+  if (active.id === "PR_KYRIE" || active.id === "HP_ASSUMPTIO") return "kyrie-assumptio";
   const definition = getBuff(active.id, active.lv, active.party);
   if ((active.bonuses ?? definition.bonuses).attackElement) return "attack-element";
   return definition.group;

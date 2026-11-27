@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-2";
+const ASSET_VER = "20261127-3";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -323,11 +323,11 @@ function renderScenario() {
     return label;
   }));
   if (!scenario.active.length) $("active-buffs").textContent = "角色目前沒有 Buff。";
-  syncActiveBuffControls();
   if (!$("extra-buffs").children.length) {
     $("extra-buffs").replaceChildren(...scenario.buffs.map(effectRow));
     $("monster-statuses").replaceChildren(...scenario.statuses.map(effectRow));
   }
+  syncActiveBuffControls();
   filterEffects("buff");
   filterEffects("status");
 }
@@ -335,7 +335,8 @@ function renderScenario() {
 function syncActiveBuffControls() {
   const boxes = [...$("active-buffs").querySelectorAll('input[type="checkbox"]')];
   const total = boxes.length;
-  const checked = boxes.filter(box => box.checked).length;
+  const checkedBoxes = boxes.filter(box => box.checked);
+  const checked = checkedBoxes.length;
   if ($("active-buff-actions")) $("active-buff-actions").hidden = total === 0;
   if ($("quick-active-buffs-wrap")) $("quick-active-buffs-wrap").hidden = total === 0;
   if ($("keep-active-buffs-wrap")) $("keep-active-buffs-wrap").hidden = total === 0;
@@ -355,6 +356,26 @@ function syncActiveBuffControls() {
     $("snapshot-buff-summary").textContent = total
       ? `匯入遊戲身上的 Buff（已選 ${checked}／${total} 項）`
       : "匯入遊戲身上的 Buff（角色目前沒有 Buff）";
+  }
+  // Mark manual buff rows that are already active from snapshot (or share a mutually exclusive group)
+  const activeIds = new Set();
+  const activeGroups = new Set();
+  for (const box of checkedBoxes) {
+    const entry = scenario?.active?.[Number(box.value)];
+    if (!entry) continue;
+    if (entry.id) activeIds.add(entry.id);
+    if (entry.group) activeGroups.add(entry.group);
+  }
+  for (const row of $("extra-buffs").children) {
+    const tag = row.querySelector(".effect-active-tag");
+    if (!tag) continue;
+    const sameId = activeIds.has(row.dataset.effect);
+    const sameGroup = !sameId && Boolean(row.dataset.group && activeGroups.has(row.dataset.group));
+    const active = sameId || sameGroup;
+    row.classList.toggle("is-active-from-snapshot", active);
+    tag.hidden = !active;
+    if (sameId) tag.textContent = "身上已套用（勾選將覆蓋，不疊加）";
+    else if (sameGroup) tag.textContent = "同類已套用（勾選將取代）";
   }
 }
 
@@ -385,12 +406,16 @@ function effectRow(definition) {
   row.className = "effect-row";
   row.dataset.effect = definition.id;
   row.dataset.name = definition.name;
+  if (definition.group) row.dataset.group = definition.group;
   const label = document.createElement("label");
   label.className = "check";
   const select = document.createElement("input");
   select.type = "checkbox";
   select.className = "effect-toggle";
-  label.append(select, definition.name);
+  const activeTag = document.createElement("span");
+  activeTag.className = "effect-active-tag";
+  activeTag.hidden = true;
+  label.append(select, definition.name, activeTag);
   const settings = document.createElement("fieldset");
   settings.className = "effect-parameters";
   settings.hidden = settings.disabled = true;
