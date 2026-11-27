@@ -12,8 +12,8 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="popup.css?v=20261127-10">
-  <script type="module" src="popup.js?v=20261127-10"></script>
+  <link rel="stylesheet" href="popup.css?v=20261127-11">
+  <script type="module" src="popup.js?v=20261127-11"></script>
 </head>
 <body>
   <div class="shell">
@@ -208,6 +208,20 @@
               <label id="build-falcon-wrap" class="check" hidden>
                 <input id="build-falcon" type="checkbox"> 攜帶獵鷹（普攻自動閃電衝擊）
               </label>
+            </div>
+
+            <div class="pet-picker-box">
+              <div class="pet-picker-head">
+                <span class="pet-picker-title">攜帶寵物（忠誠加成）</span>
+                <label class="check inline-check">
+                  <input id="build-pet-loyal" type="checkbox" checked> 親密度達忠誠（≥ 910）
+                </label>
+              </div>
+              <div class="pet-picker-controls">
+                <input id="build-pet-search" type="search" placeholder="篩選寵物名稱或效果（例如：ATK、暴擊、MATK、伊絲）" autocomplete="off">
+                <select id="build-pet" aria-label="選擇寵物"></select>
+              </div>
+              <p id="build-pet-desc" class="hint"></p>
             </div>
           </div>
 

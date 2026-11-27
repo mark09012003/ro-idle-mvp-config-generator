@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-10";
+const ASSET_VER = "20261127-11";
 const MAX_REBIRTHS = 11;
 const EXTRA_STAT_PER_REBIRTH = 20;
 const host = "https://ro-idle.app";
@@ -54,6 +54,7 @@ let selectedSlot = null;
 let itemMap = new Map();
 let cardMap = new Map();
 let jobMap = new Map();
+let petMap = new Map();
 let savedCharacters = [];
 let activeSavedKey = "";
 let activeTab = "build";
@@ -173,6 +174,7 @@ function ensureBuilder() {
       .then(info => {
         builderInfo = info;
         jobMap = new Map(info.jobs.map(j => [j.id, j]));
+        petMap = new Map((info.pets ?? []).map(p => [p.mob, p]));
         return info;
       })
       .catch(error => { builderPromise = null; throw error; });
@@ -564,8 +566,51 @@ function renderBuildTab() {
     ? "目前以匯入角色為基底，所有配點、技能與裝備修改僅在本機模擬，不會改動遊戲帳號。"
     : "自訂角色模式：可自由設定轉生次數、職業、等級、素質、技能與裝備，完全不需匯入遊戲。";
 
+  renderPetSelector();
   renderStatAllocator();
   updateHeaderRole();
+}
+
+function renderPetSelector() {
+  if (!snapshot || !builderInfo) return;
+  const sel = $("build-pet");
+  const loyalCb = $("build-pet-loyal");
+  const desc = $("build-pet-desc");
+  if (!sel) return;
+  const allPets = builderInfo.pets ?? [];
+  const curMob = snapshot.pet?.mob ?? 0;
+  const term = ($("build-pet-search")?.value ?? "").trim().normalize("NFKC").toLowerCase();
+  const sorted = [...allPets].sort((a, b) => Number(b.hasBonus) - Number(a.hasBonus) || a.gen - b.gen || a.mob - b.mob);
+  const filtered = sorted.filter(p => {
+    if (p.mob === curMob) return true;
+    if (!term) return true;
+    return `${p.name} ${p.mob} ${p.loyalText.join(" ")} ${p.loyalUnsupported.join(" ")}`
+      .normalize("NFKC").toLowerCase().includes(term);
+  });
+  sel.replaceChildren(
+    new Option("（無寵物）", ""),
+    ...filtered.map(p => new Option(
+      `${p.name} · ${p.loyalText.length ? p.loyalText.join("、") : "無忠誠加成"}`,
+      String(p.mob)
+    ))
+  );
+  sel.value = curMob && petMap.has(curMob) ? String(curMob) : "";
+  const chosen = curMob ? petMap.get(curMob) : null;
+  loyalCb.disabled = !chosen;
+  loyalCb.checked = chosen ? (snapshot.pet?.intimacy ?? 1000) >= 910 : true;
+  if (!chosen) {
+    desc.textContent = "目前未攜帶寵物；選擇寵物後預設親密度為忠誠（1000），即時套用忠誠加成。";
+  } else {
+    const loyalOn = loyalCb.checked;
+    const bonusStr = chosen.loyalText.length ? chosen.loyalText.join("、") : "此寵物無戰鬥忠誠加成";
+    const statusStr = chosen.loyalText.length
+      ? (loyalOn ? `已生效（親密度 ${snapshot.pet?.intimacy ?? 1000}）` : `未達忠誠（親密度 ${snapshot.pet?.intimacy ?? 250}，加成未生效）`)
+      : "";
+    const extraNote = chosen.loyalUnsupported.length
+      ? `；原版另有 ${chosen.loyalUnsupported.join("、")}（本引擎暫不支援）`
+      : "";
+    desc.textContent = `${chosen.name}：${bonusStr}${statusStr ? ` · ${statusStr}` : ""}${extraNote}`;
+  }
 }
 
 function renderStatRadar() {
@@ -2295,9 +2340,12 @@ async function showStats() {
     });
     if (version !== statsVersion) return;
     lastPreview = preview;
-    const {base, current, names, allocated, hasEquipOverrides, atkDetail} = preview;
+    const {base, current, names, allocated, hasEquipOverrides, atkDetail, pet} = preview;
     const parts = [];
     if (hasEquipOverrides) parts.push("自訂裝備");
+    if (pet) {
+      parts.push(`寵物：${pet.name}${pet.loyal && pet.loyalText.length ? `（${pet.loyalText.join("、")}）` : pet.loyal ? "（忠誠）" : "（未忠誠）"}`);
+    }
     parts.push(names.length ? names.join("、") : "無起始 Buff");
     $("stats-caption").textContent = parts.join(" · ");
 
@@ -2707,6 +2755,32 @@ $("build-riding").onchange = () => {
 $("build-falcon").onchange = () => {
   if (!snapshot) return;
   snapshot.character.falcon = $("build-falcon").checked;
+  scheduleStats();
+};
+$("build-pet-search").oninput = renderPetSelector;
+$("build-pet").onchange = () => {
+  if (!snapshot) return;
+  const val = $("build-pet").value;
+  if (!val) {
+    snapshot.pet = null;
+  } else {
+    const mob = Number(val);
+    const def = petMap.get(mob);
+    const keepLoyal = snapshot.pet ? $("build-pet-loyal").checked : true;
+    snapshot.pet = {
+      mob,
+      egg: def?.egg ?? 0,
+      intimacy: keepLoyal ? 1000 : 250,
+      hunger: 100,
+    };
+  }
+  renderPetSelector();
+  scheduleStats();
+};
+$("build-pet-loyal").onchange = () => {
+  if (!snapshot?.pet) return;
+  snapshot.pet.intimacy = $("build-pet-loyal").checked ? 1000 : 250;
+  renderPetSelector();
   scheduleStats();
 };
 

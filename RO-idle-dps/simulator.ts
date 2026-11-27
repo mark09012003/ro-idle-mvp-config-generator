@@ -15,7 +15,7 @@ import { buffDisplayName, getBuff, isKnownBuff } from "./src/game/data/buffs";
 import { elementModifier } from "./src/game/data/elements";
 import { getItem, ITEMS, registerItemDefs } from "./src/game/data/items";
 import { getAmmo, getEquipped, SLOT_NAMES } from "./src/game/items/equipment";
-import { withPetBuff } from "./src/game/sim/pet";
+import { PETS, PET_INTIMATE, petOf } from "./src/game/data/pets";
 import { AILMENT_NAMES, BLEEDING_TICK_MS } from "./src/game/combat/ailments";
 import { randInt } from "./src/game/core/rng";
 import { NEVER } from "./src/game/config/gameplay";
@@ -70,8 +70,18 @@ export function builderCatalog() {
       }),
     };
   });
+  const pets = PETS.map(p => ({
+    mob: p.mob,
+    egg: p.egg,
+    name: p.name,
+    gen: p.gen,
+    loyalText: [...p.loyalText],
+    loyalUnsupported: p.loyalUnsupported ? [...p.loyalUnsupported] : [],
+    hasBonus: Object.keys(p.loyal).length > 0,
+  }));
   return {
     jobs,
+    pets,
     defaultConfig: defaultAutoConfig(),
   };
 }
@@ -108,7 +118,7 @@ const manualStatuses: Partial<Record<MobStatusId, number>> = {
   spiderweb:1, fogwall:1, agiup:1, autoguard:10, defender:5, assumptio:5, reflectShield:10, powerup:1,
 };
 const maximumBuffLevel = (id: string) => SKILLS.get(id)?.maxLv ?? 1;
-const previewBuffs = (snapshot: GameSnapshot) => withPetBuff(snapshot.buffs ?? [], snapshot);
+const previewBuffs = (snapshot: GameSnapshot) => snapshot.buffs ?? [];
 
 function ammoChoices(snapshot: GameSnapshot) {
   const quantities = new Map<number, number>();
@@ -386,6 +396,20 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   state.ailments = Object.fromEntries((snapshot.ailments ?? []).map(ailment =>
     [ailment.id, {until: ailment.remainingMs, lv: ailment.lv ?? 1}]));
   if (snapshot.cart) state.cart = {items: [], nextUid: 1};
+  if (snapshot.pet?.mob) {
+    const petDef = petOf(snapshot.pet.mob);
+    if (petDef) {
+      state.pet = {
+        mob: snapshot.pet.mob,
+        egg: snapshot.pet.egg ?? petDef.egg,
+        intimacy: snapshot.pet.intimacy ?? PET_INTIMATE.max,
+        hunger: snapshot.pet.hunger ?? 100,
+        nextHungerAt: NEVER,
+        ...(snapshot.pet.name ? {name: snapshot.pet.name} : {}),
+        ...(snapshot.pet.equip ? {equip: snapshot.pet.equip} : {}),
+      };
+    }
+  }
   const config = defaultAutoConfig();
   const loaded = snapshot.config;
   const chosenAmmo = options.scenario?.ammoItemId;
@@ -689,8 +713,17 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario, mo
     : !ammo && rule?.ammo != null ? `UID ${rule.ammo}` : undefined;
   const allocated = Object.fromEntries(Object.entries(baseline.character.stats)
     .map(([key, value]) => [key.toUpperCase(), value]));
+  const petDef = current.pet ? petOf(current.pet.mob) : undefined;
+  const activePet = current.pet && petDef ? {
+    mob: current.pet.mob,
+    name: current.pet.name || petDef.name,
+    species: petDef.name,
+    loyal: current.pet.intimacy >= PET_INTIMATE.loyal,
+    loyalText: [...petDef.loyalText],
+  } : null;
   return {
     base, current:current.buffs.length || hasEquipOverrides ? panel(current) : null, hasEquipOverrides,
+    pet: activePet,
     atkDetail: {
       statusAtk: stats.statusAtk,
       weaponAtk: stats.weaponAtk,

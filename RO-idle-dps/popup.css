@@ -346,6 +346,28 @@ textarea { min-height: 72px; resize: vertical; font-family: ui-monospace, SFMono
 .rebirth-select { flex: 1; min-width: 0; font-weight: 600; }
 .rebirth-row .btn.is-active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .extra-char-flags { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 18px; padding-top: 6px; border-top: 1px solid var(--border); }
+.pet-picker-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.pet-picker-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+.pet-picker-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.pet-picker-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 8px;
+}
+#build-pet-desc { margin: 6px 0 0; }
 
 /* 6-Stat Radar Chart & Allocator Layout */
 .stats-builder-panel { container-type: inline-size; }
@@ -1027,6 +1049,7 @@ th, td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-alig
   .shell { padding: 8px 8px 24px; }
   .topbar { padding: 8px 10px; }
   .form-grid-2, .form-grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .pet-picker-controls { grid-template-columns: minmax(0, 1fr); }
   .skill-tree-list { grid-template-columns: minmax(0, 1fr); }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mob-skill-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
