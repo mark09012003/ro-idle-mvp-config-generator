@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-14";
+const ASSET_VER = "20261127-15";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -382,6 +382,9 @@ function effectRow(definition, isBuff = false) {
     numberField("等級", "level", definition.max, 1, definition.max),
     numberField("持續（秒）", "seconds", 0, 0, 120)
   );
+  if (definition.maxCasters) {
+    settings.append(numberField("施法者人數", "casterCount", 1, 1, definition.maxCasters));
+  }
   if (definition.stats) {
     for (const stat of definition.stats) settings.append(numberField(`演奏者 ${stat.toUpperCase()}`, stat, 90, 0, 999));
     settings.append(numberField(definition.lessonName, "lesson", 10, 0, 10));
@@ -420,10 +423,10 @@ function readEffects(container) {
   return [...$(container).children]
     .filter(row => row.querySelector(".effect-toggle").checked)
     .map(row => {
-      const {level, seconds: duration, ...performer} = Object.fromEntries(
+      const {level, seconds: duration, casterCount, ...performer} = Object.fromEntries(
         [...row.querySelectorAll("[data-parameter]")].map(input => [input.dataset.parameter, Number(input.value)])
       );
-      return {id: row.dataset.effect, level, seconds: duration, performer};
+      return {id: row.dataset.effect, level, seconds: duration, casterCount, performer};
     });
 }
 

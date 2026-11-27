@@ -134,6 +134,7 @@ export function attackSkills(snapshot: GameSnapshot) {
 }
 
 const GOSPEL_PULSE_ID = "PA_GOSPEL";
+const MAX_GOSPEL_CASTERS = 11;
 const GOSPEL_FIXED_BUFFS: Record<string, {name: string; bonuses: Record<string, unknown>}> = {
   nativeIncAtkRate: {name: "聖音：ATK +100%", bonuses: {atkRate: 100}},
   nativeIncAllStatus: {name: "聖音：全素質 +20", bonuses: {stats: {str: 20, agi: 20, vit: 20, int: 20, dex: 20, luk: 20}}},
@@ -210,6 +211,7 @@ export function scenarioCatalog(snapshot: GameSnapshot) {
     buffs: [...manualBuffIds, ...songIds, ...gospelBuffIds].map(id => ({
       id, name: manualBuffLabel(id), max: maximumBuffLevel(id),
       group: id === GOSPEL_PULSE_ID || Object.hasOwn(GOSPEL_FIXED_BUFFS, id) ? undefined : buffGroup({id, lv: maximumBuffLevel(id), until: NEVER} as ActiveBuff),
+      ...(id === GOSPEL_PULSE_ID && {maxCasters: MAX_GOSPEL_CASTERS}),
       ...(songIds.includes(id) && {stats:songStats[id], lessonName:id.startsWith("DC_") ? "練習舞蹈等級" : "操控樂器等級"}),
     })),
     statuses: Object.entries(manualStatuses).map(([id, max]) => ({
@@ -305,7 +307,7 @@ export function equipmentCatalog(snapshot: GameSnapshot) {
   };
 }
 
-type Effect = {id: string; level: number; seconds: number; performer?: Partial<PerformerCtx["stats"]> & {lesson?: number}};
+type Effect = {id: string; level: number; seconds: number; casterCount?: number; performer?: Partial<PerformerCtx["stats"]> & {lesson?: number}};
 type Scenario = {includeActive?: number[]; keepActiveBuffs?: boolean; buffs?: Effect[]; statuses?: Effect[]; autoBuffs?: boolean; ammoItemId?: number; equipOverrides?: EquipOverrides};
 
 function effectTime(effect: Effect, max: number) {
@@ -948,7 +950,11 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     return {id:effect.id, name:buffDisplayName(effect.id), ...songParameters(effect)};
   });
   const gospelSpec = (options.scenario?.buffs ?? []).find(effect => effect.id === GOSPEL_PULSE_ID);
-  const gospelConfig = gospelSpec ? {lv: gospelSpec.level, until: effectTime(gospelSpec, 10) || NEVER} : null;
+  const gospelConfig = gospelSpec ? {
+    lv: gospelSpec.level,
+    until: effectTime(gospelSpec, 10) || NEVER,
+    casterCount: Math.min(MAX_GOSPEL_CASTERS, Math.max(1, Math.trunc(gospelSpec.casterCount || 1))),
+  } : null;
   const lines = new Map<string, DamageLine>();
   const line = (id: string) => {
     if (!lines.has(id)) lines.set(id, {name: skillDisplayName(id), damage:0, hits:0, casts:0, castMs:0, delayMs:0, cooldownMs:0});
@@ -1123,7 +1129,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
       if (gospelConfig && nextGospelAt <= next && nextGospelAt < engineTime) {
         const nextAt = state.time + 10000;
         nextGospelAt = nextAt < gospelConfig.until ? nextAt : NEVER;
-        applyGospelPulse();
+        for (let caster = 0; caster < gospelConfig.casterCount; caster++) applyGospelPulse();
         if (current.hp <= 0 && !state.monsters.includes(current)) {
           total += monster.hp;
           kills++;
