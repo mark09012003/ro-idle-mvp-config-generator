@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-4";
+const ASSET_VER = "20261127-5";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -1547,19 +1547,48 @@ async function showStats() {
     });
     if (version !== statsVersion) return;
     lastPreview = preview;
-    const {base, current, names, allocated, hasEquipOverrides} = preview;
+    const {base, current, names, allocated, hasEquipOverrides, atkDetail} = preview;
     const parts = [];
     if (hasEquipOverrides) parts.push("自訂裝備");
     parts.push(names.length ? names.join("、") : "無起始 Buff");
     $("stats-caption").textContent = parts.join(" · ");
 
-    const kpiKeys = [
-      {key: "ATK", label: "ATK"},
+    const atkFrontOrig = base["前 ATK"] ?? 0;
+    const atkBackOrig = base["後 ATK"] ?? 0;
+    const atkFrontAct = current?.["前 ATK"] ?? atkFrontOrig;
+    const atkBackAct = current?.["後 ATK"] ?? atkBackOrig;
+    const atkTotalDiff = (atkFrontAct + atkBackAct) - (atkFrontOrig + atkBackOrig);
+    const atkTooltip = atkDetail
+      ? `前 ATK（素質，不受體型修正）：${format(atkDetail.statusAtk)}\n後 ATK（武器 ${format(atkDetail.weaponAtk)} ＋ 裝備/Buff ${format(atkDetail.atkBonus)} ＋ 精煉 ${format(atkDetail.refineAtk)}）` +
+        (atkDetail.overrefine > 0 ? `\n過精煉隨機加傷：+1～${format(atkDetail.overrefine)}` : "") +
+        (atkDetail.arrowAtk > 0 ? `\n箭矢 ATK：${format(atkDetail.arrowAtk)}` : "") +
+        (atkDetail.masteryAtk > 0 ? `\n武器修練固定傷害：+${format(atkDetail.masteryAtk)}` : "")
+      : "";
+
+    const kpiTiles = [];
+    {
+      const tile = document.createElement("div");
+      tile.className = "stats-kpi-tile";
+      tile.title = atkTooltip;
+      const dt = document.createElement("dt");
+      dt.textContent = "ATK（前 + 後）";
+      const dd = document.createElement("dd");
+      dd.textContent = `${format(atkFrontAct)} + ${format(atkBackAct)}`;
+      if (atkTotalDiff !== 0) {
+        const small = document.createElement("span");
+        small.className = "delta-tag";
+        small.dataset.direction = atkTotalDiff > 0 ? "up" : "down";
+        small.textContent = `${atkTotalDiff > 0 ? "+" : "−"}${format(Math.abs(atkTotalDiff))}`;
+        dd.append(small);
+      }
+      tile.append(dt, dd);
+      kpiTiles.push(tile);
+    }
+    for (const {key, label} of [
       {key: "ASPD", label: "ASPD"},
       {key: "最大 HP", label: "HP"},
       {key: "CRIT", label: "CRIT"},
-    ];
-    $("stats-kpi").replaceChildren(...kpiKeys.map(({key, label}) => {
+    ]) {
       const tile = document.createElement("div");
       tile.className = "stats-kpi-tile";
       const dt = document.createElement("dt");
@@ -1577,8 +1606,9 @@ async function showStats() {
         dd.append(small);
       }
       tile.append(dt, dd);
-      return tile;
-    }));
+      kpiTiles.push(tile);
+    }
+    $("stats-kpi").replaceChildren(...kpiTiles);
 
     $("character-stats").replaceChildren(...Object.entries(base).map(([key, original]) => {
       const cell = document.createElement("div");
@@ -1603,6 +1633,12 @@ async function showStats() {
         }
       } else {
         value.textContent = format(original);
+        if (key === "前 ATK" || key === "後 ATK" || key === "精煉 ATK") {
+          cell.title = atkTooltip;
+        }
+        if (key === "精煉 ATK" && atkDetail?.overrefine > 0 && active === original) {
+          value.textContent = `${format(original)} (+${format(atkDetail.overrefine)})`;
+        }
         if (active !== original) {
           const updated = document.createElement("span");
           updated.className = "delta-tag";

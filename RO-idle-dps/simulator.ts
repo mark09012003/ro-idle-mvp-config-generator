@@ -451,7 +451,9 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario, mo
     return {
       ...Object.fromEntries(Object.entries(stats.total).map(([key, value]) => [key.toUpperCase(), value])),
       "最大 HP":stats.maxHp, "最大 SP":stats.maxSp,
-      ATK:stats.statusAtk + stats.weaponAtk + stats.atkBonus + stats.refineAtk,
+      "前 ATK":stats.statusAtk,
+      "後 ATK":stats.weaponAtk + stats.atkBonus + stats.refineAtk,
+      "精煉 ATK":stats.refineAtk,
       ASPD:stats.aspd, HIT:stats.hit, FLEE:stats.flee,
       CRIT:stats.crit, DEF:stats.hardDefShown, MDEF:stats.hardMdef,
       "MATK 下限":stats.matkMin, "MATK 上限":stats.matkMax,
@@ -478,6 +480,15 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario, mo
     .map(([key, value]) => [key.toUpperCase(), value]));
   return {
     base, current:current.buffs.length || hasEquipOverrides ? panel(current) : null, hasEquipOverrides,
+    atkDetail: {
+      statusAtk: stats.statusAtk,
+      weaponAtk: stats.weaponAtk,
+      atkBonus: stats.atkBonus,
+      refineAtk: stats.refineAtk,
+      overrefine: stats.overrefine,
+      arrowAtk: stats.arrowAtk,
+      masteryAtk: stats.passive.masteryAtk,
+    },
     names:current.buffs.map(buff => buffDisplayName(buff.id)), allocated, equipment,
     weaponType:stats.weaponType, attackElement:stats.attackElement, missingRuleAmmo,
     ammo:ammo ? {name:ammo.def.name, atk:ammo.def.atk, element:ammo.def.element, quantity:ammo.stack.qty,
