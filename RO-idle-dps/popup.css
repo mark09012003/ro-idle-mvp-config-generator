@@ -66,3 +66,4 @@ summary { cursor: pointer; }
 #equipment-details { margin-top: 9px; }
 #equipment-list { padding-left: 19px; margin: 6px 0 0; }
 #equipment-list li { margin: 3px 0; }
+.hint { margin: 0 0 8px; font-size: 11px; color: color-mix(in srgb, CanvasText 76%, Canvas); }

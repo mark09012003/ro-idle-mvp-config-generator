@@ -117,6 +117,7 @@ function fillMonsters() {
     ...found.map(({name,lv,id}) => new Option(`${name} · Lv ${lv} · #${id}`, id)));
   if (found.some(({id}) => String(id) === current)) $("monster").value = current;
   else if (term && found.length === 1) $("monster").value = String(found[0].id);
+  scheduleStats();
 }
 
 function fillLevels() {
@@ -129,8 +130,8 @@ function fillLevels() {
 function renderScenario() {
   const ammo = $("ammo-choice");
   const selected = ammo.value;
-  ammo.replaceChildren(new Option("沿用目前裝備與自動補箭", ""), ...scenario.ammo.map(arrow =>
-    new Option(`${arrow.name} · ${element[arrow.element] ?? arrow.element} · 背包 ${format(arrow.quantity)} 支`, arrow.id)));
+  ammo.replaceChildren(new Option("依掛機換裝、目前裝備與補箭", ""), ...scenario.ammo.map(arrow =>
+    new Option(`${arrow.name} · ${element[arrow.element] ?? arrow.element} · ${arrow.quantity ? `背包 ${format(arrow.quantity)} 支` : "模擬 1,000 支"}${arrow.configured ? " · 換裝規則" : ""}`, arrow.id)));
   if (scenario.ammo.some(arrow => String(arrow.id) === selected)) ammo.value = selected;
   ammo.disabled = !scenario.ammo.length;
   $("active-buffs").replaceChildren(...scenario.active.map(({index, name, level}) => {
@@ -240,11 +241,12 @@ function scheduleStats() {
   statsTimeout = setTimeout(() => { void showStats(); }, 180);
 }
 
-function showEquipment({equipment, ammo, weaponType, attackElement}) {
+function showEquipment({equipment, ammo, weaponType, attackElement, missingRuleAmmo}) {
   const arrow = ammo
-    ? `${ammo.name} ×${format(ammo.quantity)} · 箭矢 ATK ${format(ammo.atk)} · ${element[ammo.element] ?? ammo.element}屬性${ammo.manual ? "（手動指定）" : ammo.fromBag ? "（從背包補上）" : ""}`
+    ? `${ammo.name} ×${format(ammo.quantity)} · 箭矢 ATK ${format(ammo.atk)} · ${element[ammo.element] ?? ammo.element}屬性${ammo.simulated ? "（模擬庫存）" : ammo.manual ? "（手動指定）" : ammo.fromRule ? "（自動換裝）" : ammo.fromBag ? "（從背包補上）" : ""}`
     : weaponType === "bow" ? "目前使用弓，箭矢欄和背包都沒有可用的散裝箭矢。" : "箭矢欄為空。";
-  $("ammo-summary").textContent = `${arrow}　｜　起始普攻：${element[attackElement] ?? attackElement}屬性`;
+  $("ammo-summary").textContent = `${arrow}　｜　起始普攻：${element[attackElement] ?? attackElement}屬性` +
+    (missingRuleAmmo ? `。換裝規則指定的 ${missingRuleAmmo} 目前沒有背包庫存。` : "");
   $("equipment-list").replaceChildren(...equipment.map(({slot, name, refine, broken, cards}) => {
     const row = document.createElement("li");
     row.textContent = `${slot} · ${refine ? `+${refine} ` : ""}${name}${broken ? "（損壞）" : ""}` +
@@ -257,7 +259,9 @@ async function showStats() {
   if (!snapshot) return;
   const version = ++statsVersion;
   try {
-    const preview = await engine("character", readScenario());
+    const preview = await engine("character", {
+      scenario:readScenario(), mode:$("mode").value, monsterId:Number($("monster").value),
+    });
     const {base, current, names, allocated} = preview;
     if (version !== statsVersion) return;
     $("character-panel").hidden = false;
@@ -408,7 +412,11 @@ function show(result) {
 
 $("search").oninput = fillMonsters;
 $("skill").onchange = fillLevels;
-$("mode").onchange = () => { $("skill-fields").hidden = $("mode").value !== "skill"; };
+$("mode").onchange = () => {
+  $("skill-fields").hidden = $("mode").value !== "skill";
+  scheduleStats();
+};
+$("monster").onchange = scheduleStats;
 $("refresh").onclick = load;
 $("calculator").addEventListener("invalid", event => {
   const row = event.target.closest(".effect-row");

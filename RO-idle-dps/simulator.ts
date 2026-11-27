@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import { createGameState, type GameState, type ActiveMonster, type ActiveBuff } from "./src/game/sim/state";
-import { derived, equipBagAmmo, moveTime, nextEventTime, observeDamage, processAt, receiveHealing } from "./src/game/sim/engine";
+import { autoEquipFor, derived, equipBagAmmo, moveTime, nextEventTime, observeDamage, processAt, receiveHealing } from "./src/game/sim/engine";
 import { SONGS, type PerformerCtx } from "./src/game/combat/songs";
 import { defaultAutoConfig } from "./src/game/ai/config";
 import { MONSTERS, type MonsterDef } from "./src/game/data/monsters";
@@ -57,15 +57,22 @@ const maximumBuffLevel = (id: string) => SKILLS.get(id)?.maxLv ?? 1;
 const previewBuffs = (snapshot: GameSnapshot) => withPetBuff(snapshot.buffs ?? [], snapshot);
 
 function ammoChoices(snapshot: GameSnapshot) {
-  const choices = new Map<number, {id:number; name:string; element:string; quantity:number}>();
-  for (const item of snapshot.inventory) {
-    const def = ITEMS.get(item.itemId);
-    if (def?.category !== "ammo" || !(item.qty > 0)) continue;
-    const prior = choices.get(def.id);
-    if (prior) prior.quantity += item.qty;
-    else choices.set(def.id, {id:def.id, name:def.name, element:def.element, quantity:item.qty});
+  const quantities = new Map<number, number>();
+  const stacks = new Map(snapshot.inventory.map(item => [item.uid, item]));
+  const configured = new Set<number>();
+  for (const rule of snapshot.config.equipRules ?? []) {
+    if (rule.enabled === false) continue;
+    const id = (rule.ammo != null ? stacks.get(rule.ammo)?.itemId : undefined) ?? rule.ammoId;
+    if (id) configured.add(id);
   }
-  return [...choices.values()].sort((a,b) => a.id - b.id);
+  for (const item of snapshot.inventory) {
+    if (item.qty > 0) quantities.set(item.itemId, (quantities.get(item.itemId) ?? 0) + item.qty);
+  }
+  return [...ITEMS.values()].flatMap(def => def.category === "ammo" ? [{
+    id:def.id, name:def.name, element:def.element,
+    quantity:quantities.get(def.id) ?? 0, configured:configured.has(def.id),
+  }] : []).sort((a,b) => Number(b.quantity > 0) - Number(a.quantity > 0) ||
+    Number(b.configured) - Number(a.configured) || a.id - b.id);
 }
 
 export function scenarioCatalog(snapshot: GameSnapshot) {
@@ -174,8 +181,13 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   if (chosenAmmo !== undefined) {
     const stack = state.inventory.items.filter(item => item.itemId === chosenAmmo && item.qty > 0)
       .sort((a, b) => b.qty - a.qty || a.uid - b.uid)[0];
-    if (!stack || ITEMS.get(chosenAmmo)?.category !== "ammo") throw new Error("背包裡找不到指定的箭矢。");
-    state.equipment.ammo = stack.uid;
+    if (ITEMS.get(chosenAmmo)?.category !== "ammo") throw new Error("指定的道具不是箭矢。");
+    if (stack) state.equipment.ammo = stack.uid;
+    else {
+      const uid = state.inventory.nextUid++;
+      state.inventory.items.push({uid, itemId:chosenAmmo, qty:1000});
+      state.equipment.ammo = uid;
+    }
   }
   const map = [snapshot.mapId, loaded.lockMap, config.lockMap].find(id => MAPS.get(id)?.type !== "town" && MAPS.has(id))!;
   state.mapId = map;
@@ -203,7 +215,16 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
   if (options.mode === "auto") {
     state.config.skills = (loaded.skills ?? []).filter(skill =>
       skill.use !== "escape" && (options.scenario?.autoBuffs || skill.use !== "buff"));
-    state.config.equipRules = loaded.equipRules;
+    state.config.equipRules = structuredClone(loaded.equipRules ?? []).flatMap(rule => {
+      if (chosenAmmo === undefined) {
+        if (rule.ammo === undefined && rule.ammoId !== undefined) {
+          rule.ammo = state.inventory.items.find(item => item.itemId === rule.ammoId && item.qty > 0)?.uid;
+        }
+        return [rule];
+      }
+      const {ammo, ammoId, ...other} = rule;
+      return other.weapon || other.shield || other.gear?.length ? [other] : [];
+    });
     state.config.combat = loaded.combat ?? config.combat;
   } else if (options.mode === "skill") {
     const selected = attackSkills(snapshot).find(skill => skill.id === options.skill);
@@ -212,19 +233,15 @@ function setup(snapshot: GameSnapshot, options: Options, seed: number) {
     }
     state.config.skills = [{skill:selected.id, lv:options.level!, use:"attack", percent:0}];
   }
-  const weaponType = derived(state).weaponType;
-  if (["bow", "instrument", "whip"].includes(weaponType) && !getAmmo(state.inventory, state.equipment)) {
-    equipBagAmmo(state, () => {});
-  }
   const stats = derived(state);
   state.character.hp = Math.min(state.character.hp, stats.maxHp);
   state.character.sp = options.unlimitedSp ? stats.maxSp : Math.min(state.character.sp, stats.maxSp);
   return state;
 }
 
-export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario) {
+export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario, mode: Options["mode"] = "normal", monsterId = 0) {
   registerItemDefs(snapshot.heldItems ?? []);
-  const options: Options = {monsterId:0, mode:"normal", seconds:30};
+  const options: Options = {monsterId, mode:mode === "auto" ? "auto" : "normal", seconds:30};
   function panel(state: GameState) {
     const stats = derived(state);
     return {
@@ -236,21 +253,30 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario) {
   }
   const current = setup(snapshot, {...options, scenario}, 1);
   const baseline = setup(snapshot, {...options, scenario:{ammoItemId:scenario?.ammoItemId}}, 1);
+  const modifier = prepareEncounter(current, {...options, scenario});
+  prepareEncounter(baseline, {...options, scenario:{statuses:scenario?.statuses}});
   const base = panel(baseline);
-  const equipment = getEquipped(baseline.inventory, baseline.equipment).map(({slot, stack, def}) => ({
+  const equipment = getEquipped(current.inventory, current.equipment).map(({slot, stack, def}) => ({
     slot:SLOT_NAMES[slot], name:def.name, refine:stack.refine ?? 0, broken:!!stack.broken,
     cards:(stack.cards ?? []).filter(Boolean).map(id => ITEMS.get(id)?.name ?? `#${id}`),
   }));
   const ammo = getAmmo(current.inventory, current.equipment);
   const stats = derived(current);
+  const rule = current.config.equipRules?.[current.ai.autoEquipIdx ?? -1];
+  const ruleAmmoId = rule?.ammoId ?? (rule?.ammo == null ? undefined : snapshot.inventory.find(item => item.uid === rule.ammo)?.itemId);
+  const missingRuleAmmo = ruleAmmoId && !current.inventory.items.some(item => item.itemId === ruleAmmoId && item.qty > 0)
+    ? ITEMS.get(ruleAmmoId)?.name ?? `#${ruleAmmoId}`
+    : !ammo && rule?.ammo != null ? `UID ${rule.ammo}` : undefined;
   const allocated = Object.fromEntries(Object.entries(baseline.character.stats)
     .map(([key, value]) => [key.toUpperCase(), value]));
   return {
     base, current:current.buffs.length ? panel(current) : null,
     names:current.buffs.map(buff => buffDisplayName(buff.id)), allocated, equipment,
-    weaponType:stats.weaponType, attackElement:stats.attackElement,
+    weaponType:stats.weaponType, attackElement:stats.attackElement, missingRuleAmmo,
     ammo:ammo ? {name:ammo.def.name, atk:ammo.def.atk, element:ammo.def.element, quantity:ammo.stack.qty,
-      fromBag:ammo.stack.uid !== snapshot.equipment.ammo, manual:scenario?.ammoItemId !== undefined} : null,
+      fromBag:ammo.stack.uid !== snapshot.equipment.ammo, manual:scenario?.ammoItemId !== undefined,
+      simulated:!snapshot.inventory.some(item => item.uid === ammo.stack.uid),
+      fromRule:modifier === "rule"} : null,
   };
 }
 
@@ -268,6 +294,21 @@ function replaceTarget(state: GameState, target: MonsterDef, options: Options): 
   state.activity = {kind:"attacking", targetUid: monster.uid};
   state.timers.nextAmbush = NEVER;
   return monster;
+}
+
+function prepareEncounter(state: GameState, options: Options) {
+  const target = MONSTERS.get(options.monsterId);
+  const before = state.equipment.ammo;
+  if (target) {
+    const monster = replaceTarget(state, target, options);
+    if (options.mode === "auto") autoEquipFor(state, () => {}, monster);
+  }
+  if (before !== state.equipment.ammo && getAmmo(state.inventory, state.equipment)) return "rule";
+  const weaponType = derived(state).weaponType;
+  if (["bow", "instrument", "whip"].includes(weaponType) && !getAmmo(state.inventory, state.equipment)) {
+    equipBagAmmo(state, () => {});
+  }
+  return null;
 }
 
 export function simulate(snapshot: GameSnapshot, options: Options) {
@@ -295,7 +336,8 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   let panel;
   for (let run = 0; run < trials; run++) {
     const state = setup(snapshot, options, 91237 + 7919 * run);
-    let current = replaceTarget(state, monster, options);
+    prepareEncounter(state, options);
+    let current = state.monsters[0];
     const pulses = songs.filter(song => song.heal > 0).map(song => ({...song, at:song.interval,
       buff:state.buffs.find(buff => buff.id === song.id)}));
     function record(text: string, kind = "system") {

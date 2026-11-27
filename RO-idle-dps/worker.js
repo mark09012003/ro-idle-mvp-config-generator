@@ -6,7 +6,7 @@ self.onmessage = ({data: {id, action, snapshot, options}}) => {
       targets: () => targets,
       skills: () => attackSkills(snapshot),
       scenario: () => scenarioCatalog(snapshot),
-      character: () => previewCharacter(snapshot, options),
+      character: () => previewCharacter(snapshot, options.scenario, options.mode, options.monsterId),
       simulate: () => simulate(snapshot, options),
     }[action]();
     self.postMessage({id, result});
