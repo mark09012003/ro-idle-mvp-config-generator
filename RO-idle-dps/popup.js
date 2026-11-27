@@ -1099,6 +1099,7 @@ $("calculator").onsubmit = async event => {
 // Web mode initialization & events
 function setupWebMode() {
   $("web-loader").hidden = false;
+  $("back-route").hidden = false;
   $("refresh").textContent = "匯入／切換角色";
   $("refresh").onclick = () => {
     const panel = $("import-panel");
