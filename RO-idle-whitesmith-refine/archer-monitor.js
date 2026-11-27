@@ -6,6 +6,7 @@
   let observing = false;
   let inFlight = false;
   let pending = false;
+  let pendingRefresh = false;
   let lastSignal = "";
   let timer;
   let fallback;
@@ -37,6 +38,7 @@
   function stop(text) {
     observing = false;
     pending = false;
+    pendingRefresh = false;
     observer.disconnect();
     document.removeEventListener("visibilitychange", syncBackgroundStream);
     closeBackgroundStream();
@@ -95,9 +97,14 @@
         body: JSON.stringify(body),
       }),
     });
-    const data = await reply.json();
-    if (!reply.ok) throw new Error(data.error?.message ?? data.message ??
-      (typeof data.error === "string" ? data.error : `HTTP ${reply.status}`));
+    const data = await reply.json().catch(error => {
+      if (reply.ok) throw error;
+      return null;
+    });
+    if (!reply.ok) {
+      throw Object.assign(new Error(data?.error?.message ?? data?.message ??
+        (typeof data?.error === "string" ? data.error : `HTTP ${reply.status}`)), {status:reply.status});
+    }
     return data;
   }
 
@@ -125,9 +132,22 @@
     if (!observing || inFlight) return;
     inFlight = true;
     pending = false;
+    const refresh = pendingRefresh;
+    pendingRefresh = false;
     try {
       const path = `/api/characters/${role.id}`;
-      let view = checkedView(await request(`${path}?deferCatchup=1`));
+      const snapshotPath = refresh ? path : `${path}?deferCatchup=1`;
+      let response;
+      try {
+        response = await request(snapshotPath);
+      } catch (error) {
+        if (!(error instanceof TypeError) && error.name !== "TimeoutError" &&
+            error.status !== 429 && !(error.status >= 500)) throw error;
+        message = "暫時讀不到角色狀態，稍後會自動重試。";
+        return;
+      }
+      if (!observing) return;
+      let view = checkedView(response);
       await track(view);
       while (observing) {
         if (displayedCharacter()?.name !== role.name) {
@@ -176,7 +196,7 @@
     }
   }
 
-  function inspect(force = false) {
+  function inspect(force = false, refresh = false) {
     if (!observing) return;
     const current = displayedCharacter();
     if (current?.name && current.name !== role.name) {
@@ -186,6 +206,7 @@
     if (!current || (!force && current.levels === lastSignal)) return;
     lastSignal = current.levels;
     pending = true;
+    pendingRefresh ||= refresh;
     void run();
   }
 
@@ -202,7 +223,8 @@
         observing = true;
         observer.observe(document.documentElement, {subtree:true, childList:true, characterData:true});
         document.addEventListener("visibilitychange", syncBackgroundStream);
-        fallback = setInterval(() => inspect(true), 60000);
+        // Unlike stream-triggered reads, refresh elapsed progress even when the game closes its stream.
+        fallback = setInterval(() => inspect(true, true), 3 * 60_000);
         syncBackgroundStream();
       }
     }
