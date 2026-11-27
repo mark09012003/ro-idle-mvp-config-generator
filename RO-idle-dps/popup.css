@@ -823,6 +823,25 @@ fieldset { border: 0; padding: 0; margin: 0; }
   font-size: 12px;
 }
 .monster-preview strong { font-size: 13px; }
+.monster-def-tags {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--gold);
+}
+.monster-def-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--gold-soft);
+  border: 1px solid var(--gold-border);
+  color: var(--gold);
+  font-weight: 700;
+}
 .monster-subpanel {
   margin-bottom: 10px;
   border: 1px solid var(--border);

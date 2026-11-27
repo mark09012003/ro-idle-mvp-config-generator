@@ -21,9 +21,49 @@ import { randInt } from "./src/game/core/rng";
 import { NEVER } from "./src/game/config/gameplay";
 import type { GameSnapshot } from "./src/game/view";
 
+const PURE_MOB_DEFENSE_SKILLS = new Set([
+  "NPC_STONESKIN", "HP_ASSUMPTIO", "CR_AUTOGUARD", "NPC_DEFENDER",
+  "MG_SAFETYWALL", "AL_PNEUMA", "NPC_KEEPING", "NPC_BARRIER",
+  "NPC_AGIUP", "AL_INCAGI", "SM_ENDURE",
+  "NPC_ATTRICHANGE", "NPC_CHANGEFIRE", "NPC_CHANGEWATER",
+  "NPC_CHANGEWIND", "NPC_CHANGEGROUND", "NPC_CHANGEHOLY", "NPC_CHANGETELEKINESIS",
+]);
+const REFLECT_MOB_DEFENSE_SKILLS = new Set([
+  "CR_REFLECTSHIELD", "NPC_MAGICMIRROR", "KN_AUTOCOUNTER",
+]);
+
+function summarizeMobDefense(mob: MonsterDef) {
+  const out: {skill: string; name: string; lv: number; opening: boolean}[] = [];
+  const seen = new Map<string, {skill: string; name: string; lv: number; opening: boolean}>();
+  for (const e of mob.skills ?? []) {
+    if (!PURE_MOB_DEFENSE_SKILLS.has(e.skill) && !REFLECT_MOB_DEFENSE_SKILLS.has(e.skill)) continue;
+    const isOpening = (e.state === "idle" || e.state === "chase" || e.state === "any" || e.cond === "onspawn") &&
+      (e.cond === "always" || e.cond === "onspawn") && e.rate >= 5000;
+    const prev = seen.get(e.skill);
+    if (prev) {
+      if (e.lv > prev.lv) prev.lv = e.lv;
+      if (isOpening) prev.opening = true;
+    } else {
+      const entry = {
+        skill: e.skill,
+        name: e.name || SKILLS.get(e.skill)?.name || e.skill,
+        lv: e.lv,
+        opening: isOpening,
+      };
+      seen.set(e.skill, entry);
+      out.push(entry);
+    }
+  }
+  return out;
+}
+
 export const targets = [...MONSTERS.values()].filter(monster => monster.hp > 0)
-  .map(({id, name, lv, hp, element, elementLv, race, size, def, mdef, boss}) =>
-    ({id, name, lv, hp, element, elementLv, race, size, def, mdef, boss: !!boss}));
+  .map(monster => ({
+    id: monster.id, name: monster.name, lv: monster.lv, hp: monster.hp,
+    element: monster.element, elementLv: monster.elementLv, race: monster.race,
+    size: monster.size, def: monster.def, mdef: monster.mdef, boss: !!monster.boss,
+    defenseSkills: summarizeMobDefense(monster),
+  }));
 
 const MONSTER_SKILL_NAMES = new Map<string, string>();
 for (const mob of MONSTERS.values()) {
@@ -115,7 +155,9 @@ const songIds = Object.keys(songStats).filter(id => SONGS[id]?.party && SKILLS.h
 const manualStatuses: Partial<Record<MobStatusId, number>> = {
   aeterna:1, provoke:10, quagmire:5, crucis:10, decagi:10, mindBreaker:5,
   freeze:1, stone:1, stun:1, sleep:1, silence:1, blind:1, poison:1, deadlyPoison:1, bleeding:1,
-  spiderweb:1, fogwall:1, agiup:1, autoguard:10, defender:5, assumptio:5, reflectShield:10, powerup:1,
+  spiderweb:1, fogwall:1,
+  armorChange:5, keeping:1, safetywall:10, pneuma:1, magicMirror:5, barrier:1,
+  agiup:1, incagi:10, autoguard:10, defender:5, assumptio:5, reflectShield:10, powerup:1,
 };
 const maximumBuffLevel = (id: string) => SKILLS.get(id)?.maxLv ?? 1;
 const previewBuffs = (snapshot: GameSnapshot) => snapshot.buffs ?? [];
@@ -153,7 +195,11 @@ export function scenarioCatalog(snapshot: GameSnapshot) {
       group: buffGroup({id, lv: maximumBuffLevel(id), until: NEVER} as ActiveBuff),
       ...(songIds.includes(id) && {stats:songStats[id], lessonName:id.startsWith("DC_") ? "練習舞蹈等級" : "操控樂器等級"}),
     })),
-    statuses: Object.entries(manualStatuses).map(([id, max]) => ({id, name:STATUS_NAMES[id as MobStatusId], max})),
+    statuses: Object.entries(manualStatuses).map(([id, max]) => ({
+      id,
+      name: id === "armorChange" ? "石膚（鋼筋鐵骨）" : STATUS_NAMES[id as MobStatusId],
+      max,
+    })),
   };
 }
 
@@ -314,7 +360,7 @@ function initialStatuses(effects: Effect[], time: number): MobStatuses {
   return status;
 }
 
-type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; unlimitedSp?: boolean; scenario?: Scenario};
+type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; unlimitedSp?: boolean; scenario?: Scenario};
 type HitRange = {min: number; max: number; count: number};
 type DamageLine = {normal?: HitRange; critical?: HitRange; name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
@@ -742,27 +788,115 @@ export function previewCharacter(snapshot: GameSnapshot, scenario?: Scenario, mo
   };
 }
 
-function replaceTarget(state: GameState, target: MonsterDef, options: Options): ActiveMonster {
+const MOB_INCAPACITATED = ["stun", "freeze", "stoneWait", "stone", "sleep", "silence", "rokisweil", "winkCharm"] as const;
+
+function applyOpeningMobDefense(
+  state: GameState,
+  monster: ActiveMonster,
+  target: MonsterDef,
+  allowReflect: boolean,
+  emit: (event: Record<string, unknown>) => void
+) {
+  const skills = target.skills ?? [];
+  const tried = new Set<string>();
+  for (let idx = 0; idx < skills.length; idx++) {
+    const e = skills[idx];
+    const isPure = PURE_MOB_DEFENSE_SKILLS.has(e.skill);
+    const isReflect = allowReflect && REFLECT_MOB_DEFENSE_SKILLS.has(e.skill);
+    if (!isPure && !isReflect) continue;
+    if (tried.has(e.skill)) continue;
+    const openingState = e.state === "idle" || e.state === "chase" || e.state === "any" || e.cond === "onspawn";
+    const openingCond = e.cond === "always" || e.cond === "onspawn";
+    if (!openingState || !openingCond) continue;
+    tried.add(e.skill);
+    if (randInt(state.rng.ai, 0, 9999) > e.rate) continue;
+    performMobSkill(state, monster, e, emit as never);
+    const nextReady = state.time + e.delayMs;
+    const readyMap = {...(monster.skillReadyAt ?? {})};
+    for (let j = 0; j < skills.length; j++) {
+      if (skills[j].skill === e.skill) readyMap[j] = Math.max(readyMap[j] ?? 0, nextReady);
+    }
+    monster.skillReadyAt = readyMap;
+  }
+}
+
+function tryCombatMobDefense(
+  state: GameState,
+  monster: ActiveMonster,
+  target: MonsterDef,
+  emit: (event: Record<string, unknown>) => void
+) {
+  if (monster.casting || state.activity.kind === "dead") return false;
+  if (MOB_INCAPACITATED.some(st => monster.status?.[st])) return false;
+  const skills = target.skills ?? [];
+  const hpPct = Math.floor((monster.hp * 100) / Math.max(1, target.hp));
+  for (let idx = 0; idx < skills.length; idx++) {
+    const e = skills[idx];
+    if (!PURE_MOB_DEFENSE_SKILLS.has(e.skill)) continue;
+    if ((monster.skillReadyAt?.[idx] ?? 0) > state.time) continue;
+    if (e.state !== "attack" && e.state !== "angry" && e.state !== "anytarget" && e.state !== "any") continue;
+    if (e.cond === "myhpltmaxrate") {
+      if (hpPct > (e.condValue ?? 100)) continue;
+    } else if (e.cond !== "always") {
+      continue;
+    }
+    if (randInt(state.rng.ai, 0, 9999) > e.rate) continue;
+    monster.skillReadyAt = {...(monster.skillReadyAt ?? {}), [idx]: state.time + e.delayMs};
+    if (e.castMs > 0) {
+      monster.casting = {idx, until: state.time + e.castMs};
+      emit({type: "mobSkillCast", uid: monster.uid, monsterId: monster.monsterId, skill: e.skill, lv: e.lv, castMs: e.castMs});
+    } else {
+      performMobSkill(state, monster, e, emit as never);
+    }
+    return true;
+  }
+  return false;
+}
+
+function replaceTarget(
+  state: GameState,
+  target: MonsterDef,
+  options: Options,
+  emit: (event: Record<string, unknown>) => void = () => {}
+): ActiveMonster {
   const counterattack = !!(options.counterattack || options.invincible);
+  const mobDefense = options.mobDefense !== false;
+  let skillReadyAt: Record<number, number> | undefined;
+  if (!counterattack) {
+    skillReadyAt = {};
+    for (let index = 0; index < (target.skills ?? []).length; index++) {
+      const sk = target.skills![index].skill;
+      if (!mobDefense || !PURE_MOB_DEFENSE_SKILLS.has(sk)) {
+        skillReadyAt[index] = NEVER;
+      }
+    }
+  }
   const monster: ActiveMonster = {
     uid: state.nextMonsterUid++, monsterId: target.id, hp: target.hp, distance: 1,
     status: initialStatuses(options.scenario?.statuses ?? [], state.time),
-    aggro: counterattack, arriveAt: state.time, engageAt: state.time,
+    aggro: counterattack || mobDefense, arriveAt: state.time, engageAt: state.time,
     nextAttackAt: counterattack ? state.time + randInt(state.rng.encounter, 100, 500) : NEVER,
-    ...(!counterattack && {skillReadyAt: Object.fromEntries((target.skills ?? []).map((_, index) => [index, NEVER]))}),
+    ...(skillReadyAt && {skillReadyAt}),
   };
   state.monsters = [monster];
   state.targetUid = monster.uid;
   state.activity = {kind:"attacking", targetUid: monster.uid};
   state.timers.nextAmbush = NEVER;
+  if (mobDefense) {
+    applyOpeningMobDefense(state, monster, target, counterattack, emit);
+  }
   return monster;
 }
 
-function prepareEncounter(state: GameState, options: Options) {
+function prepareEncounter(
+  state: GameState,
+  options: Options,
+  emit: (event: Record<string, unknown>) => void = () => {}
+) {
   const target = MONSTERS.get(options.monsterId);
   const before = state.equipment.ammo;
   if (target) {
-    const monster = replaceTarget(state, target, options);
+    const monster = replaceTarget(state, target, options, emit);
     if (options.mode === "auto") autoEquipFor(state, () => {}, monster);
   }
   if (before !== state.equipment.ammo && getAmmo(state.inventory, state.equipment)) return "rule";
@@ -801,6 +935,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   let total = 0, kills = 0, casts = 0, endingSp = 0;
   let summonCount = 0, summonKills = 0, summonDamage = 0;
   const counterattack = !!(options.counterattack || options.invincible);
+  const mobDefense = options.mobDefense !== false;
   const killTimes: number[] = [];
   const deathTimes: number[] = [];
   const timeline: {at: number; text: string; hp: number; kind: string}[] = [];
@@ -811,15 +946,29 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   for (let run = 0; run < trials; run++) {
     const state = setup(snapshot, options, 91237 + 7919 * run);
     if (options.invincible) setDamageImmunity(state);
-    prepareEncounter(state, options);
-    let current = state.monsters[0];
-    const pulses = songs.filter(song => song.heal > 0).map(song => ({...song, at:song.interval,
-      buff:state.buffs.find(buff => buff.id === song.id)}));
     function record(text: string, kind = "system") {
       if (run !== 0) return;
       timelineCount++;
       if (timeline.length < 1000) timeline.push({at:state.time, text, hp:state.character.hp, kind});
     }
+    function logMobDefenseEvent(ev: Record<string, unknown>) {
+      if (ev.type === "mobSkillCast") {
+        const mid = Number(ev.monsterId);
+        record(`${MONSTERS.get(mid)?.name ?? "怪物"} 開始詠唱 ${skillDisplayName(String(ev.skill), mid)}（${Number(ev.castMs) / 1000} 秒）`, "monster");
+      } else if (ev.type === "mobSkill") {
+        const mid = Number(ev.monsterId);
+        record(`${MONSTERS.get(mid)?.name ?? "怪物"} 使用 ${skillDisplayName(String(ev.skill), mid)}`, "monster");
+      } else if (ev.type === "statusStart") {
+        const mid = Number(ev.monsterId);
+        const st = String(ev.status);
+        record(`${MONSTERS.get(mid)?.name ?? "怪物"} 獲得 ${STATUS_NAMES[st as MobStatusId] ?? st}`, "monster");
+      }
+    }
+    record(`對戰開始 · ${monster.name}`);
+    prepareEncounter(state, options, logMobDefenseEvent);
+    let current = state.monsters[0];
+    const pulses = songs.filter(song => song.heal > 0).map(song => ({...song, at:song.interval,
+      buff:state.buffs.find(buff => buff.id === song.id)}));
     const summonHp = new Map<number, number>();
     if (counterattack) observeDamage(state, (id, damage) => {
       if (damage <= 0) return;
@@ -828,9 +977,10 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
       received.set(name, (received.get(name) ?? 0) + damage);
       record(`${name} · 受到 ${damage} 傷害`, "incoming");
     });
-    record(`對戰開始 · ${monster.name}`);
     let firstKill = false;
     let credited = 0;
+    const defenseTickMs = Math.max(500, monster.attackDelay);
+    let nextDefenseCheckAt = !counterattack && mobDefense ? state.time + defenseTickMs : NEVER;
     if (!panel) {
       const stats = derived(state);
       const target = effectiveMonster(monster, current.status);
@@ -846,13 +996,20 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     for (let steps = 0; steps < 15000; steps++) {
       const pulse = pulses.find(entry => entry.buff && state.buffs.includes(entry.buff) && entry.at < entry.buff.until);
       const engineTime = nextEventTime(state);
-      const next = Math.min(engineTime, pulse?.at ?? NEVER);
+      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt);
       if (next > duration || state.activity.kind === "stopped" || state.activity.kind === "dead") break;
       moveTime(state, Math.max(state.time, next));
-      if (pulse && pulse.at < engineTime) {
+      if (pulse && pulse.at <= next && pulse.at < engineTime) {
         const healed = receiveHealing(state, pulse.heal);
         if (healed > 0) record(`${pulse.name} · HP +${healed}`);
         pulse.at += pulse.interval;
+        continue;
+      }
+      if (!counterattack && mobDefense && nextDefenseCheckAt <= next && nextDefenseCheckAt < engineTime) {
+        nextDefenseCheckAt = state.time + defenseTickMs;
+        if (current.hp > 0 && state.monsters.includes(current)) {
+          tryCombatMobDefense(state, current, monster, logMobDefenseEvent);
+        }
         continue;
       }
       if (options.unlimitedSp) state.character.sp = derived(state).maxSp;
@@ -953,9 +1110,10 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           current.hp = monster.hp;
           break;
         }
-        current = replaceTarget(state, monster, options);
-        summonHp.clear();
         record(`下一隻 ${monster.name} 進入戰鬥`, "monster");
+        current = replaceTarget(state, monster, options, logMobDefenseEvent);
+        summonHp.clear();
+        nextDefenseCheckAt = !counterattack && mobDefense ? state.time + defenseTickMs : NEVER;
         credited = 0;
       } else if (!state.monsters.includes(current) || current.monsterId !== monster.id) break;
       if (steps === 14999) throw new Error("模擬事件超過上限，請改用較短的試算時間。");
@@ -976,7 +1134,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   } : null;
   return {monster: {name:monster.name, lv:monster.lv, hp:monster.hp, element:monster.element,
     elementLv:monster.elementLv, race:monster.race, size:monster.size}, panel,
-    defense, songs, timeline, timelineCount, invincible:!!options.invincible, dps: total / trials / options.seconds,
+    defense, songs, timeline, timelineCount, invincible:!!options.invincible, mobDefense, dps: total / trials / options.seconds,
     summons: {count:summonCount, kills:summonKills, dps:summonDamage / trials / options.seconds,
       totalDps:(total + summonDamage) / trials / options.seconds},
     averageKill: killTimes.length ? killTimes.reduce((sum, t) => sum + t, 0) / killTimes.length : null,

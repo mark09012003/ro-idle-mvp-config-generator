@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-11";
+const ASSET_VER = "20261127-12";
 const MAX_REBIRTHS = 11;
 const EXTRA_STAT_PER_REBIRTH = 20;
 const host = "https://ro-idle.app";
@@ -2194,6 +2194,20 @@ function updateMonsterPreview() {
   detail.className = "muted";
   detail.textContent = `HP ${format(mob.hp)} · ${element[mob.element] ?? mob.element} ${mob.elementLv} · ${race[mob.race] ?? mob.race} · ${size[mob.size] ?? mob.size} · DEF ${mob.def}／MDEF ${mob.mdef}`;
   box.append(title, detail);
+  if (mob.defenseSkills?.length) {
+    const defRow = document.createElement("div");
+    defRow.className = "monster-def-tags";
+    const lbl = document.createElement("span");
+    lbl.textContent = "防禦／自體技：";
+    defRow.append(lbl);
+    for (const sk of mob.defenseSkills) {
+      const pill = document.createElement("span");
+      pill.className = "monster-def-pill";
+      pill.textContent = `${sk.name} Lv.${sk.lv}${sk.opening ? "（開場即放）" : ""}`;
+      defRow.append(pill);
+    }
+    box.append(defRow);
+  }
   void loadMobSkills(mob.id);
 }
 
@@ -2605,7 +2619,7 @@ function show(result) {
   $("kpi-combat").textContent = `${format(panel.hit)}% ／ ${format(panel.crit)}% ／ ${format(panel.aspd)}`;
   $("summon-summary").hidden = result.summons.count === 0;
   $("summon-summary").textContent = `召喚物 DPS ${format(result.summons.dps)} · 含召喚物 DPS ${format(result.summons.totalDps)} · ${result.trials} 次合計召喚 ${format(result.summons.count)} 隻、擊倒 ${format(result.summons.kills)} 隻`;
-  $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · ${result.unlimitedSp ? "無限 SP" : `期末平均 SP ${format(result.endingSp)}`}${result.invincible ? " · 角色不死" : ""}`;
+  $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · ${result.unlimitedSp ? "無限 SP" : `期末平均 SP ${format(result.endingSp)}`}${result.mobDefense ? " · 含怪物防禦技" : " · 關閉怪物防禦技"}${result.invincible ? " · 角色不死" : ""}`;
   $("combat-stats").textContent = `起始普攻：${element[panel.element] ?? panel.element}屬性 ×${format(panel.modifier / 100)} · 攻擊間隔 ${seconds(panel.interval)}`;
 
   const share = lines.reduce((sum, entry) => sum + entry.share, 0);
@@ -3005,6 +3019,7 @@ $("calculator").onsubmit = async event => {
     skill: $("skill").value,
     level: Number($("skill-level").value),
     seconds: Number($("seconds").value),
+    mobDefense: $("mob-defense").checked,
     counterattack: $("counterattack").checked,
     invincible: $("invincible").checked,
     unlimitedSp: $("unlimited-sp").checked,
