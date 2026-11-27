@@ -1,4 +1,4 @@
-import {attackSkills, builderCatalog, equipmentCatalog, monsterSkills, previewCharacter, scenarioCatalog, simulate, targets, testMonsterSkill} from "../RO-idle-dps/engine.js?v=20261128-4";
+import {attackSkills, builderCatalog, equipmentCatalog, monsterSkills, previewCharacter, scenarioCatalog, simulate, targets, testMonsterSkill} from "../RO-idle-dps/engine.js?v=20261128-5";
 
 self.onmessage = ({data: {id, action, snapshot, options}}) => {
   try {

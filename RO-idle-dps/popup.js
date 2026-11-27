@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261128-4";
+const ASSET_VER = "20261128-5";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -1261,6 +1261,7 @@ $("calculator").addEventListener("invalid", event => {
   filterEffects(type);
 }, true);
 
+let simulationSeed;
 $("calculator").onsubmit = async event => {
   event.preventDefault();
   if (!snapshot) return;
@@ -1270,6 +1271,7 @@ $("calculator").onsubmit = async event => {
   }
   const options = {
     monsterId: Number($("monster").value),
+    seed: simulationSeed,
     mode: $("mode").value,
     skill: $("skill").value,
     level: Number($("skill-level").value),
@@ -1295,7 +1297,14 @@ $("calculator").onsubmit = async event => {
   $("result").hidden = true;
   $("status").textContent = "正在本機模擬 16 場戰鬥…";
   try {
-    show(await engine("simulate", options));
+    if (event.submitter?.id === "reroll") {
+      const nextSeed = crypto.getRandomValues(new Uint32Array(1))[0];
+      options.seed = nextSeed === (simulationSeed ?? 91237) ? (nextSeed + 1) >>> 0 : nextSeed;
+    }
+    const result = await engine("simulate", options);
+    simulationSeed = result.seed;
+    show(result);
+    $("summary").append(` · 亂數種子 ${result.seed}`);
     $("status").textContent = "";
   } catch (error) {
     $("status").textContent = error.message;

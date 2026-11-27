@@ -424,7 +424,7 @@ function initialStatuses(effects: Effect[], time: number): MobStatuses {
   return status;
 }
 
-type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; soulChange?: ({interval: number; spBelow?: never} | {spBelow: number; interval?: never}) & {casterDex: number; casterMaxHp: number; casterMaxSp: number; casterMinSp: number; healAmount?: number; healInterval?: number}; scenario?: Scenario};
+type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; seed?: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; soulChange?: ({interval: number; spBelow?: never} | {spBelow: number; interval?: never}) & {casterDex: number; casterMaxHp: number; casterMaxSp: number; casterMinSp: number; healAmount?: number; healInterval?: number}; scenario?: Scenario};
 type HitRange = {min: number; max: number; count: number};
 type AttackDetails = {doubleAttack?: true; dualBeforeDefense?: {right: number; left: number}};
 type BreakerDetails = {breaker?: {physical: number; intelligence: number; missed: boolean}};
@@ -985,6 +985,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   registerItemDefs(snapshot.heldItems ?? []);
   const duration = options.seconds * 1000;
   const trials = 16;
+  const seed = (options.seed ?? 91237) >>> 0;
   const songs = (options.scenario?.buffs ?? []).filter(effect => songIds.includes(effect.id)).map(effect => {
     effectTime(effect, maximumBuffLevel(effect.id));
     return {id:effect.id, name:buffDisplayName(effect.id), ...songParameters(effect)};
@@ -1034,7 +1035,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   const casterHealInterval = Math.max(1, soulChange?.healInterval || 5) * 1000;
   let panel;
   for (let run = 0; run < trials; run++) {
-    const state = setup(snapshot, options, 91237 + 7919 * run);
+    const state = setup(snapshot, options, (seed + 7919 * run) >>> 0);
     if (options.invincible) setDamageImmunity(state);
     function record(text: string, kind = "system") {
       if (run !== 0) return;
@@ -1457,7 +1458,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     defense, songs, timeline, timelineCount, normalAttacks, invincible:!!options.invincible, mobDefense, dps: total / trials / options.seconds,
     summons: {count:summonCount, kills:summonKills, dps:summonDamage / trials / options.seconds,
       totalDps:(total + summonDamage) / trials / options.seconds},
-    averageKill: killTimes.length ? killTimes.reduce((sum, t) => sum + t, 0) / killTimes.length : null,
+    seed, averageKill: killTimes.length ? killTimes.reduce((sum, t) => sum + t, 0) / killTimes.length : null,
     killedTrials: killTimes.length, kills, casts, endingSp:endingSp / trials, trials, seconds:options.seconds,
     lines: [...lines.values()].sort((a,b) => b.damage - a.damage)
       .map(entry => ({...entry, share:total ? entry.damage / total : 0})),
