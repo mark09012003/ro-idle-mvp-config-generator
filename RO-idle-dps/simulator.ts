@@ -130,7 +130,7 @@ export function builderCatalog() {
 export function attackSkills(snapshot: GameSnapshot) {
   return Object.entries(snapshot.character.skills ?? {}).flatMap(([id, lv]) => {
     const skill = SKILLS.get(id);
-    return skill && lv > 0 && canAttackWithSkill(id) ? [{id, name: skill.name, lv}] : [];
+    return skill && lv > 0 && canAttackWithSkill(id) ? [{id, name: skill.name, lv, descs: skill.descs ?? []}] : [];
   });
 }
 
@@ -427,6 +427,7 @@ function initialStatuses(effects: Effect[], time: number): MobStatuses {
 type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; soulChange?: ({interval: number; spBelow?: never} | {spBelow: number; interval?: never}) & {casterDex: number; casterMaxHp: number; casterMaxSp: number; casterMinSp: number; healAmount?: number; healInterval?: number}; scenario?: Scenario};
 type HitRange = {min: number; max: number; count: number};
 type AttackDetails = {doubleAttack?: true; dualBeforeDefense?: {right: number; left: number}};
+type BreakerDetails = {breaker?: {physical: number; intelligence: number; missed: boolean}};
 type DamageLine = {normal?: HitRange; critical?: HitRange; name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
 function applyEquipOverrides(state: GameState, snapshot: GameSnapshot, overrides?: EquipOverrides): Set<EditableSlot> {
@@ -1398,7 +1399,9 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
             const name = attack?.doubleAttack ? "二刀連擊" : entry.name;
             const hands = attack?.dualBeforeDefense;
             const split = hands ? ` · 右手 ${hands.right}＋左手 ${hands.left}${event.damage !== hands.right + hands.left ? "（防禦技能結算前）" : ""}` : "";
-            record(`${name} · ${critical ? "爆擊 " : ""}造成 ${event.damage} 傷害${split}${effective}`, "player");
+            const breaker = event.type === "skillHit" ? (event as typeof event & BreakerDetails).breaker : undefined;
+            const breakerSplit = breaker ? ` · 物理 ${breaker.physical}${breaker.missed ? "（未命中）" : ""}＋INT ${breaker.intelligence}` : "";
+            record(`${name} · ${critical ? "爆擊 " : ""}造成 ${event.damage} 傷害${split}${breakerSplit}${effective}`, "player");
           } else {
             const prior = summonHp.get(event.uid);
             if (prior === undefined) return;

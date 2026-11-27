@@ -91,4 +91,12 @@ replace_once("""      type: 'skillHit', skill: id, lv, uid: m.uid, monsterId: m.
       damage,""", """      type: 'skillHit', skill: id, lv, uid: m.uid, monsterId: m.monsterId, result: id === 'ASC_BREAKER' && damage > 0 ? 'hit' : guarded || prot.blocked ? 'miss' : out.kind,
       ...(out.kind === 'hit' && 'crit' in out && out.crit && !guarded && !prot.blocked && damage > 0 ? { crit: true } : {}),
       damage,""")
+replace_once("    let breakerMisc = 0;", """    const breakerPhysicalMiss = id === 'ASC_BREAKER' && out.kind !== 'hit';
+    let breakerMisc = 0;""")
+replace_once("""    const damage = prot.damage + (id === 'ASC_BREAKER' ? mobDefense(s, m, emit, breakerMisc, 'misc').damage : 0);""",
+    """    const breakerInt = id === 'ASC_BREAKER' ? mobDefense(s, m, emit, breakerMisc, 'misc').damage : 0;
+    const damage = prot.damage + breakerInt;""")
+replace_once("""      ...(out.kind === 'hit' && 'crit' in out && out.crit && !guarded && !prot.blocked && damage > 0 ? { crit: true } : {}),""",
+    """      ...(out.kind === 'hit' && 'crit' in out && out.crit && !guarded && !prot.blocked && damage > 0 ? { crit: true } : {}),
+      ...(id === 'ASC_BREAKER' ? { breaker: { physical: prot.damage, intelligence: breakerInt, missed: breakerPhysicalMiss } } : {}),""")
 path.write_text(source)

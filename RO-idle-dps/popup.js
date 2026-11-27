@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261128-3";
+const ASSET_VER = "20261128-4";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -742,6 +742,12 @@ const PREREQ_LABEL = {
 
 function updateSkillPrereqHint() {
   const box = $("skill-prereq-hint");
+  const description = $("skill-description");
+  const skill = $("mode").value === "skill" ? skills.find(entry => entry.id === $("skill").value) : undefined;
+  const level = Number($("skill-level").value) || 1;
+  const text = skill?.descs?.[level - 1] ?? skill?.descs?.[0] ?? "";
+  description.textContent = text;
+  description.hidden = !text;
   if (!box || !snapshot || $("mode").value !== "skill") {
     if (box) box.hidden = true;
     return;
@@ -1206,6 +1212,7 @@ $("ammo-choice").onchange = scheduleStats;
 $("search").oninput = fillMonsters;
 $("monster").onchange = () => { updateMonsterPreview(); scheduleStats(); };
 $("skill").onchange = fillLevels;
+$("skill-level").addEventListener("change", updateSkillPrereqHint);
 $("mode").onchange = () => {
   $("skill-fields").hidden = $("mode").value !== "skill";
   updateSkillPrereqHint();
