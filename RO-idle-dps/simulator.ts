@@ -393,7 +393,7 @@ function initialStatuses(effects: Effect[], time: number): MobStatuses {
   return status;
 }
 
-type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; soulChange?: ({interval: number; spBelow?: never} | {spBelow: number; interval?: never}) & {casterDex: number; casterMaxHp: number; casterMaxSp: number; casterMinSp: number}; scenario?: Scenario};
+type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; soulChange?: ({interval: number; spBelow?: never} | {spBelow: number; interval?: never}) & {casterDex: number; casterMaxHp: number; casterMaxSp: number; casterMinSp: number; healAmount?: number; healInterval?: number}; scenario?: Scenario};
 type HitRange = {min: number; max: number; count: number};
 type DamageLine = {normal?: HitRange; critical?: HitRange; name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
@@ -991,6 +991,8 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
       soulChange.casterMinSp < soulChangeCost || soulChange.casterMinSp > soulChange.casterMaxSp)) {
     throw new Error("智者的互換 SP 門檻須介於技能消耗與最大 SP 之間。");
   }
+  const casterHealAmount = soulChange?.healAmount ?? 0;
+  const casterHealInterval = Math.max(1, soulChange?.healInterval || 5) * 1000;
   let panel;
   for (let run = 0; run < trials; run++) {
     const state = setup(snapshot, options, 91237 + 7919 * run);
@@ -1035,6 +1037,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     const casterMaxSp = soulChange?.casterMaxSp ?? 0;
     const conversionHp = Math.max(1, Math.floor(casterMaxHp / 10));
     let casterHp = casterMaxHp;
+    let nextCasterHealAt = casterHealAmount > 0 ? state.time + casterHealInterval : NEVER;
     let nextCasterHpRegenAt = soulChange ? state.time + HP_REGEN_INTERVAL_MS : NEVER;
     let nextCasterSpRegenAt = soulChange ? state.time + SP_REGEN_INTERVAL_MS : NEVER;
     let casterSp = casterMaxSp;
@@ -1160,9 +1163,18 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           casterActionAt = Math.max(state.time, casterReadyAt, nextSoulChangeAttemptAt);
         }
       }
-      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt, nextGospelAt, nextSoulChangeAt, casterActionAt, nextCasterHpRegenAt, nextCasterSpRegenAt);
+      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt, nextGospelAt, nextSoulChangeAt, casterActionAt, nextCasterHpRegenAt, nextCasterSpRegenAt, nextCasterHealAt);
       if (next > duration || state.activity.kind === "stopped" || state.activity.kind === "dead") break;
       moveTime(state, Math.max(state.time, next));
+      if (nextCasterHealAt === next) {
+        nextCasterHealAt += casterHealInterval;
+        const healed = Math.min(casterMaxHp - casterHp, casterHealAmount);
+        if (healed > 0) {
+          casterHp += healed;
+          record(`隊友替智者補血 · HP +${healed}（智者 HP ${casterHp}／${casterMaxHp}）`, "player");
+        }
+        continue;
+      }
       if (nextCasterHpRegenAt === next || nextCasterSpRegenAt === next) {
         if (nextCasterHpRegenAt === next) {
           casterHp = Math.min(casterMaxHp, casterHp + 1 + Math.floor(casterMaxHp / 200));

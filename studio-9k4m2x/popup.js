@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-18";
+const ASSET_VER = "20261127-19";
 const MAX_REBIRTHS = 11;
 const EXTRA_STAT_PER_REBIRTH = 20;
 const host = "https://ro-idle.app";
@@ -3002,14 +3002,16 @@ function syncSoulChangeFields() {
     input.parentElement.hidden = !show;
     input.disabled = disabled || !show;
   }
-  for (const id of ["soul-change-dex", "soul-change-hp", "soul-change-sp", "soul-change-min-sp"]) {
+  for (const id of ["soul-change-dex", "soul-change-hp", "soul-change-sp", "soul-change-min-sp", "soul-change-heal-amount"]) {
     $(id).disabled = disabled;
   }
+  $("soul-change-heal-interval").disabled = disabled || Number($("soul-change-heal-amount").value) === 0;
   $("soul-change-min-sp").max = $("soul-change-sp").value;
 }
 $("soul-change").addEventListener("change", syncSoulChangeFields);
 $("soul-change-trigger").addEventListener("change", syncSoulChangeFields);
 $("soul-change-sp").addEventListener("input", syncSoulChangeFields);
+$("soul-change-heal-amount").addEventListener("input", syncSoulChangeFields);
 syncSoulChangeFields();
 
 $("counterattack").onchange = () => { if (!$("counterattack").checked) $("invincible").checked = false; };
@@ -3055,6 +3057,8 @@ $("calculator").onsubmit = async event => {
       casterMaxHp: Number($("soul-change-hp").value),
       casterMaxSp: Number($("soul-change-sp").value),
       casterMinSp: Number($("soul-change-min-sp").value),
+      healAmount: Number($("soul-change-heal-amount").value),
+      healInterval: Number($("soul-change-heal-interval").value),
     } : undefined,
     scenario: readScenario(),
   };
