@@ -1,10 +1,10 @@
-"""Add read-only HP-loss observations to the pinned upstream combat engine."""
+"""Add optional incoming damage immunity and HP-loss observations to the pinned engine."""
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
 source = path.read_text()
-declaration = "\nconst damageObservers = new WeakMap<GameState, (source: string, lostHp: number) => void>();\n\nexport function observeDamage(s: GameState, onDamage: (source: string, lostHp: number) => void) {\n  damageObservers.set(s, onDamage);\n}\n"
+declaration = "\nconst damageImmune = new WeakSet<GameState>();\n\nexport function setDamageImmunity(s: GameState) { damageImmune.add(s); }\n\nconst damageObservers = new WeakMap<GameState, (source: string, lostHp: number) => void>();\n\nexport function observeDamage(s: GameState, onDamage: (source: string, lostHp: number) => void) {\n  damageObservers.set(s, onDamage);\n}\n"
 anchor = "function damagePlayer(s: GameState, emit: Emit, damage:"
 assert source.count(anchor) == 1
 source = source.replace(anchor, declaration + "\n" + anchor)
@@ -15,11 +15,16 @@ def replace_once(old, new):
         raise ValueError(f"Upstream damage path changed: {old}")
     source = source.replace(old, new)
 
-replace_once("  if (!devoted) c.hp = Math.max(hpFloor(s), c.hp - damage);", """  if (!devoted) {
+replace_once("  if (!devoted) c.hp = Math.max(hpFloor(s), c.hp - damage);", """  if (damageImmune.has(s)) damage = 0;
+  if (!devoted) {
     const before = c.hp;
     c.hp = Math.max(hpFloor(s), c.hp - damage);
     damageObservers.get(s)?.('怪物普攻', before - c.hp);
   }""")
+
+replace_once("""  if (basilicaInside(s) && !getMonster(monsterId).boss) return false;
+  if (damage <= 0) return false;""", """  if (basilicaInside(s) && !getMonster(monsterId).boss) return false;
+  if (damage <= 0 || damageImmune.has(s)) return false;""")
 
 replace_once("""  c.hp = Math.max(hpFloor(s), c.hp - damage);
   noteBigHit(s, damage);""", """  const before = c.hp;
@@ -33,14 +38,14 @@ for label, expression in (
     ("石化", "stoneDamage(d.maxHp, c.hp)"),
 ):
     replace_once(f"c.hp -= {expression};", f"""{{
-      const damage = {expression};
+      const damage = damageImmune.has(s) ? 0 : {expression};
       c.hp -= damage;
       damageObservers.get(s)?.('{label}', damage);
     }}""")
 
 replace_once("""    c.hp = Math.max(hpFloor(s), c.hp - dmg);
     emit({ type: 'ailmentDamage', ailment: 'bleeding'""", """    const before = c.hp;
-    c.hp = Math.max(hpFloor(s), c.hp - dmg);
+    if (!damageImmune.has(s)) c.hp = Math.max(hpFloor(s), c.hp - dmg);
     damageObservers.get(s)?.('出血', before - c.hp);
     emit({ type: 'ailmentDamage', ailment: 'bleeding'""")
 replace_once("function equipBagAmmo(", "export function equipBagAmmo(")

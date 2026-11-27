@@ -57,6 +57,7 @@
       </select>
       <p class="hint">可手動選箭測試。背包沒有該箭種時，會使用 1,000 支模擬庫存。</p>
       <label class="check"><input id="counterattack" type="checkbox"> 模擬怪物反擊並計算承傷</label>
+      <label class="check"><input id="invincible" type="checkbox"> 角色免傷，怪物照常施技</label>
       <label class="check"><input id="unlimited-sp" type="checkbox"> 無限 SP</label>
       <details id="scenario">
         <summary>角色 Buff 與怪物狀態</summary>
@@ -88,6 +89,7 @@
       <div><dt>單隻首殺時間</dt><dd id="ttk"></dd></div>
     </dl>
     <p id="summary"></p>
+    <p id="summon-summary" hidden></p>
     <p id="combat-stats"></p>
     <div class="table-scroll">
       <table>
@@ -114,7 +116,7 @@
     </details>
     <details>
       <summary>試算條件</summary>
-      <p>以角色快照的 HP、SP、裝備、背包及看得到的 Buff 開始。目標倒下後立刻換上同一隻滿血怪，計入有效傷害。勾選反擊時，雙方在可交戰距離開始。怪物可普攻、施技及打斷詠唱，角色倒下後結束該次模擬。找怪移動、掉落與隊友攻擊不計。手動選入的現有 Buff 會按快照剩餘時間倒數。角色戰鬥內部狀態以新遭遇起算。</p>
+      <p>以角色快照的 HP、SP、裝備、背包及看得到的 Buff 開始。目標倒下後立刻換上同一隻滿血怪，計入有效傷害。勾選反擊時，雙方在可交戰距離開始。怪物可普攻、施技及打斷詠唱，角色倒下後結束該次模擬。免傷時，怪物仍會施技和召喚，無法扣除角色 HP。範圍攻擊依技能規則命中在範圍內的召喚物。找怪移動、掉落與隊友攻擊不計。手動選入的現有 Buff 會按快照剩餘時間倒數。角色戰鬥內部狀態以新遭遇起算。</p>
     </details>
   </section>
 </body>
