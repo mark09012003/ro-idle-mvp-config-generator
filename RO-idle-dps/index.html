@@ -12,8 +12,8 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="popup.css?v=20261127-5">
-  <script type="module" src="popup.js?v=20261127-5"></script>
+  <link rel="stylesheet" href="popup.css?v=20261127-6">
+  <script type="module" src="popup.js?v=20261127-6"></script>
 </head>
 <body>
   <div class="shell">
@@ -156,6 +156,10 @@
                   <button id="rebirth-1" class="seg-btn" type="button" data-rebirth="1">1 轉（進階）</button>
                   <input id="build-rebirths" class="rebirth-num" type="number" min="0" max="99" value="1" aria-label="轉生次數">
                 </div>
+                <div id="rebirth-bonus-wrap" class="rebirth-bonus-row" hidden>
+                  <label for="build-rebirth-bonus">2 轉起每多 1 轉額外素質點</label>
+                  <input id="build-rebirth-bonus" type="number" min="0" max="500" value="52">
+                </div>
                 <p id="rebirth-hint" class="hint"></p>
               </div>
             </div>
@@ -200,7 +204,7 @@
           <div class="panel">
             <div class="panel-head">
               <div>
-                <h2>六圍屬性配點</h2>
+                <h2>六圍屬性配點與雷達圖</h2>
                 <p id="stat-points-summary" class="points-pill">剩餘素質點數：—</p>
               </div>
               <div class="panel-head-actions">
@@ -208,7 +212,16 @@
                 <button id="build-stats-reset" class="btn btn-outline btn-sm" type="button">全部重置</button>
               </div>
             </div>
-            <div id="stat-allocator" class="stat-allocator"></div>
+            <div class="stats-builder-layout">
+              <div class="radar-card">
+                <svg id="stat-radar" class="stat-radar" viewBox="0 0 320 296" role="img" aria-label="六圍屬性雷達圖"></svg>
+                <div class="radar-legend">
+                  <span><i class="legend-swatch swatch-base"></i>內圈：純配點</span>
+                  <span><i class="legend-swatch swatch-total"></i>外圈：含加成總值</span>
+                </div>
+              </div>
+              <div id="stat-allocator" class="stat-allocator"></div>
+            </div>
           </div>
         </section>
 
@@ -221,6 +234,10 @@
                 <p id="skill-points-summary" class="points-pill">已配技能點：—</p>
               </div>
               <div class="panel-head-actions">
+                <div class="view-switch" role="group" aria-label="技能檢視模式">
+                  <button id="skill-view-tree" class="pill is-active" type="button" data-skill-view="tree">技能樹圖</button>
+                  <button id="skill-view-list" class="pill" type="button" data-skill-view="list">清單模式</button>
+                </div>
                 <label class="check inline-check"><input id="build-free-skills" type="checkbox"> 不限技能點</label>
                 <button id="skills-learn-quests" class="btn btn-outline btn-sm" type="button">全學任務技能</button>
                 <button id="skills-reset" class="btn btn-outline btn-sm" type="button">重置技能</button>
@@ -234,8 +251,29 @@
                 <button class="pill" type="button" data-skill-filter="learned">已學習</button>
               </div>
             </div>
-            <p class="hint">點擊尚未滿足前置的技能「＋」時會自動補足前置技能等級；已學的主動攻擊技能可勾選「加入掛機施放」或直接到「DPS 試算」指定施放。</p>
-            <div id="skill-tree-list" class="skill-tree-list"></div>
+            <p class="hint">技能樹圖中「點擊技能／＋」會自動補足前置技能等級（綠色實線箭頭＝前置已達成，虛線箭頭＝尚未達成）；右鍵或「−」可降級。</p>
+
+            <!-- Visual RO Skill Tree Graph View -->
+            <div id="skill-tree-graph-wrap" class="skill-graph-wrap">
+              <div id="skill-inspector" class="skill-inspector" hidden></div>
+              <div class="skill-graph-section" id="skill-graph-connected-sec">
+                <div class="skill-section-title">前置連動技能樹</div>
+                <div class="skill-graph-scroll">
+                  <div id="skill-graph-canvas" class="skill-graph-canvas"></div>
+                </div>
+              </div>
+              <div class="skill-graph-section" id="skill-graph-standalone-sec" hidden>
+                <div class="skill-section-title">無前置獨立技能</div>
+                <div id="skill-graph-standalone" class="skill-node-grid"></div>
+              </div>
+              <div class="skill-graph-section" id="skill-graph-quests-sec" hidden>
+                <div class="skill-section-title">任務技能（免技能點）</div>
+                <div id="skill-graph-quests" class="skill-node-grid"></div>
+              </div>
+            </div>
+
+            <!-- List View -->
+            <div id="skill-tree-list" class="skill-tree-list" hidden></div>
           </div>
         </section>
 

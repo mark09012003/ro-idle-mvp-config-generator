@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-5";
+const ASSET_VER = "20261127-6";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
@@ -56,8 +56,11 @@ let activeSavedKey = "";
 let activeTab = "build";
 let currentIsCustom = true;
 let currentRebirths = 1;
+let currentRebirthBonus = 52;
 let currentFirstJobLv = 50;
 let skillFilterMode = "all";
+let skillViewMode = "tree";
+let selectedSkillId = null;
 let buffCategoryFilter = "all";
 let lastPreview = null;
 let useDirectEngine = false;
@@ -174,8 +177,10 @@ function statStepCost(currentVal) {
   return Math.floor((currentVal - 1) / 10) + 2;
 }
 
-function totalStatPointsFor(baseLv, rebirths) {
-  let pts = rebirths >= 1 ? 100 : 48;
+function totalStatPointsFor(baseLv, rebirths, extraPerRebirth = currentRebirthBonus) {
+  const rb = Math.max(0, Math.trunc(rebirths || 0));
+  const extra = Math.max(0, Math.trunc(extraPerRebirth ?? 52));
+  let pts = rb === 0 ? 48 : 100 + (rb - 1) * extra;
   const lv = Math.max(1, Math.min(99, Math.trunc(baseLv)));
   for (let i = 1; i < lv; i++) pts += Math.floor(i / 5) + 3;
   return pts;
@@ -298,7 +303,7 @@ function persistSavedList() {
   }
 }
 
-function upsertSavedCharacter(snap, {isCustom = false, rebirths, firstJobLv, overrides, preserveKey} = {}) {
+function upsertSavedCharacter(snap, {isCustom = false, rebirths, rebirthBonus, firstJobLv, overrides, preserveKey} = {}) {
   const key = preserveKey || charStorageKey(snap, isCustom);
   const jobDef = jobMap.get(snap.character.job);
   const inferredRebirths = rebirths ?? (jobDef?.upper ? 1 : 0);
@@ -310,6 +315,7 @@ function upsertSavedCharacter(snap, {isCustom = false, rebirths, firstJobLv, ove
     job: snap.character.job ?? "",
     jobName: jobDef?.name ?? snap.character.job ?? "",
     rebirths: inferredRebirths,
+    rebirthBonus: rebirthBonus ?? currentRebirthBonus,
     firstJobLv: firstJobLv ?? 50,
     isCustom: Boolean(isCustom),
     savedAt: Date.now(),
@@ -516,14 +522,22 @@ function renderBuildTab() {
   const c = snapshot.character;
   const jobDef = jobMap.get(c.job);
   $("build-name").value = c.name;
-  $("build-rebirths").value = String(currentRebirths);
+  if (document.activeElement !== $("build-rebirths")) {
+    $("build-rebirths").value = String(currentRebirths);
+  }
   $("rebirth-0").classList.toggle("is-active", currentRebirths === 0);
   $("rebirth-1").classList.toggle("is-active", currentRebirths >= 1);
+  $("rebirth-bonus-wrap").hidden = currentRebirths < 2;
+  if (document.activeElement !== $("build-rebirth-bonus")) {
+    $("build-rebirth-bonus").value = String(currentRebirthBonus);
+  }
+  const startPts = currentRebirths === 0 ? 48 : 100 + (currentRebirths - 1) * currentRebirthBonus;
+  const totalLvPts = totalStatPointsFor(c.baseLv, currentRebirths, currentRebirthBonus);
   $("rebirth-hint").textContent = currentRebirths === 0
-    ? "0 轉一般職業：Lv.1 起始 48 素質點、基礎 HP／SP 1.0×"
+    ? `0 轉一般職業：Lv.1 起始 48 點（目前 Lv.${c.baseLv} 共 ${format(totalLvPts)} 點）、基礎 HP／SP 1.0×`
     : currentRebirths === 1
-      ? "1 轉進階職業：Lv.1 起始 100 素質點、基礎 HP／SP ×1.25、Job 上限 70"
-      : `已填 ${currentRebirths} 轉（RO 放置仙境原版以 1 轉進階職業計算：起始 100 點、HP／SP ×1.25；若需額外點數可勾選下方「自由配點」）`;
+      ? `1 轉進階職業：Lv.1 起始 100 點（+52，目前 Lv.${c.baseLv} 共 ${format(totalLvPts)} 點）、基礎 HP／SP ×1.25、Job 上限 70`
+      : `${currentRebirths} 轉：Lv.1 起始 ${format(startPts)} 點（100 + ${currentRebirths - 1}×${currentRebirthBonus}，目前 Lv.${c.baseLv} 共 ${format(totalLvPts)} 點）、基礎 HP／SP ×1.25`;
 
   populateJobSelect(currentRebirths, c.job);
   const maxJL = jobDef?.maxJobLv ?? 70;
@@ -550,11 +564,72 @@ function renderBuildTab() {
   updateHeaderRole();
 }
 
+function renderStatRadar() {
+  const svg = $("stat-radar");
+  if (!svg || !snapshot) return;
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs = {}, text) => {
+    const node = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  const c = snapshot.character;
+  const panelTotals = lastPreview?.current ?? lastPreview?.base ?? null;
+  const bases = STAT_KEYS.map(k => Math.max(1, Math.min(99, Math.trunc(c.stats[k] ?? 1))));
+  const totals = STAT_KEYS.map((k, i) => Math.max(1, panelTotals?.[k.toUpperCase()] ?? bases[i]));
+  const maxVal = Math.max(100, Math.ceil(Math.max(...totals, ...bases, 100) / 20) * 20);
+
+  const cx = 160, cy = 148, R = 92;
+  const point = (idx, ratio) => {
+    const angle = (-90 + idx * 60) * Math.PI / 180;
+    return [cx + Math.cos(angle) * R * ratio, cy + Math.sin(angle) * R * ratio];
+  };
+  const polyPoints = vals => vals.map((v, i) => point(i, Math.min(1, Math.max(0, v / maxVal))).map(n => n.toFixed(1)).join(",")).join(" ");
+
+  const nodes = [];
+  // Concentric hexagon grid rings
+  for (const frac of [0.25, 0.5, 0.75, 1]) {
+    const pts = STAT_KEYS.map((_, i) => point(i, frac).map(n => n.toFixed(1)).join(",")).join(" ");
+    nodes.push(el("polygon", {points: pts, class: "radar-grid-ring"}));
+    const [tx, ty] = point(0, frac);
+    nodes.push(el("text", {x: tx + 11, y: ty + 3, class: "radar-tick"}, String(Math.round(maxVal * frac))));
+  }
+  // Axes
+  for (let i = 0; i < 6; i++) {
+    const [ax, ay] = point(i, 1);
+    nodes.push(el("line", {x1: cx, y1: cy, x2: ax.toFixed(1), y2: ay.toFixed(1), class: "radar-axis"}));
+  }
+  // Outer polygon (total with bonuses)
+  nodes.push(el("polygon", {points: polyPoints(totals), class: "radar-poly-total"}));
+  // Inner polygon (base allocated stats)
+  nodes.push(el("polygon", {points: polyPoints(bases), class: "radar-poly-base"}));
+
+  // Vertex dots & axis labels
+  for (let i = 0; i < 6; i++) {
+    const [tx, ty] = point(i, Math.min(1, totals[i] / maxVal));
+    const [bx, by] = point(i, Math.min(1, bases[i] / maxVal));
+    nodes.push(el("circle", {cx: tx.toFixed(1), cy: ty.toFixed(1), r: 3.4, class: "radar-dot-total"}));
+    nodes.push(el("circle", {cx: bx.toFixed(1), cy: by.toFixed(1), r: 3.1, class: "radar-dot-base"}));
+
+    const [lx, ly] = point(i, 1.24);
+    const anchor = i === 0 || i === 3 ? "middle" : i < 3 ? "start" : "end";
+    const xAdj = i === 0 || i === 3 ? lx : i < 3 ? lx - 4 : lx + 4;
+    const yAdj = i === 0 ? ly - 4 : i === 3 ? ly + 6 : ly;
+    const bonus = totals[i] - bases[i];
+    const bonusStr = bonus === 0 ? "" : bonus > 0 ? `+${bonus}` : `−${Math.abs(bonus)}`;
+    nodes.push(el("text", {x: xAdj.toFixed(1), y: (yAdj - 3).toFixed(1), "text-anchor": anchor, class: "radar-label-stat"}, STAT_KEYS[i].toUpperCase()));
+    nodes.push(el("text", {x: xAdj.toFixed(1), y: (yAdj + 10).toFixed(1), "text-anchor": anchor, class: "radar-label-val"}, `${bases[i]}${bonusStr}`));
+  }
+  svg.replaceChildren(...nodes);
+}
+
 function renderStatAllocator() {
   if (!snapshot) return;
   const c = snapshot.character;
   const freeMode = $("build-free-stats").checked;
-  const totalPts = totalStatPointsFor(c.baseLv, currentRebirths);
+  const totalPts = totalStatPointsFor(c.baseLv, currentRebirths, currentRebirthBonus);
   const usedPts = spentStatPoints(c.stats);
   const remain = totalPts - usedPts;
   const pill = $("stat-points-summary");
@@ -562,6 +637,8 @@ function renderStatAllocator() {
     ? `剩餘素質點數：${format(remain)} ／ ${format(totalPts)}（已用 ${format(usedPts)}）`
     : `超出素質點數：${format(Math.abs(remain))} 點（已用 ${format(usedPts)} ／ ${format(totalPts)}）`;
   pill.classList.toggle("is-over", remain < 0);
+
+  renderStatRadar();
 
   const panelTotals = lastPreview?.current ?? lastPreview?.base ?? null;
   $("stat-allocator").replaceChildren(...STAT_KEYS.map(key => {
@@ -627,7 +704,7 @@ function setStatExact(key, desired) {
   const c = snapshot.character;
   let val = Math.max(1, Math.min(99, Math.trunc(desired)));
   if (!freeMode && val > c.stats[key]) {
-    const totalPts = totalStatPointsFor(c.baseLv, currentRebirths);
+    const totalPts = totalStatPointsFor(c.baseLv, currentRebirths, currentRebirthBonus);
     const otherSpent = spentStatPoints({...c.stats, [key]: 1});
     let best = 1;
     let acc = otherSpent;
@@ -774,6 +851,420 @@ function toggleAutoCastSkill(skillId, enabled) {
   scheduleStats();
 }
 
+function skillIconTheme(entry) {
+  const id = entry.id;
+  if (/FIRE|MAGNUM|METEOR|PILLAR|DEMONSTRATION/.test(id)) return {bg: "linear-gradient(135deg,#ea580c,#dc2626)", glyph: "flame"};
+  if (/COLD|FROST|STORM|ICE|WATER|SG_|FREEZE/.test(id)) return {bg: "linear-gradient(135deg,#0284c7,#2563eb)", glyph: "snow"};
+  if (/LIGHTNING|JUPITEL|THUNDER|VERMILION/.test(id)) return {bg: "linear-gradient(135deg,#eab308,#ca8a04)", glyph: "bolt"};
+  if (/HEAL|SANCTUARY|RESURRECT|RECOVERY|POTION|PITCHER|FIRSTAID/.test(id)) return {bg: "linear-gradient(135deg,#16a34a,#059669)", glyph: "cross"};
+  if (/BLESS|ANGEL|HOLY|MAGNUS|TURNUNDEAD|ASPERSIO|GLORIA|ASSUMPTIO|KYRIE|SUFFRAGIUM|IMPOSITIO|CR_|PA_|PR_|HP_|AL_/.test(id)) {
+    return {bg: "linear-gradient(135deg,#d97706,#b45309)", glyph: entry.attack ? "spark" : "halo"};
+  }
+  if (/POISON|VENOM|ENVENOM|CLOAK|HIDE|STEAL|SONIC|GRIMTOOTH|METEORASSAULT|AS_|ASC_|TF_|RG_|ST_/.test(id)) {
+    return {bg: "linear-gradient(135deg,#7c3aed,#5b21b6)", glyph: "dagger"};
+  }
+  if (/BOW|ARROW|DOUBLE|SHOWER|STRAFE|FALCON|BLITZ|TRAP|SNARE|LANDMINE|BLAST|CLAYMORE|AC_|HT_|SN_/.test(id)) {
+    return {bg: "linear-gradient(135deg,#0d9488,#0f766e)", glyph: /TRAP|SNARE|MINE|CLAYMORE/.test(id) ? "trap" : "bow"};
+  }
+  if (/BA_|DC_|BD_|CG_|SONG|WHISTLE|BRAGI|HUMMING|KISS|APPLE|ENCORE/.test(id)) {
+    return {bg: "linear-gradient(135deg,#db2777,#9333ea)", glyph: "music"};
+  }
+  if (/SPEAR|PIERCE|BRANDISH|SPIRAL/.test(id)) return {bg: "linear-gradient(135deg,#b91c1c,#7f1d1d)", glyph: "spear"};
+  if (/SHIELD|GUARD|DEFENDER|REFLECT|AUTOGUARD|ENDURE|SACRIFICE/.test(id)) return {bg: "linear-gradient(135deg,#475569,#1e293b)", glyph: "shield"};
+  if (/MONK|MO_|CH_|FIST|COMBO|SPIRIT|FINGER|OCCULT|INVESTIGATE|ASURA/.test(id)) return {bg: "linear-gradient(135deg,#c2410c,#9a3412)", glyph: "fist"};
+  if (/BS_|WS_|MC_|AM_|CART|MAMMONITE|OVERTHRUST|ADRENALINE|FORGE|PHARMACY|ACID|BOMB/.test(id)) {
+    return {bg: "linear-gradient(135deg,#ca8a04,#854d0e)", glyph: "hammer"};
+  }
+  if (/WZ_|HW_|MG_|SA_|PF_|BOLT|SOUL|MAGIC|CAST|SPELL|EARTH|HEAVEN/.test(id)) {
+    return {bg: "linear-gradient(135deg,#4f46e5,#3730a3)", glyph: "wand"};
+  }
+  if (entry.attack) return {bg: "linear-gradient(135deg,#dc2626,#991b1b)", glyph: "sword"};
+  if (entry.questJobLv != null) return {bg: "linear-gradient(135deg,#d97706,#92400e)", glyph: "star"};
+  return {bg: "linear-gradient(135deg,#475569,#334155)", glyph: "book"};
+}
+
+const SKILL_GLYPHS = {
+  sword: '<path d="M14.5 3.5L20.5 3.5L20.5 9.5L10.5 19.5L4.5 13.5L14.5 3.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M3 21L7.5 16.5M6 12L12 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  spear: '<path d="M4 20L19 5M14 4L20 4L20 10" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>',
+  bow: '<path d="M5 19C5 11 11 5 19 5M5 19L19 5M14 5H19V10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  dagger: '<path d="M18 4L20 6L11 15L9 13L18 4ZM4 20L9.5 14.5M8 11L13 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  flame: '<path d="M12 3C12 3 17 7.5 17 12.5A5 5 0 0 1 7 12.5C7 9.5 9 7.5 9 7.5C9 9.5 10.5 10 10.5 10C10.5 7 12 3 12 3Z" fill="currentColor"/>',
+  snow: '<path d="M12 3V21M3 12H21M5.6 5.6L18.4 18.4M18.4 5.6L5.6 18.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  bolt: '<path d="M13 2L4 14H11L10 22L20 10H13L13 2Z" fill="currentColor"/>',
+  cross: '<path d="M9 4H15V9H20V15H15V20H9V15H4V9H9V4Z" fill="currentColor"/>',
+  halo: '<circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 2V5M12 19V22M2 12H5M19 12H22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  spark: '<path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/>',
+  shield: '<path d="M12 3L19 6V12C19 16.5 15.8 19.8 12 21C8.2 19.8 5 16.5 5 12V6L12 3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
+  music: '<path d="M9 18V6L19 4V16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="18" r="2.5" fill="currentColor"/><circle cx="16.5" cy="16" r="2.5" fill="currentColor"/>',
+  trap: '<path d="M4 17H20M6 17L9 8L12 13L15 8L18 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  fist: '<circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 11V8M12 11V7M15 11V8M8 14H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  hammer: '<path d="M4 20L13 11M10 6L15 3L20 8L17 13L10 6Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  wand: '<path d="M4 20L15 9M15 4V7M20 9H17M18.5 5.5L16.5 7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  star: '<path d="M12 3L14.8 8.7L21 9.6L16.5 14L17.6 20.2L12 17.2L6.4 20.2L7.5 14L3 9.6L9.2 8.7L12 3Z" fill="currentColor"/>',
+  book: '<path d="M5 4H14C16 4 19 5 19 7V19C19 17.5 16 17 14 17H5V4Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 8H15M9 12H14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+};
+
+function createSkillIconEl(entry) {
+  const {bg, glyph} = skillIconTheme(entry);
+  const box = document.createElement("div");
+  box.className = "skill-icon";
+  box.style.background = bg;
+  box.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${SKILL_GLYPHS[glyph] ?? SKILL_GLYPHS.book}</svg>`;
+  return box;
+}
+
+function renderSkillInspector(jobDef, autoCastSet, skillNameById) {
+  const box = $("skill-inspector");
+  if (!box) return;
+  const entry = selectedSkillId ? jobDef.skillTree.find(s => s.id === selectedSkillId) : null;
+  if (!entry) {
+    box.hidden = true;
+    return;
+  }
+  const c = snapshot.character;
+  const lv = c.skills?.[entry.id] ?? 0;
+  box.hidden = false;
+
+  const main = document.createElement("div");
+  main.className = "skill-inspector-main";
+  const head = document.createElement("div");
+  head.className = "skill-inspector-head";
+  const title = document.createElement("strong");
+  title.textContent = `${entry.name}（Lv ${lv} / ${entry.maxLv}）`;
+  head.append(title);
+  if (entry.attack) {
+    const b = document.createElement("span");
+    b.className = "mini-tag tag-attack";
+    b.textContent = "主動攻擊";
+    head.append(b);
+  }
+  if (entry.questJobLv != null) {
+    const b = document.createElement("span");
+    b.className = "mini-tag tag-quest";
+    b.textContent = "任務技能（免技能點）";
+    head.append(b);
+  }
+  if (entry.requires) {
+    for (const [reqId, reqLv] of Object.entries(entry.requires)) {
+      const met = (c.skills?.[reqId] ?? 0) >= reqLv;
+      const b = document.createElement("span");
+      b.className = `mini-tag ${met ? "tag-ok" : "tag-req"}`;
+      b.textContent = `前置：${skillNameById.get(reqId) ?? reqId} Lv.${reqLv}`;
+      head.append(b);
+    }
+  }
+  const desc = document.createElement("p");
+  desc.className = "skill-inspector-desc";
+  desc.textContent = entry.desc || entry.id;
+  main.append(head, desc);
+
+  const actions = document.createElement("div");
+  actions.className = "skill-inspector-actions";
+  const stepper = document.createElement("div");
+  stepper.className = "skill-stepper";
+  for (const [label, target, disabled] of [
+    ["0", 0, lv <= 0],
+    ["−", lv - 1, lv <= 0],
+    ["+", lv + 1, lv >= entry.maxLv],
+    ["滿", entry.maxLv, lv >= entry.maxLv],
+  ]) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    btn.disabled = disabled;
+    btn.onclick = () => setSkillLevel(entry.id, target);
+    stepper.append(btn);
+  }
+  actions.append(stepper);
+
+  if (entry.attack && lv > 0) {
+    const autoLabel = document.createElement("label");
+    autoLabel.className = "check inline-check";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = autoCastSet.has(entry.id);
+    cb.onchange = () => toggleAutoCastSkill(entry.id, cb.checked);
+    autoLabel.append(cb, "加入掛機施放");
+    actions.append(autoLabel);
+  }
+
+  box.replaceChildren(main, actions);
+}
+
+function createSkillNodeElement(entry, {c, matchesFilter, isStatic = false, onHover}) {
+  const lv = c.skills?.[entry.id] ?? 0;
+  const reqsMet = !entry.requires || Object.entries(entry.requires).every(([rid, rlv]) => (c.skills?.[rid] ?? 0) >= rlv);
+  const node = document.createElement("div");
+  node.className = `skill-node${isStatic ? " skill-node-static" : ""}`;
+  node.dataset.skillId = entry.id;
+  if (lv > 0) node.classList.add("is-learned");
+  if (lv >= entry.maxLv) node.classList.add("is-maxed");
+  if (!reqsMet && lv === 0) node.classList.add("is-locked");
+  if (selectedSkillId === entry.id) node.classList.add("is-selected");
+  if (!matchesFilter) node.classList.add("is-dimmed");
+  node.title = `${entry.name} (Lv ${lv}/${entry.maxLv})\n${entry.desc || ""}\n左鍵升級、右鍵降級`;
+
+  const top = document.createElement("div");
+  top.className = "skill-node-top";
+  const title = document.createElement("div");
+  title.className = "skill-node-title";
+  title.textContent = entry.name;
+  top.append(createSkillIconEl(entry), title);
+
+  const bottom = document.createElement("div");
+  bottom.className = "skill-node-bottom";
+  const lvEl = document.createElement("span");
+  lvEl.className = "skill-node-lv";
+  lvEl.textContent = `Lv ${lv}/${entry.maxLv}`;
+
+  const btns = document.createElement("div");
+  btns.className = "skill-node-btns";
+  const bMinus = document.createElement("button");
+  bMinus.type = "button"; bMinus.textContent = "−"; bMinus.disabled = lv <= 0;
+  bMinus.onclick = e => { e.stopPropagation(); selectedSkillId = entry.id; setSkillLevel(entry.id, lv - 1); };
+  const bPlus = document.createElement("button");
+  bPlus.type = "button"; bPlus.textContent = "+"; bPlus.disabled = lv >= entry.maxLv;
+  bPlus.onclick = e => { e.stopPropagation(); selectedSkillId = entry.id; setSkillLevel(entry.id, lv + 1); };
+  const bMax = document.createElement("button");
+  bMax.type = "button"; bMax.textContent = "滿"; bMax.disabled = lv >= entry.maxLv;
+  bMax.onclick = e => { e.stopPropagation(); selectedSkillId = entry.id; setSkillLevel(entry.id, entry.maxLv); };
+  btns.append(bMinus, bPlus, bMax);
+  bottom.append(lvEl, btns);
+
+  const bar = document.createElement("div");
+  bar.className = "skill-node-bar";
+  const fill = document.createElement("div");
+  fill.className = "skill-node-bar-fill";
+  fill.style.width = `${Math.round(lv / Math.max(1, entry.maxLv) * 100)}%`;
+  bar.append(fill);
+
+  node.append(top, bottom, bar);
+  node.onclick = () => {
+    selectedSkillId = entry.id;
+    if (lv < entry.maxLv) setSkillLevel(entry.id, lv + 1);
+    else renderSkillTree();
+  };
+  node.oncontextmenu = e => {
+    e.preventDefault();
+    selectedSkillId = entry.id;
+    if (lv > 0) setSkillLevel(entry.id, lv - 1);
+    else renderSkillTree();
+  };
+  if (onHover) {
+    node.onmouseenter = () => onHover(entry.id);
+    node.onmouseleave = () => onHover(null);
+  }
+  return node;
+}
+
+function renderSkillTreeGraph(jobDef, matchSet, autoCastSet, skillNameById) {
+  const c = snapshot.character;
+  const questSkills = jobDef.skillTree.filter(s => s.questJobLv != null);
+  const regularSkills = jobDef.skillTree.filter(s => s.questJobLv == null);
+  const regMap = new Map(regularSkills.map(s => [s.id, s]));
+
+  // Build adjacency for regular skills
+  const parentsOf = new Map();
+  const childrenOf = new Map();
+  for (const s of regularSkills) {
+    parentsOf.set(s.id, []);
+    childrenOf.set(s.id, []);
+  }
+  for (const s of regularSkills) {
+    if (!s.requires) continue;
+    for (const [reqId, reqLv] of Object.entries(s.requires)) {
+      if (!regMap.has(reqId)) continue;
+      parentsOf.get(s.id).push({id: reqId, lv: reqLv});
+      childrenOf.get(reqId).push({id: s.id, lv: reqLv});
+    }
+  }
+
+  const connected = regularSkills.filter(s => parentsOf.get(s.id).length > 0 || childrenOf.get(s.id).length > 0);
+  const standalone = regularSkills.filter(s => parentsOf.get(s.id).length === 0 && childrenOf.get(s.id).length === 0);
+
+  if (selectedSkillId && !jobDef.skillTree.some(s => s.id === selectedSkillId)) {
+    selectedSkillId = null;
+  }
+  renderSkillInspector(jobDef, autoCastSet, skillNameById);
+
+  // Connected DAG Layout (longest-path depth + barycenter column order)
+  const connSec = $("skill-graph-connected-sec");
+  const canvas = $("skill-graph-canvas");
+  connSec.hidden = connected.length === 0;
+  if (connected.length) {
+    const depth = new Map();
+    const calcDepth = (id, stack = new Set()) => {
+      if (depth.has(id)) return depth.get(id);
+      if (stack.has(id)) return 0;
+      stack.add(id);
+      const ps = parentsOf.get(id) ?? [];
+      const d = ps.length ? 1 + Math.max(...ps.map(p => calcDepth(p.id, stack))) : 0;
+      depth.set(id, d);
+      return d;
+    };
+    for (const s of connected) calcDepth(s.id);
+
+    const maxDepth = Math.max(0, ...depth.values());
+    const rows = Array.from({length: maxDepth + 1}, () => []);
+    for (const s of connected) rows[depth.get(s.id)].push(s);
+
+    // Order row 0 by subtree weight & original tree order so related roots stay together
+    const subtreeSize = (id, seen = new Set()) => {
+      if (seen.has(id)) return 0;
+      seen.add(id);
+      return 1 + (childrenOf.get(id) ?? []).reduce((sum, ch) => sum + subtreeSize(ch.id, seen), 0);
+    };
+    const origIdx = new Map(regularSkills.map((s, i) => [s.id, i]));
+    rows[0].sort((a, b) => subtreeSize(b.id) - subtreeSize(a.id) || origIdx.get(a.id) - origIdx.get(b.id));
+
+    const colOf = new Map();
+    rows[0].forEach((s, idx) => colOf.set(s.id, idx));
+    for (let r = 1; r < rows.length; r++) {
+      rows[r].sort((a, b) => {
+        const avg = s => {
+          const ps = parentsOf.get(s.id);
+          return ps.reduce((sum, p) => sum + (colOf.get(p.id) ?? 0), 0) / Math.max(1, ps.length);
+        };
+        return avg(a) - avg(b) || origIdx.get(a.id) - origIdx.get(b.id);
+      });
+      rows[r].forEach((s, idx) => colOf.set(s.id, idx));
+    }
+
+    const NODE_W = 142, NODE_H = 86, GAP_X = 28, GAP_Y = 48, PAD = 10;
+    const maxCols = Math.max(...rows.map(r => r.length));
+    const totalW = PAD * 2 + maxCols * NODE_W + Math.max(0, maxCols - 1) * GAP_X;
+    const totalH = PAD * 2 + rows.length * NODE_H + Math.max(0, rows.length - 1) * GAP_Y;
+    canvas.style.width = `${totalW}px`;
+    canvas.style.height = `${totalH}px`;
+
+    const pos = new Map();
+    for (let r = 0; r < rows.length; r++) {
+      const rowW = rows[r].length * NODE_W + Math.max(0, rows[r].length - 1) * GAP_X;
+      const startX = (totalW - rowW) / 2;
+      const y = PAD + r * (NODE_H + GAP_Y);
+      rows[r].forEach((s, idx) => {
+        pos.set(s.id, {x: startX + idx * (NODE_W + GAP_X), y, r});
+      });
+    }
+
+    // Build SVG edges
+    const NS = "http://www.w3.org/2000/svg";
+    const svgEl = (tag, attrs = {}, text) => {
+      const node = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+    const svg = svgEl("svg", {class: "skill-graph-svg", width: totalW, height: totalH, viewBox: `0 0 ${totalW} ${totalH}`});
+    const defs = svgEl("defs");
+    const addMarker = (id, color) => {
+      const m = svgEl("marker", {id, viewBox: "0 0 10 10", refX: "8.5", refY: "5", markerWidth: "6", markerHeight: "6", orient: "auto-start-reverse"});
+      m.append(svgEl("path", {d: "M 0 1 L 10 5 L 0 9 z", fill: color}));
+      defs.append(m);
+    };
+    addMarker("arrow-unmet", "var(--border-strong)");
+    addMarker("arrow-met", "var(--green)");
+    addMarker("arrow-hi", "var(--accent)");
+    svg.append(defs);
+
+    const edgeEls = [];
+    for (const s of connected) {
+      const childPos = pos.get(s.id);
+      const ps = parentsOf.get(s.id);
+      ps.forEach((p, pIdx) => {
+        const parentPos = pos.get(p.id);
+        if (!parentPos || !childPos) return;
+        const met = (c.skills?.[p.id] ?? 0) >= p.lv;
+        const x1 = parentPos.x + NODE_W / 2;
+        const y1 = parentPos.y + NODE_H;
+        const offsetX = ps.length > 1 ? (pIdx - (ps.length - 1) / 2) * 24 : 0;
+        const x2 = childPos.x + NODE_W / 2 + offsetX;
+        const y2 = childPos.y - 2;
+        const rowSpan = childPos.r - parentPos.r;
+        let d, lx, ly;
+        if (rowSpan <= 1) {
+          const midY = (y1 + y2) / 2;
+          d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+          lx = (x1 + x2) / 2;
+          ly = midY;
+        } else {
+          // Route smoothly around intermediate rows
+          const bendX = x1 <= x2 ? Math.max(x1, x2) + 34 : Math.min(x1, x2) - 34;
+          const midY1 = y1 + 22;
+          const midY2 = y2 - 22;
+          d = `M ${x1} ${y1} C ${x1} ${midY1}, ${bendX} ${midY1}, ${bendX} ${(y1 + y2) / 2} S ${x2} ${midY2}, ${x2} ${y2}`;
+          lx = x2;
+          ly = y2 - 14;
+        }
+        const path = svgEl("path", {
+          d,
+          class: `skill-edge${met ? " is-met" : ""}`,
+          "marker-end": met ? "url(#arrow-met)" : "url(#arrow-unmet)",
+        });
+        path.dataset.from = p.id;
+        path.dataset.to = s.id;
+        path.dataset.met = met ? "1" : "0";
+        svg.append(path);
+        edgeEls.push(path);
+
+        // Required level pill on the arrow
+        const pillW = 28, pillH = 14;
+        svg.append(
+          svgEl("rect", {
+            x: (lx - pillW / 2).toFixed(1),
+            y: (ly - pillH / 2).toFixed(1),
+            width: pillW,
+            height: pillH,
+            rx: 7,
+            class: `skill-edge-pill-bg${met ? " is-met" : ""}`,
+          }),
+          svgEl("text", {
+            x: lx.toFixed(1),
+            y: ly.toFixed(1),
+            class: `skill-edge-pill-text${met ? " is-met" : ""}`,
+          }, `Lv.${p.lv}`)
+        );
+      });
+    }
+
+    const highlightEdges = hoveredId => {
+      const focusId = hoveredId || selectedSkillId;
+      for (const path of edgeEls) {
+        const hi = Boolean(focusId && (path.dataset.from === focusId || path.dataset.to === focusId));
+        path.classList.toggle("is-highlight", hi);
+        path.setAttribute("marker-end", hi ? "url(#arrow-hi)" : path.dataset.met === "1" ? "url(#arrow-met)" : "url(#arrow-unmet)");
+      }
+    };
+
+    const nodeEls = connected.map(entry => {
+      const node = createSkillNodeElement(entry, {
+        c,
+        matchesFilter: matchSet.has(entry.id),
+        isStatic: false,
+        onHover: highlightEdges,
+      });
+      const p = pos.get(entry.id);
+      node.style.left = `${p.x}px`;
+      node.style.top = `${p.y}px`;
+      return node;
+    });
+    highlightEdges(null);
+    canvas.replaceChildren(svg, ...nodeEls);
+  }
+
+  // Standalone skills section
+  $("skill-graph-standalone-sec").hidden = standalone.length === 0;
+  $("skill-graph-standalone").replaceChildren(...standalone.map(entry =>
+    createSkillNodeElement(entry, {c, matchesFilter: matchSet.has(entry.id), isStatic: true})
+  ));
+
+  // Quest skills section
+  $("skill-graph-quests-sec").hidden = questSkills.length === 0;
+  $("skill-graph-quests").replaceChildren(...questSkills.map(entry =>
+    createSkillNodeElement(entry, {c, matchesFilter: matchSet.has(entry.id), isStatic: true})
+  ));
+}
+
 function renderSkillTree() {
   if (!snapshot || !builderInfo) return;
   const c = snapshot.character;
@@ -805,6 +1296,15 @@ function renderSkillTree() {
     if (!term) return true;
     return `${entry.name} ${entry.id} ${entry.desc}`.normalize("NFKC").toLowerCase().includes(term);
   });
+  const matchSet = new Set(filtered.map(s => s.id));
+
+  const isTree = skillViewMode === "tree";
+  $("skill-tree-graph-wrap").hidden = !isTree;
+  $("skill-tree-list").hidden = isTree;
+  if (isTree) {
+    renderSkillTreeGraph(jobDef, matchSet, autoCastSet, skillNameById);
+    return;
+  }
 
   if (!filtered.length) {
     const empty = document.createElement("p");
@@ -1652,6 +2152,7 @@ async function showStats() {
     }));
 
     showEquipment(preview);
+    renderStatRadar();
     if (activeTab === "build") renderStatAllocator();
   } catch (error) {
     if (version === statsVersion) $("stats-caption").textContent = error.message;
@@ -1678,6 +2179,7 @@ async function applyLoadedSnapshot(nextSnapshot, {
   save = true,
   isCustom = false,
   rebirths,
+  rebirthBonus,
   firstJobLv = 50,
   overrides = {},
   sourceLabel = "",
@@ -1694,7 +2196,9 @@ async function applyLoadedSnapshot(nextSnapshot, {
     originalImportedSnapshot = isCustom ? null : structuredClone(snapshot);
     const jobDef = jobMap.get(snapshot.character.job);
     currentRebirths = rebirths ?? (jobDef?.upper ? 1 : 0);
+    currentRebirthBonus = rebirthBonus ?? 52;
     currentFirstJobLv = firstJobLv ?? 50;
+    selectedSkillId = null;
 
     const [nextSkills, nextScenario, nextCatalog] = await Promise.all([
       engine("skills"),
@@ -1906,7 +2410,21 @@ function setRebirthCount(nextCount) {
 
 $("rebirth-0").onclick = () => setRebirthCount(0);
 $("rebirth-1").onclick = () => setRebirthCount(1);
+$("build-rebirths").oninput = () => {
+  if ($("build-rebirths").value === "") return;
+  setRebirthCount(Number($("build-rebirths").value));
+};
 $("build-rebirths").onchange = () => setRebirthCount(Number($("build-rebirths").value));
+$("build-rebirth-bonus").oninput = () => {
+  if ($("build-rebirth-bonus").value === "") return;
+  currentRebirthBonus = Math.max(0, Math.min(500, Math.trunc(Number($("build-rebirth-bonus").value) || 0)));
+  renderBuildTab();
+};
+$("build-rebirth-bonus").onchange = () => {
+  currentRebirthBonus = Math.max(0, Math.min(500, Math.trunc(Number($("build-rebirth-bonus").value) || 0)));
+  $("build-rebirth-bonus").value = String(currentRebirthBonus);
+  renderBuildTab();
+};
 
 $("build-job").onchange = () => {
   if (!snapshot) return;
@@ -1973,6 +2491,13 @@ $("revert-imported-char").onclick = () => {
 };
 
 // Skill tab events
+for (const viewBtn of document.querySelectorAll("[data-skill-view]")) {
+  viewBtn.onclick = () => {
+    skillViewMode = viewBtn.dataset.skillView;
+    for (const b of document.querySelectorAll("[data-skill-view]")) b.classList.toggle("is-active", b === viewBtn);
+    renderSkillTree();
+  };
+}
 $("build-free-skills").onchange = renderSkillTree;
 $("skill-tree-search").oninput = renderSkillTree;
 for (const pill of document.querySelectorAll("[data-skill-filter]")) {
@@ -2262,6 +2787,7 @@ function setupWebMode() {
         save: true,
         isCustom: isBuildExport ? Boolean(parsed.isCustom) : false,
         rebirths: isBuildExport ? parsed.rebirths : undefined,
+        rebirthBonus: isBuildExport ? parsed.rebirthBonus : undefined,
         firstJobLv: isBuildExport ? parsed.firstJobLv : 50,
         overrides: isBuildExport ? parsed.equipOverrides : {},
         sourceLabel: file.name,
@@ -2290,6 +2816,7 @@ function setupWebMode() {
     const entry = upsertSavedCharacter(snapshot, {
       isCustom: currentIsCustom,
       rebirths: currentRebirths,
+      rebirthBonus: currentRebirthBonus,
       firstJobLv: currentFirstJobLv,
       overrides: equipOverrides,
     });
@@ -2306,6 +2833,7 @@ function setupWebMode() {
       save: false,
       isCustom: Boolean(found.isCustom),
       rebirths: found.rebirths,
+      rebirthBonus: found.rebirthBonus,
       firstJobLv: found.firstJobLv ?? 50,
       overrides: found.equipOverrides ?? {},
       sourceLabel: found.isCustom ? "已存自訂配點" : "已存匯入角色",
@@ -2318,6 +2846,7 @@ function setupWebMode() {
       roDpsBuild: 1,
       isCustom: currentIsCustom,
       rebirths: currentRebirths,
+      rebirthBonus: currentRebirthBonus,
       firstJobLv: currentFirstJobLv,
       equipOverrides: cleanEquipOverrides() ?? {},
       snapshot,
@@ -2422,6 +2951,7 @@ async function init() {
         save: false,
         isCustom: Boolean(first.isCustom),
         rebirths: first.rebirths,
+        rebirthBonus: first.rebirthBonus,
         firstJobLv: first.firstJobLv ?? 50,
         overrides: first.equipOverrides ?? {},
         sourceLabel: first.isCustom ? "已存自訂配點" : "已存匯入角色",
