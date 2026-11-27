@@ -1,9 +1,10 @@
-import {attackSkills, equipmentCatalog, previewCharacter, scenarioCatalog, simulate, targets} from "./engine.js?v=20261127-3";
+import {attackSkills, builderCatalog, equipmentCatalog, previewCharacter, scenarioCatalog, simulate, targets} from "./engine.js?v=20261127-4";
 
 self.onmessage = ({data: {id, action, snapshot, options}}) => {
   try {
     const result = {
       targets: () => targets,
+      builder: () => builderCatalog(),
       skills: () => attackSkills(snapshot),
       scenario: () => scenarioCatalog(snapshot),
       equipment: () => equipmentCatalog(snapshot),

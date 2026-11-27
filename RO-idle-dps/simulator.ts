@@ -5,6 +5,8 @@ import { SONGS, type PerformerCtx } from "./src/game/combat/songs";
 import { defaultAutoConfig } from "./src/game/ai/config";
 import { MONSTERS, type MonsterDef } from "./src/game/data/monsters";
 import { MAPS } from "./src/game/data/maps";
+import { JOBS } from "./src/game/data/jobs";
+import { isUpper } from "./src/game/data/jobFamily";
 import { SKILLS, atLv } from "./src/game/data/skills";
 import { canAttackWithSkill } from "./src/game/combat/skillEffects";
 import { cardfixPermille, monsterDefender, playerHitRate, playerCritRate } from "./src/game/combat/damage";
@@ -20,7 +22,42 @@ import { NEVER } from "./src/game/config/gameplay";
 import type { GameSnapshot } from "./src/game/view";
 
 export const targets = [...MONSTERS.values()].filter(monster => monster.hp > 0)
-  .map(({id, name, lv}) => ({id, name, lv}));
+  .map(({id, name, lv, hp, element, elementLv, race, size, def, mdef, boss}) =>
+    ({id, name, lv, hp, element, elementLv, race, size, def, mdef, boss: !!boss}));
+
+export function builderCatalog() {
+  const jobs = Object.values(JOBS).map(job => {
+    const from = job.jobChange?.from ?? null;
+    const tier = !from ? 0 : job.id === "supernovice" ? 1 : (from === "novice" || from === "novice_high") ? 1 : 2;
+    return {
+      id: job.id,
+      name: job.name,
+      upper: isUpper(job.id),
+      tier,
+      maxJobLv: job.maxJobLv,
+      from,
+      rebirthOf: job.jobChange?.rebirthOf ? [...job.jobChange.rebirthOf] : null,
+      skillTree: job.skillTree.map(entry => {
+        const sk = SKILLS.get(entry.id);
+        return {
+          id: entry.id,
+          name: sk?.name ?? entry.id,
+          maxLv: entry.maxLv,
+          requires: entry.requires ? {...entry.requires} : null,
+          questJobLv: entry.questJobLv ?? null,
+          minJobLv: entry.minJobLv ?? null,
+          attack: canAttackWithSkill(entry.id),
+          kind: sk?.kind ?? "passive",
+          desc: sk?.desc ?? "",
+        };
+      }),
+    };
+  });
+  return {
+    jobs,
+    defaultConfig: defaultAutoConfig(),
+  };
+}
 
 export function attackSkills(snapshot: GameSnapshot) {
   return Object.entries(snapshot.character.skills ?? {}).flatMap(([id, lv]) => {

@@ -1,12 +1,14 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-3";
+const ASSET_VER = "20261127-4";
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
 const isExtension = Boolean(globalThis.chrome?.scripting && gameTab);
 const SAVED_STORAGE_KEY = "ro-idle-dps-saved-characters-v1";
+const THEME_STORAGE_KEY = "ro-idle-dps-theme";
 const number = new Intl.NumberFormat("zh-TW", {maximumFractionDigits: 2});
 const format = value => Number.isFinite(value) ? number.format(value) : "—";
 const seconds = ms => `${format(ms / 1000)} 秒`;
+
 const element = {
   neutral:"無", water:"水", earth:"地", fire:"火", wind:"風",
   poison:"毒", holy:"聖", dark:"暗", ghost:"念", undead:"不死",
@@ -22,25 +24,51 @@ const weaponTypeLabel = {
   "2hStaff":"雙手杖", mace:"鈍器", book:"書本", staff:"單手杖",
   bow:"弓", knuckle:"拳套", instrument:"樂器", whip:"鞭子",
 };
+const STAT_KEYS = ["str", "agi", "vit", "int", "dex", "luk"];
 const TWO_HANDED_TYPES = new Set(["2hSword", "2hSpear", "2hAxe", "2hMace", "2hStaff", "bow", "katar"]);
 const LEFT_HAND_TYPES = new Set(["dagger", "1hSword", "1hAxe"]);
 const HEAD_SLOTS = ["headTop", "headMid", "headLow"];
-const EDITABLE_SLOTS = [
-  "headTop", "headMid", "headLow", "weapon", "shield",
-  "armor", "garment", "shoes", "accessory1", "accessory2",
-];
+const RIDING_JOBS = new Set(["knight", "lord_knight", "crusader", "paladin"]);
+const FALCON_JOBS = new Set(["hunter", "sniper"]);
+const NORMAL_TO_UPPER = {
+  novice:"novice_high", swordman:"swordman_high", mage:"mage_high", archer:"archer_high",
+  acolyte:"acolyte_high", thief:"thief_high", merchant:"merchant_high",
+  knight:"lord_knight", wizard:"high_wizard", hunter:"sniper", assassin:"assassin_cross",
+  priest:"high_priest", blacksmith:"whitesmith", crusader:"paladin", monk:"champion",
+  rogue:"stalker", sage:"professor", bard:"clown", dancer:"gypsy", alchemist:"creator",
+};
+const UPPER_TO_NORMAL = Object.fromEntries(Object.entries(NORMAL_TO_UPPER).map(([a, b]) => [b, a]));
+const ELEMENT_BUFF_IDS = new Set([
+  "PR_ASPERSIO", "AS_ENCHANTPOISON", "SA_FLAMELAUNCHER", "SA_FROSTWEAPON",
+  "SA_LIGHTNINGLOADER", "SA_SEISMICWEAPON", "itemEndowWater",
+]);
+const ITEM_BUFF_PREFIXES = ["aspdPotion", "resist", "strFood", "agiFood", "vitFood", "intFood", "dexFood", "lukFood"];
 
-let worker, snapshot, scenario, equipCatalog, targets = [], skills = [], sequence = 0;
+let worker, snapshot, originalImportedSnapshot = null;
+let scenario, equipCatalog, builderInfo, targets = [], skills = [], sequence = 0;
 let equipOverrides = {};
 let selectedSlot = null;
 let itemMap = new Map();
 let cardMap = new Map();
+let jobMap = new Map();
 let savedCharacters = [];
 let activeSavedKey = "";
+let activeTab = "build";
+let currentIsCustom = true;
+let currentRebirths = 1;
+let currentFirstJobLv = 50;
+let skillFilterMode = "all";
+let buffCategoryFilter = "all";
+let lastPreview = null;
 let useDirectEngine = false;
 let directEnginePromise = null;
 let targetsPromise = null;
+let builderPromise = null;
 const requests = new Map();
+
+// =========================================================================
+// Engine Worker + Direct Main-Thread Fallback
+// =========================================================================
 
 async function runDirectEngine(action, options) {
   if (!directEnginePromise) {
@@ -49,6 +77,7 @@ async function runDirectEngine(action, options) {
   const eng = await directEnginePromise;
   return {
     targets: () => eng.targets,
+    builder: () => eng.builderCatalog(),
     skills: () => eng.attackSkills(snapshot),
     scenario: () => eng.scenarioCatalog(snapshot),
     equipment: () => eng.equipmentCatalog(snapshot),
@@ -108,7 +137,8 @@ function engine(action, options) {
     const id = ++sequence;
     const timeout = setTimeout(() => resetWorker("本機試算逾時，請改用較短的模擬時間。"), 25000);
     requests.set(id, {resolve, reject, timeout, action, options});
-    thread.postMessage({id, action, snapshot: action === "targets" ? undefined : snapshot, options});
+    const noSnap = action === "targets" || action === "builder";
+    thread.postMessage({id, action, snapshot: noSnap ? undefined : snapshot, options});
   });
 }
 
@@ -122,17 +152,132 @@ function ensureTargets() {
   return targetsPromise;
 }
 
+function ensureBuilder() {
+  if (builderInfo) return Promise.resolve(builderInfo);
+  if (!builderPromise) {
+    builderPromise = engine("builder")
+      .then(info => {
+        builderInfo = info;
+        jobMap = new Map(info.jobs.map(j => [j.id, j]));
+        return info;
+      })
+      .catch(error => { builderPromise = null; throw error; });
+  }
+  return builderPromise;
+}
+
+// =========================================================================
+// RO-idle Authentic Formulas for Stat & Skill Points
+// =========================================================================
+
+function statStepCost(currentVal) {
+  return Math.floor((currentVal - 1) / 10) + 2;
+}
+
+function totalStatPointsFor(baseLv, rebirths) {
+  let pts = rebirths >= 1 ? 100 : 48;
+  const lv = Math.max(1, Math.min(99, Math.trunc(baseLv)));
+  for (let i = 1; i < lv; i++) pts += Math.floor(i / 5) + 3;
+  return pts;
+}
+
+function spentStatPoints(stats) {
+  let spent = 0;
+  for (const key of STAT_KEYS) {
+    const val = Math.max(1, Math.min(99, Math.trunc(stats[key] ?? 1)));
+    for (let v = 1; v < val; v++) spent += statStepCost(v);
+  }
+  return spent;
+}
+
+function totalSkillPointsFor(jobDef, jobLv, firstJobLv) {
+  if (!jobDef) return 0;
+  const jlv = Math.max(1, Math.min(jobDef.maxJobLv, Math.trunc(jobLv)));
+  if (jobDef.tier === 0) return jlv - 1;
+  if (jobDef.tier === 1) return 9 + (jlv - 1);
+  const fLv = Math.max(40, Math.min(50, Math.trunc(firstJobLv || 50)));
+  return 9 + (fLv - 1) + (jlv - 1);
+}
+
+function spentSkillPoints(jobDef, skillMap) {
+  if (!jobDef) return 0;
+  let total = 0;
+  for (const entry of jobDef.skillTree) {
+    if (entry.questJobLv != null) continue;
+    total += Math.max(0, Math.min(entry.maxLv, Math.trunc(skillMap[entry.id] ?? 0)));
+  }
+  return total;
+}
+
+function createCustomSnapshot({
+  name = "自訂角色",
+  job = "lord_knight",
+  rebirths = 1,
+  baseLv = 99,
+  jobLv = 70,
+  firstJobLv = 50,
+} = {}) {
+  const jobDef = jobMap.get(job) ?? builderInfo?.jobs.find(j => j.id === "lord_knight") ?? builderInfo?.jobs[0];
+  const jId = jobDef?.id ?? "lord_knight";
+  const maxJL = jobDef?.maxJobLv ?? 70;
+  const clampedJL = Math.min(maxJL, Math.max(1, jobLv));
+  const defaultSkills = {};
+  if (jobDef) {
+    if (jobDef.skillTree.some(s => s.id === "NV_BASIC")) defaultSkills.NV_BASIC = 9;
+    for (const s of jobDef.skillTree) {
+      if (s.questJobLv != null && clampedJL >= s.questJobLv) defaultSkills[s.id] = s.maxLv;
+    }
+  }
+  const config = builderInfo?.defaultConfig
+    ? structuredClone(builderInfo.defaultConfig)
+    : {lockMap: "prt_fild08", skills: [], equipRules: []};
+  config.skills = [];
+  config.equipRules = [];
+  return {
+    character: {
+      name,
+      job: jId,
+      baseLv: Math.max(1, Math.min(99, baseLv)),
+      baseExp: 0,
+      jobLv: clampedJL,
+      jobExp: 0,
+      statPoints: totalStatPointsFor(baseLv, rebirths),
+      skillPoints: totalSkillPointsFor(jobDef, clampedJL, firstJobLv),
+      stats: {str: 1, agi: 1, vit: 1, int: 1, dex: 1, luk: 1},
+      hp: 999999,
+      sp: 999999,
+      zeny: 0,
+      skills: defaultSkills,
+      ...(RIDING_JOBS.has(jId) ? {riding: false} : {}),
+      ...(FALCON_JOBS.has(jId) ? {falcon: false} : {}),
+    },
+    inventory: [],
+    equipment: {},
+    buffs: [],
+    ailments: [],
+    cart: null,
+    config,
+    mapId: "prt_fild08",
+    heldItems: [],
+    pet: null,
+  };
+}
+
+// =========================================================================
+// Snapshot Storage & Cross-Tab Import
+// =========================================================================
+
 function normalizeSnapshot(raw) {
   const s = raw?.snapshot?.character ? raw.snapshot : raw;
   if (!s || typeof s !== "object" || !s.character?.name || !s.config || !Array.isArray(s.inventory) || !s.equipment) {
-    throw new Error("角色快照格式不完整，請確認複製的是 /api/characters/ID?deferCatchup=1 的完整 JSON。");
+    throw new Error("角色快照格式不完整，請確認複製的是 /api/characters/ID?deferCatchup=1 的完整 JSON，或是本工具匯出的配點檔。");
   }
   const {character, inventory, equipment, buffs, ailments, cart, config, mapId, heldItems, pet} = s;
   return {character, inventory, equipment, buffs, ailments, cart, config, mapId, heldItems, pet};
 }
 
-function charStorageKey(snap) {
-  return `${snap.character.name}::${snap.character.job ?? ""}`;
+function charStorageKey(snap, isCustom) {
+  return `${isCustom ? "custom" : "import"}::${snap.character.name}::${snap.character.job ?? ""}`;
 }
 
 function loadSavedList() {
@@ -153,21 +298,29 @@ function persistSavedList() {
   }
 }
 
-function upsertSavedCharacter(snap) {
-  const key = charStorageKey(snap);
+function upsertSavedCharacter(snap, {isCustom = false, rebirths, firstJobLv, overrides, preserveKey} = {}) {
+  const key = preserveKey || charStorageKey(snap, isCustom);
+  const jobDef = jobMap.get(snap.character.job);
+  const inferredRebirths = rebirths ?? (jobDef?.upper ? 1 : 0);
   const entry = {
     key,
     name: snap.character.name,
     baseLv: snap.character.baseLv,
     jobLv: snap.character.jobLv,
     job: snap.character.job ?? "",
+    jobName: jobDef?.name ?? snap.character.job ?? "",
+    rebirths: inferredRebirths,
+    firstJobLv: firstJobLv ?? 50,
+    isCustom: Boolean(isCustom),
     savedAt: Date.now(),
-    snapshot: snap,
+    snapshot: structuredClone(snap),
+    equipOverrides: overrides ? structuredClone(overrides) : {},
   };
-  savedCharacters = [entry, ...savedCharacters.filter(item => item.key !== key)].slice(0, 20);
+  savedCharacters = [entry, ...savedCharacters.filter(item => item.key !== key)].slice(0, 30);
   activeSavedKey = key;
   persistSavedList();
   renderSavedBar();
+  return entry;
 }
 
 function formatTimeShort(ts) {
@@ -178,13 +331,29 @@ function formatTimeShort(ts) {
 
 function renderSavedBar() {
   if (isExtension) return;
-  const bar = $("saved-bar");
-  bar.hidden = savedCharacters.length === 0;
-  if (!savedCharacters.length) return;
   const sel = $("saved-character");
-  sel.replaceChildren(...savedCharacters.map(entry =>
-    new Option(`${entry.name} · Base ${entry.baseLv}／Job ${entry.jobLv} · ${formatTimeShort(entry.savedAt)}`, entry.key)));
-  if (savedCharacters.some(entry => entry.key === activeSavedKey)) sel.value = activeSavedKey;
+  if (!sel) return;
+  if (!savedCharacters.length) {
+    sel.replaceChildren(new Option("（目前為暫存自訂角色，點右側「儲存配點」保留）", ""));
+    $("delete-saved").disabled = true;
+    return;
+  }
+  sel.replaceChildren(...savedCharacters.map(entry => {
+    const tag = entry.isCustom ? "[自訂]" : "[匯入]";
+    const jName = entry.jobName || jobMap.get(entry.job)?.name || entry.job;
+    return new Option(
+      `${tag} ${entry.name} · ${jName} · Lv ${entry.baseLv}/${entry.jobLv} · ${formatTimeShort(entry.savedAt)}`,
+      entry.key
+    );
+  }));
+  if (savedCharacters.some(entry => entry.key === activeSavedKey)) {
+    sel.value = activeSavedKey;
+    $("delete-saved").disabled = false;
+  } else {
+    sel.prepend(new Option(`（未儲存）${snapshot?.character?.name ?? "自訂角色"}`, ""));
+    sel.value = "";
+    $("delete-saved").disabled = true;
+  }
 }
 
 function asciiEscape(str) {
@@ -284,204 +453,456 @@ async function readCharacterFromExtension() {
   return result.snapshot;
 }
 
-function fillMonsters() {
-  const term = $("search").value.trim().normalize("NFKC").toLowerCase();
-  const current = $("monster").value;
-  const found = targets.filter(({id, name}) => String(id).includes(term) || name.toLowerCase().includes(term));
-  $("monster").replaceChildren(new Option(found.length ? "請選擇怪物" : "沒有符合的怪物", ""),
-    ...found.map(({name, lv, id}) => new Option(`${name} · Lv ${lv} · #${id}`, id)));
-  if (found.some(({id}) => String(id) === current)) $("monster").value = current;
-  else if (term && found.length === 1) $("monster").value = String(found[0].id);
-  scheduleStats();
-}
+// =========================================================================
+// Tabs & Theme Navigation
+// =========================================================================
 
-function fillLevels() {
-  const skill = skills.find(entry => entry.id === $("skill").value);
-  $("skill-level").replaceChildren(...Array.from({length:skill?.lv ?? 0}, (_, index) =>
-    new Option(`Lv ${index + 1}`, index + 1)));
-  if (skill) $("skill-level").value = String(skill.lv);
-}
-
-function renderScenario() {
-  const ammo = $("ammo-choice");
-  const selected = ammo.value;
-  ammo.replaceChildren(new Option("依掛機換裝、目前裝備與補箭", ""), ...scenario.ammo.map(arrow =>
-    new Option(`${arrow.name} · ${element[arrow.element] ?? arrow.element} · ${arrow.quantity ? `背包 ${format(arrow.quantity)} 支` : "模擬 1,000 支"}${arrow.configured ? " · 換裝規則" : ""}`, arrow.id)));
-  if (scenario.ammo.some(arrow => String(arrow.id) === selected)) ammo.value = selected;
-  ammo.disabled = !scenario.ammo.length;
-  $("active-buffs").replaceChildren(...scenario.active.map(({index, name, level, remainingMs}) => {
-    const label = document.createElement("label");
-    label.className = "check";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = false;
-    input.value = String(index);
-    const rem = Number.isFinite(remainingMs) && remainingMs > 0 && remainingMs < 1e12
-      ? ` · 剩 ${seconds(remainingMs)}`
-      : "";
-    label.append(input, `${level ? `${name} Lv ${level}` : name}${rem}`);
-    return label;
-  }));
-  if (!scenario.active.length) $("active-buffs").textContent = "角色目前沒有 Buff。";
-  if (!$("extra-buffs").children.length) {
-    $("extra-buffs").replaceChildren(...scenario.buffs.map(effectRow));
-    $("monster-statuses").replaceChildren(...scenario.statuses.map(effectRow));
+function switchTab(tabId) {
+  activeTab = tabId;
+  for (const btn of document.querySelectorAll(".tab-btn")) {
+    const active = btn.dataset.tab === tabId;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", String(active));
   }
-  syncActiveBuffControls();
-  filterEffects("buff");
-  filterEffects("status");
-}
-
-function syncActiveBuffControls() {
-  const boxes = [...$("active-buffs").querySelectorAll('input[type="checkbox"]')];
-  const total = boxes.length;
-  const checkedBoxes = boxes.filter(box => box.checked);
-  const checked = checkedBoxes.length;
-  if ($("active-buff-actions")) $("active-buff-actions").hidden = total === 0;
-  if ($("quick-active-buffs-wrap")) $("quick-active-buffs-wrap").hidden = total === 0;
-  if ($("keep-active-buffs-wrap")) $("keep-active-buffs-wrap").hidden = total === 0;
-  if ($("active-buffs-all")) $("active-buffs-all").disabled = total === 0 || checked === total;
-  if ($("active-buffs-none")) $("active-buffs-none").disabled = checked === 0;
-  const quick = $("quick-active-buffs");
-  if (quick) {
-    quick.checked = total > 0 && checked === total;
-    quick.indeterminate = checked > 0 && checked < total;
-  }
-  if ($("quick-active-buffs-label")) {
-    $("quick-active-buffs-label").textContent = checked > 0 && checked < total
-      ? `套用角色目前身上的 Buff（已選 ${checked}／${total} 項）`
-      : `套用角色目前身上的 Buff（共 ${total} 項）`;
-  }
-  if ($("snapshot-buff-summary")) {
-    $("snapshot-buff-summary").textContent = total
-      ? `匯入遊戲身上的 Buff（已選 ${checked}／${total} 項）`
-      : "匯入遊戲身上的 Buff（角色目前沒有 Buff）";
-  }
-  // Mark manual buff rows that are already active from snapshot (or share a mutually exclusive group)
-  const activeIds = new Set();
-  const activeGroups = new Set();
-  for (const box of checkedBoxes) {
-    const entry = scenario?.active?.[Number(box.value)];
-    if (!entry) continue;
-    if (entry.id) activeIds.add(entry.id);
-    if (entry.group) activeGroups.add(entry.group);
-  }
-  for (const row of $("extra-buffs").children) {
-    const tag = row.querySelector(".effect-active-tag");
-    if (!tag) continue;
-    const sameId = activeIds.has(row.dataset.effect);
-    const sameGroup = !sameId && Boolean(row.dataset.group && activeGroups.has(row.dataset.group));
-    const active = sameId || sameGroup;
-    row.classList.toggle("is-active-from-snapshot", active);
-    tag.hidden = !active;
-    if (sameId) tag.textContent = "身上已套用（勾選將覆蓋，不疊加）";
-    else if (sameGroup) tag.textContent = "同類已套用（勾選將取代）";
+  for (const panel of document.querySelectorAll(".tab-panel")) {
+    panel.hidden = panel.id !== `tab-${tabId}`;
   }
 }
 
-function setAllActiveBuffs(checked) {
-  for (const box of $("active-buffs").querySelectorAll('input[type="checkbox"]')) {
-    box.checked = checked;
-  }
-  syncActiveBuffControls();
-  scheduleStats();
-}
-
-function numberField(text, name, initial, min, max) {
-  const label = document.createElement("label");
-  label.textContent = text;
-  const input = document.createElement("input");
-  input.type = "number";
-  input.dataset.parameter = name;
-  input.min = String(min);
-  input.max = String(max);
-  input.value = String(initial);
-  input.required = true;
-  label.append(input);
-  return label;
-}
-
-function effectRow(definition) {
-  const row = document.createElement("div");
-  row.className = "effect-row";
-  row.dataset.effect = definition.id;
-  row.dataset.name = definition.name;
-  if (definition.group) row.dataset.group = definition.group;
-  const label = document.createElement("label");
-  label.className = "check";
-  const select = document.createElement("input");
-  select.type = "checkbox";
-  select.className = "effect-toggle";
-  const activeTag = document.createElement("span");
-  activeTag.className = "effect-active-tag";
-  activeTag.hidden = true;
-  label.append(select, definition.name, activeTag);
-  const settings = document.createElement("fieldset");
-  settings.className = "effect-parameters";
-  settings.hidden = settings.disabled = true;
-  settings.append(numberField("等級", "level", definition.max, 1, definition.max),
-    numberField("持續（秒）", "seconds", 0, 0, 120));
-  if (definition.stats) {
-    for (const stat of definition.stats) settings.append(numberField(`演奏者 ${stat.toUpperCase()}`, stat, 90, 0, 999));
-    settings.append(numberField(definition.lessonName, "lesson", 10, 0, 10));
-  }
-  select.onchange = () => {
-    settings.hidden = settings.disabled = !select.checked;
-    filterEffects(row.parentElement.id === "extra-buffs" ? "buff" : "status");
-  };
-  row.append(label, settings);
-  return row;
-}
-
-const effectLists = {buff:"extra-buffs", status:"monster-statuses"};
-
-function filterEffects(type) {
-  const term = $(`${type}-filter`).value.trim().normalize("NFKC").toLowerCase();
-  const rows = [...$(effectLists[type]).children];
-  let visible = 0;
-  let selected = 0;
-  let hiddenSelected = 0;
-  for (const row of rows) {
-    const match = `${row.dataset.name} ${row.dataset.effect}`.normalize("NFKC").toLowerCase().includes(term);
-    row.hidden = !match;
-    if (match) visible++;
-    if (row.querySelector(".effect-toggle").checked) {
-      selected++;
-      if (!match) hiddenSelected++;
-    }
-  }
-  $(`${type}-count`).textContent = `顯示 ${visible} 項 · 已勾選 ${selected} 項` +
-    (hiddenSelected ? `（${hiddenSelected} 項被篩選隱藏）` : "");
-}
-
-function readEffects(container) {
-  return [...$(container).children].filter(row => row.querySelector(".effect-toggle").checked).map(row => {
-    const {level, seconds: duration, ...performer} = Object.fromEntries([...row.querySelectorAll("[data-parameter]")]
-      .map(input => [input.dataset.parameter, Number(input.value)]));
-    return {id:row.dataset.effect, level, seconds: duration, performer};
-  });
-}
-
-function cleanEquipOverrides() {
-  const keys = Object.keys(equipOverrides);
-  if (!keys.length) return undefined;
-  return structuredClone(equipOverrides);
-}
-
-function readScenario() {
-  return {
-    includeActive: [...$("active-buffs").querySelectorAll("input:checked")].map(input => Number(input.value)),
-    keepActiveBuffs: $("keep-active-buffs") ? $("keep-active-buffs").checked : true,
-    buffs: readEffects("extra-buffs"),
-    statuses: readEffects("monster-statuses"),
-    autoBuffs: $("auto-buffs").checked,
-    ammoItemId: $("ammo-choice").value ? Number($("ammo-choice").value) : undefined,
-    equipOverrides: cleanEquipOverrides(),
-  };
+function updateHeaderRole() {
+  if (!snapshot) return;
+  const c = snapshot.character;
+  const jobDef = jobMap.get(c.job);
+  const jobName = jobDef?.name ?? c.job;
+  const rebirthStr = currentRebirths > 0 ? `${currentRebirths}轉` : "0轉";
+  const srcStr = currentIsCustom ? "自訂" : "匯入";
+  $("role").textContent = `${c.name} · ${jobName}（${rebirthStr}）· Base ${c.baseLv}／Job ${c.jobLv} · ${srcStr}`;
 }
 
 // =========================================================================
-// Custom Equipment / Refine / Card Editor
+// TAB 1: Character Builder & Stat Allocator
+// =========================================================================
+
+function populateJobSelect(rebirths, currentJobId) {
+  if (!builderInfo) return;
+  const wantUpper = rebirths >= 1;
+  const sel = $("build-job");
+  const groups = wantUpper
+    ? [
+      {label: "進階二轉（上限 Job 70）", items: builderInfo.jobs.filter(j => j.upper && j.tier === 2)},
+      {label: "進階一轉（上限 Job 50）", items: builderInfo.jobs.filter(j => j.upper && j.tier === 1)},
+      {label: "進階初學者", items: builderInfo.jobs.filter(j => j.upper && j.tier === 0)},
+    ]
+    : [
+      {label: "二轉（上限 Job 50）", items: builderInfo.jobs.filter(j => !j.upper && j.tier === 2)},
+      {label: "一轉／擴充（上限 Job 50／99）", items: builderInfo.jobs.filter(j => !j.upper && j.tier === 1)},
+      {label: "初學者", items: builderInfo.jobs.filter(j => !j.upper && j.tier === 0)},
+    ];
+  sel.replaceChildren(...groups.filter(g => g.items.length).map(group => {
+    const og = document.createElement("optgroup");
+    og.label = group.label;
+    for (const j of group.items.sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"))) {
+      og.append(new Option(j.name, j.id));
+    }
+    return og;
+  }));
+  if ([...sel.options].some(o => o.value === currentJobId)) {
+    sel.value = currentJobId;
+  }
+}
+
+function renderBuildTab() {
+  if (!snapshot || !builderInfo) return;
+  const c = snapshot.character;
+  const jobDef = jobMap.get(c.job);
+  $("build-name").value = c.name;
+  $("build-rebirths").value = String(currentRebirths);
+  $("rebirth-0").classList.toggle("is-active", currentRebirths === 0);
+  $("rebirth-1").classList.toggle("is-active", currentRebirths >= 1);
+  $("rebirth-hint").textContent = currentRebirths === 0
+    ? "0 轉一般職業：Lv.1 起始 48 素質點、基礎 HP／SP 1.0×"
+    : currentRebirths === 1
+      ? "1 轉進階職業：Lv.1 起始 100 素質點、基礎 HP／SP ×1.25、Job 上限 70"
+      : `已填 ${currentRebirths} 轉（RO 放置仙境原版以 1 轉進階職業計算：起始 100 點、HP／SP ×1.25；若需額外點數可勾選下方「自由配點」）`;
+
+  populateJobSelect(currentRebirths, c.job);
+  const maxJL = jobDef?.maxJobLv ?? 70;
+  $("build-base-lv").value = String(c.baseLv);
+  $("build-job-lv").max = String(maxJL);
+  $("build-job-lv").value = String(Math.min(maxJL, c.jobLv));
+  $("build-job-lv-max-label").textContent = String(maxJL);
+  $("first-job-lv-wrap").hidden = !jobDef || jobDef.tier < 2;
+  $("build-first-job-lv").value = String(currentFirstJobLv);
+
+  const showRiding = RIDING_JOBS.has(c.job);
+  const showFalcon = FALCON_JOBS.has(c.job);
+  $("build-riding-wrap").hidden = !showRiding;
+  if (showRiding) $("build-riding").checked = Boolean(c.riding);
+  $("build-falcon-wrap").hidden = !showFalcon;
+  if (showFalcon) $("build-falcon").checked = Boolean(c.falcon);
+
+  $("revert-imported-char").hidden = !originalImportedSnapshot;
+  $("char-source-hint").textContent = originalImportedSnapshot
+    ? "目前以匯入角色為基底，所有配點、技能與裝備修改僅在本機模擬，不會改動遊戲帳號。"
+    : "自訂角色模式：可自由設定轉生次數、職業、等級、素質、技能與裝備，完全不需匯入遊戲。";
+
+  renderStatAllocator();
+  updateHeaderRole();
+}
+
+function renderStatAllocator() {
+  if (!snapshot) return;
+  const c = snapshot.character;
+  const freeMode = $("build-free-stats").checked;
+  const totalPts = totalStatPointsFor(c.baseLv, currentRebirths);
+  const usedPts = spentStatPoints(c.stats);
+  const remain = totalPts - usedPts;
+  const pill = $("stat-points-summary");
+  pill.textContent = remain >= 0
+    ? `剩餘素質點數：${format(remain)} ／ ${format(totalPts)}（已用 ${format(usedPts)}）`
+    : `超出素質點數：${format(Math.abs(remain))} 點（已用 ${format(usedPts)} ／ ${format(totalPts)}）`;
+  pill.classList.toggle("is-over", remain < 0);
+
+  const panelTotals = lastPreview?.current ?? lastPreview?.base ?? null;
+  $("stat-allocator").replaceChildren(...STAT_KEYS.map(key => {
+    const val = Math.max(1, Math.min(99, Math.trunc(c.stats[key] ?? 1)));
+    const upperKey = key.toUpperCase();
+    const totalShown = panelTotals?.[upperKey] ?? val;
+    const bonus = totalShown - val;
+    const cost1 = val >= 99 ? 0 : statStepCost(val);
+
+    const row = document.createElement("div");
+    row.className = "stat-row";
+
+    const meta = document.createElement("div");
+    meta.className = "stat-meta";
+    const code = document.createElement("span");
+    code.className = "stat-code";
+    code.textContent = upperKey;
+    const tot = document.createElement("span");
+    tot.className = "stat-total";
+    tot.textContent = `${val} ${bonus < 0 ? "−" : "+"} ${Math.abs(bonus)} ＝ ${totalShown}`;
+    meta.append(code, tot);
+
+    const controls = document.createElement("div");
+    controls.className = "stat-controls";
+
+    const mkBtn = (label, delta) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "stat-step-btn";
+      b.textContent = label;
+      if (delta < 0 && val <= 1) b.disabled = true;
+      if (delta > 0 && (val >= 99 || (!freeMode && remain < cost1))) b.disabled = true;
+      b.onclick = () => adjustStat(key, delta);
+      return b;
+    };
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.className = "stat-input";
+    input.min = "1";
+    input.max = "99";
+    input.value = String(val);
+    input.setAttribute("aria-label", `${upperKey} 基礎值`);
+    input.onchange = () => {
+      const target = Math.max(1, Math.min(99, Math.trunc(Number(input.value) || 1)));
+      setStatExact(key, target);
+    };
+
+    controls.append(mkBtn("−10", -10), mkBtn("−1", -1), input, mkBtn("+1", 1), mkBtn("+10", 10));
+
+    const cost = document.createElement("span");
+    cost.className = "stat-cost";
+    cost.textContent = val >= 99 ? "已達上限" : `+1 耗 ${cost1} 點`;
+
+    row.append(meta, controls, cost);
+    return row;
+  }));
+}
+
+function setStatExact(key, desired) {
+  if (!snapshot) return;
+  const freeMode = $("build-free-stats").checked;
+  const c = snapshot.character;
+  let val = Math.max(1, Math.min(99, Math.trunc(desired)));
+  if (!freeMode && val > c.stats[key]) {
+    const totalPts = totalStatPointsFor(c.baseLv, currentRebirths);
+    const otherSpent = spentStatPoints({...c.stats, [key]: 1});
+    let best = 1;
+    let acc = otherSpent;
+    while (best < val && best < 99) {
+      const cost = statStepCost(best);
+      if (acc + cost > totalPts) break;
+      acc += cost;
+      best++;
+    }
+    val = best;
+  }
+  c.stats[key] = val;
+  renderStatAllocator();
+  scheduleStats();
+}
+
+function adjustStat(key, delta) {
+  if (!snapshot) return;
+  const current = snapshot.character.stats[key] ?? 1;
+  setStatExact(key, current + delta);
+}
+
+async function handleJobOrLevelChange({jobChanged = false} = {}) {
+  if (!snapshot || !builderInfo) return;
+  const c = snapshot.character;
+  const jobDef = jobMap.get(c.job);
+  if (jobDef) {
+    c.jobLv = Math.max(1, Math.min(jobDef.maxJobLv, Math.trunc(c.jobLv)));
+    if (jobChanged) {
+      // Keep only skills belonging to the new job's skill tree
+      const allowed = new Map(jobDef.skillTree.map(s => [s.id, s]));
+      const nextSkills = {};
+      for (const [sid, lv] of Object.entries(c.skills ?? {})) {
+        const entry = allowed.get(sid);
+        if (entry && lv > 0) nextSkills[sid] = Math.min(entry.maxLv, lv);
+      }
+      if (allowed.has("NV_BASIC") && !nextSkills.NV_BASIC) nextSkills.NV_BASIC = 9;
+      c.skills = nextSkills;
+      if (!RIDING_JOBS.has(c.job)) delete c.riding;
+      if (!FALCON_JOBS.has(c.job)) delete c.falcon;
+      // Clean auto-cast skills that no longer exist
+      if (snapshot.config?.skills) {
+        snapshot.config.skills = snapshot.config.skills.filter(s => (c.skills[s.skill] ?? 0) > 0);
+      }
+    }
+  }
+  c.hp = 999999;
+  c.sp = 999999;
+  renderBuildTab();
+  renderSkillTree();
+  await refreshDerivedCatalogs();
+}
+
+// =========================================================================
+// TAB 2: Skill Tree Allocator
+// =========================================================================
+
+function getSkillTreeEntry(skillId) {
+  return jobMap.get(snapshot?.character?.job)?.skillTree.find(s => s.id === skillId);
+}
+
+function collectMissingPrereqs(jobDef, skillMap, skillId, visited = new Set()) {
+  if (visited.has(skillId)) return [];
+  visited.add(skillId);
+  const entry = jobDef.skillTree.find(s => s.id === skillId);
+  if (!entry?.requires) return [];
+  const steps = [];
+  for (const [reqId, reqLv] of Object.entries(entry.requires)) {
+    const cur = skillMap[reqId] ?? 0;
+    if (cur < reqLv) {
+      steps.push(...collectMissingPrereqs(jobDef, skillMap, reqId, visited));
+      steps.push({id: reqId, targetLv: reqLv});
+    }
+  }
+  return steps;
+}
+
+function setSkillLevel(skillId, targetLv) {
+  if (!snapshot || !builderInfo) return;
+  const c = snapshot.character;
+  const jobDef = jobMap.get(c.job);
+  if (!jobDef) return;
+  const entry = jobDef.skillTree.find(s => s.id === skillId);
+  if (!entry) return;
+
+  const freeSkills = $("build-free-skills").checked;
+  const maxPts = totalSkillPointsFor(jobDef, c.jobLv, currentFirstJobLv);
+  const nextMap = {...(c.skills ?? {})};
+  const clamped = Math.max(0, Math.min(entry.maxLv, Math.trunc(targetLv)));
+
+  if (clamped > (nextMap[skillId] ?? 0)) {
+    // Auto-satisfy prerequisites
+    const prereqs = collectMissingPrereqs(jobDef, nextMap, skillId);
+    for (const p of prereqs) {
+      nextMap[p.id] = Math.max(nextMap[p.id] ?? 0, p.targetLv);
+    }
+    nextMap[skillId] = clamped;
+    if (!freeSkills && entry.questJobLv == null) {
+      const needed = spentSkillPoints(jobDef, nextMap);
+      if (needed > maxPts) {
+        $("status").textContent = `技能點數不足（需要 ${needed} 點，目前可用 ${maxPts} 點）。可提高 Job Lv 或勾選「不限技能點」。`;
+        return;
+      }
+    }
+  } else {
+    nextMap[skillId] = clamped;
+    if (clamped === 0) delete nextMap[skillId];
+    // Cascade-lower skills that require this skill above its new level
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const s of jobDef.skillTree) {
+        if (!(nextMap[s.id] > 0) || !s.requires) continue;
+        for (const [reqId, reqLv] of Object.entries(s.requires)) {
+          if ((nextMap[reqId] ?? 0) < reqLv) {
+            delete nextMap[s.id];
+            changed = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  c.skills = nextMap;
+  // Sync auto-cast skills levels if configured
+  if (snapshot.config?.skills) {
+    snapshot.config.skills = snapshot.config.skills
+      .filter(s => (c.skills[s.skill] ?? 0) > 0)
+      .map(s => ({...s, lv: Math.min(s.lv, c.skills[s.skill])}));
+  }
+  $("status").textContent = "";
+  renderSkillTree();
+  void refreshAttackSkillsAndStats();
+}
+
+function toggleAutoCastSkill(skillId, enabled) {
+  if (!snapshot) return;
+  const lv = snapshot.character.skills?.[skillId] ?? 0;
+  snapshot.config.skills = (snapshot.config.skills ?? []).filter(s => !(s.skill === skillId && s.use === "attack"));
+  if (enabled && lv > 0) {
+    snapshot.config.skills.push({skill: skillId, lv, use: "attack", percent: 0, enabled: true});
+  }
+  scheduleStats();
+}
+
+function renderSkillTree() {
+  if (!snapshot || !builderInfo) return;
+  const c = snapshot.character;
+  const jobDef = jobMap.get(c.job);
+  if (!jobDef) return;
+  const used = spentSkillPoints(jobDef, c.skills ?? {});
+  const maxPts = totalSkillPointsFor(jobDef, c.jobLv, currentFirstJobLv);
+  const remain = maxPts - used;
+
+  const pill = $("skill-points-summary");
+  pill.textContent = remain >= 0
+    ? `已配技能點：${used} ／ ${maxPts}（剩餘 ${remain} 點）`
+    : `超出技能點：${Math.abs(remain)} 點（已配 ${used} ／ ${maxPts}）`;
+  pill.classList.toggle("is-over", remain < 0);
+  $("tab-badge-skills").textContent = `${used}/${maxPts}`;
+
+  const term = $("skill-tree-search").value.trim().normalize("NFKC").toLowerCase();
+  const autoCastSet = new Set(
+    (snapshot.config?.skills ?? [])
+      .filter(s => s.use === "attack" && s.enabled !== false)
+      .map(s => s.skill)
+  );
+  const skillNameById = new Map(jobDef.skillTree.map(s => [s.id, s.name]));
+
+  const filtered = jobDef.skillTree.filter(entry => {
+    const lv = c.skills?.[entry.id] ?? 0;
+    if (skillFilterMode === "attack" && !entry.attack) return false;
+    if (skillFilterMode === "learned" && lv <= 0) return false;
+    if (!term) return true;
+    return `${entry.name} ${entry.id} ${entry.desc}`.normalize("NFKC").toLowerCase().includes(term);
+  });
+
+  if (!filtered.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "沒有符合篩選條件的技能。";
+    $("skill-tree-list").replaceChildren(empty);
+    return;
+  }
+
+  $("skill-tree-list").replaceChildren(...filtered.map(entry => {
+    const lv = c.skills?.[entry.id] ?? 0;
+    const card = document.createElement("div");
+    card.className = "skill-card";
+    if (lv > 0) card.classList.add("is-learned");
+
+    const head = document.createElement("div");
+    head.className = "skill-card-head";
+
+    const titleWrap = document.createElement("div");
+    titleWrap.className = "skill-title-wrap";
+    const nameEl = document.createElement("div");
+    nameEl.className = "skill-name";
+    nameEl.textContent = entry.name;
+
+    const badges = document.createElement("div");
+    badges.className = "skill-badges";
+    if (entry.attack) {
+      const b = document.createElement("span");
+      b.className = "mini-tag tag-attack";
+      b.textContent = "主動攻擊";
+      badges.append(b);
+    }
+    if (entry.questJobLv != null) {
+      const b = document.createElement("span");
+      b.className = "mini-tag tag-quest";
+      b.textContent = `任務技能（免點數）`;
+      badges.append(b);
+    }
+    if (entry.requires) {
+      for (const [reqId, reqLv] of Object.entries(entry.requires)) {
+        const met = (c.skills?.[reqId] ?? 0) >= reqLv;
+        const b = document.createElement("span");
+        b.className = `mini-tag ${met ? "tag-ok" : "tag-req"}`;
+        b.textContent = `前置 ${skillNameById.get(reqId) ?? reqId} Lv${reqLv}`;
+        badges.append(b);
+      }
+    }
+    titleWrap.append(nameEl, badges);
+
+    const lvBadge = document.createElement("span");
+    lvBadge.className = "skill-lv-badge";
+    lvBadge.textContent = `Lv ${lv}/${entry.maxLv}`;
+    head.append(titleWrap, lvBadge);
+
+    const desc = document.createElement("p");
+    desc.className = "skill-desc";
+    desc.textContent = entry.desc || entry.id;
+    desc.title = entry.desc || entry.id;
+
+    const foot = document.createElement("div");
+    foot.className = "skill-card-foot";
+
+    const stepper = document.createElement("div");
+    stepper.className = "skill-stepper";
+    const b0 = document.createElement("button");
+    b0.type = "button"; b0.textContent = "0"; b0.disabled = lv <= 0;
+    b0.onclick = () => setSkillLevel(entry.id, 0);
+    const bm = document.createElement("button");
+    bm.type = "button"; bm.textContent = "−"; bm.disabled = lv <= 0;
+    bm.onclick = () => setSkillLevel(entry.id, lv - 1);
+    const bp = document.createElement("button");
+    bp.type = "button"; bp.textContent = "+"; bp.disabled = lv >= entry.maxLv;
+    bp.onclick = () => setSkillLevel(entry.id, lv + 1);
+    const bmax = document.createElement("button");
+    bmax.type = "button"; bmax.textContent = "滿"; bmax.disabled = lv >= entry.maxLv;
+    bmax.onclick = () => setSkillLevel(entry.id, entry.maxLv);
+    stepper.append(b0, bm, bp, bmax);
+
+    foot.append(stepper);
+
+    if (entry.attack && lv > 0) {
+      const autoLabel = document.createElement("label");
+      autoLabel.className = "check inline-check";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = autoCastSet.has(entry.id);
+      cb.onchange = () => toggleAutoCastSkill(entry.id, cb.checked);
+      autoLabel.append(cb, "掛機施放");
+      foot.append(autoLabel);
+    }
+
+    card.append(head, desc, foot);
+    return card;
+  }));
+}
+
+// =========================================================================
+// TAB 3: Equipment / Refine / Card Editor
 // =========================================================================
 
 function effectiveSlotEntry(slot) {
@@ -507,9 +928,7 @@ function computeBlockedSlots() {
     const def = entry ? itemMap.get(entry.itemId) : null;
     if (!def) continue;
     for (const s of def.slots) {
-      if (s !== head && HEAD_SLOTS.includes(s)) {
-        blocked.set(s, `由 ${def.name} 佔用`);
-      }
+      if (s !== head && HEAD_SLOTS.includes(s)) blocked.set(s, `由 ${def.name} 佔用`);
     }
   }
   return blocked;
@@ -553,12 +972,9 @@ function isSameAsOriginal(slot, patch) {
 }
 
 function setSlotOverride(slot, patch) {
-  if (isSameAsOriginal(slot, patch)) {
-    delete equipOverrides[slot];
-  } else {
-    equipOverrides[slot] = patch;
-  }
-  // Keep conflicting slots consistent in the editor state.
+  if (isSameAsOriginal(slot, patch)) delete equipOverrides[slot];
+  else equipOverrides[slot] = patch;
+
   if (patch && patch.itemId !== null) {
     const def = itemMap.get(patch.itemId);
     if (slot === "weapon" && def?.weaponType && TWO_HANDED_TYPES.has(def.weaponType)) {
@@ -611,6 +1027,9 @@ function renderGearGrid() {
   badge.hidden = modifiedCount === 0;
   badge.textContent = `已自訂 ${modifiedCount} 個部位`;
   $("gear-reset-all").disabled = modifiedCount === 0;
+  const tabBadge = $("tab-badge-gear");
+  tabBadge.hidden = modifiedCount === 0;
+  tabBadge.textContent = String(modifiedCount);
 
   $("gear-grid").replaceChildren(...equipCatalog.slots.map(({id, name}) => {
     const entry = effectiveSlotEntry(id);
@@ -664,8 +1083,12 @@ function renderGearGrid() {
     btn.onclick = () => {
       selectedSlot = selectedSlot === id ? null : id;
       renderGearGrid();
-      if (selectedSlot) renderSlotEditor(selectedSlot, {preserveSearch: false});
-      else $("slot-editor").hidden = true;
+      if (selectedSlot) {
+        renderSlotEditor(selectedSlot, {preserveSearch: false});
+        $("slot-editor").scrollIntoView({behavior: "smooth", block: "nearest"});
+      } else {
+        $("slot-editor").hidden = true;
+      }
     };
     return btn;
   }));
@@ -682,7 +1105,7 @@ function renderSlotEditor(slot, {preserveSearch = false} = {}) {
   const isModified = Object.hasOwn(equipOverrides, slot);
 
   $("slot-editor").hidden = false;
-  $("slot-editor-title").textContent = `編輯：${slotInfo?.name ?? slot}`;
+  $("slot-editor-title").textContent = `編輯部位：${slotInfo?.name ?? slot}`;
   $("slot-reset").disabled = !isModified;
   $("slot-unequip").disabled = !entry;
 
@@ -691,23 +1114,22 @@ function renderSlotEditor(slot, {preserveSearch = false} = {}) {
     $("slot-card-search").value = "";
   }
 
-  // Owned equipment quick-picker
   const ownedMatches = equipCatalog.owned.filter(stack => {
     const def = itemMap.get(stack.itemId);
     return def && itemMatchesSlot(def, slot, true);
   });
-  const ownedRow = $("slot-owned-row");
-  ownedRow.hidden = ownedMatches.length === 0;
+  $("slot-owned-row").hidden = ownedMatches.length === 0;
   if (ownedMatches.length) {
-    const sel = $("slot-owned-select");
-    sel.replaceChildren(
+    $("slot-owned-select").replaceChildren(
       new Option("— 從背包挑選裝備套用 —", ""),
       ...ownedMatches.map(stack => {
         const def = itemMap.get(stack.itemId);
         const ref = stack.refine ? `+${stack.refine} ` : "";
         const cNames = stack.cards.map(cid => cardMap.get(cid)?.name ?? `#${cid}`).join("、");
-        const label = `${ref}${def.name}${def.cardSlots ? ` [${def.cardSlots}]` : ""}${cNames ? ` · ${cNames}` : ""}${stack.broken ? "（損壞）" : ""}`;
-        return new Option(label, String(stack.uid));
+        return new Option(
+          `${ref}${def.name}${def.cardSlots ? ` [${def.cardSlots}]` : ""}${cNames ? ` · ${cNames}` : ""}${stack.broken ? "（損壞）" : ""}`,
+          String(stack.uid)
+        );
       })
     );
   }
@@ -742,7 +1164,6 @@ function renderSlotItemOptions(slot, entry) {
 }
 
 function renderSlotRefineAndCards(slot, entry, def) {
-  // Refine
   const refineBlock = $("slot-refine-block");
   if (def && def.refineable) {
     refineBlock.hidden = false;
@@ -758,7 +1179,6 @@ function renderSlotRefineAndCards(slot, entry, def) {
     refineBlock.hidden = true;
   }
 
-  // Cards
   const cardsBlock = $("slot-cards-block");
   const maxSlots = def?.cardSlots ?? 0;
   if (!def || maxSlots <= 0) {
@@ -787,11 +1207,8 @@ function renderSlotCardPickers(slot, entry, def) {
     const label = document.createElement("label");
     label.textContent = `插槽 ${idx + 1}`;
     const select = document.createElement("select");
-    select.dataset.cardIndex = String(idx);
-
     const options = [new Option("（空插槽）", "")];
-    const hasSelectedInMatch = !selectedCardId || matchingCards.some(c => c.id === selectedCardId);
-    if (!hasSelectedInMatch) {
+    if (selectedCardId && !matchingCards.some(c => c.id === selectedCardId)) {
       const currentCard = cardMap.get(selectedCardId);
       if (currentCard) options.push(new Option(`${currentCard.name} · #${currentCard.id}`, String(currentCard.id)));
     }
@@ -818,46 +1235,307 @@ function renderSlotCardPickers(slot, entry, def) {
         cards: nextCards.filter(Boolean),
       });
     };
-
     row.append(label, select, desc);
     return row;
   }));
 }
 
-function initEquipmentEditor(catalog) {
+function initEquipmentEditor(catalog, keepOverrides = false) {
   equipCatalog = catalog;
-  equipOverrides = {};
-  selectedSlot = null;
+  if (!keepOverrides) {
+    equipOverrides = {};
+    selectedSlot = null;
+  }
   itemMap = new Map(catalog.items.map(item => [item.id, item]));
   cardMap = new Map(catalog.cards.map(card => [card.id, card]));
-  $("gear-section").hidden = false;
-  $("slot-editor").hidden = true;
   renderGearGrid();
+  if (selectedSlot) renderSlotEditor(selectedSlot, {preserveSearch: true});
+  else $("slot-editor").hidden = true;
 }
 
 // =========================================================================
-// Character Stats & Simulation Output
+// TAB 4: Buffs & Monster Statuses
 // =========================================================================
+
+function buffCategoryOf(def) {
+  if (def.stats) return "song";
+  if (ELEMENT_BUFF_IDS.has(def.id)) return "element";
+  if (ITEM_BUFF_PREFIXES.some(p => def.id.startsWith(p))) return "item";
+  return "skill";
+}
+
+function numberField(text, name, initial, min, max) {
+  const label = document.createElement("label");
+  label.textContent = text;
+  const input = document.createElement("input");
+  input.type = "number";
+  input.dataset.parameter = name;
+  input.min = String(min);
+  input.max = String(max);
+  input.value = String(initial);
+  input.required = true;
+  label.append(input);
+  return label;
+}
+
+function effectRow(definition, isBuff = false) {
+  const row = document.createElement("div");
+  row.className = "effect-row";
+  row.dataset.effect = definition.id;
+  row.dataset.name = definition.name;
+  if (definition.group) row.dataset.group = definition.group;
+  if (isBuff) row.dataset.category = buffCategoryOf(definition);
+
+  const label = document.createElement("label");
+  label.className = "check";
+  const select = document.createElement("input");
+  select.type = "checkbox";
+  select.className = "effect-toggle";
+  const activeTag = document.createElement("span");
+  activeTag.className = "effect-active-tag";
+  activeTag.hidden = true;
+  label.append(select, definition.name, activeTag);
+
+  const settings = document.createElement("fieldset");
+  settings.className = "effect-parameters";
+  settings.hidden = settings.disabled = true;
+  settings.append(
+    numberField("等級", "level", definition.max, 1, definition.max),
+    numberField("持續（秒）", "seconds", 0, 0, 120)
+  );
+  if (definition.stats) {
+    for (const stat of definition.stats) settings.append(numberField(`演奏者 ${stat.toUpperCase()}`, stat, 90, 0, 999));
+    settings.append(numberField(definition.lessonName, "lesson", 10, 0, 10));
+  }
+  select.onchange = () => {
+    settings.hidden = settings.disabled = !select.checked;
+    filterEffects(row.parentElement.id === "extra-buffs" ? "buff" : "status");
+    updateBuffTabBadge();
+  };
+  row.append(label, settings);
+  return row;
+}
+
+const effectLists = {buff: "extra-buffs", status: "monster-statuses"};
+
+function filterEffects(type) {
+  const term = $(`${type}-filter`).value.trim().normalize("NFKC").toLowerCase();
+  const rows = [...$(effectLists[type]).children];
+  let visible = 0, selected = 0, hiddenSelected = 0;
+  for (const row of rows) {
+    const textMatch = `${row.dataset.name} ${row.dataset.effect}`.normalize("NFKC").toLowerCase().includes(term);
+    const catMatch = type !== "buff" || buffCategoryFilter === "all" || row.dataset.category === buffCategoryFilter;
+    const match = textMatch && catMatch;
+    row.hidden = !match;
+    if (match) visible++;
+    if (row.querySelector(".effect-toggle").checked) {
+      selected++;
+      if (!match) hiddenSelected++;
+    }
+  }
+  $(`${type}-count`).textContent = `顯示 ${visible} 項 · 已勾選 ${selected} 項` +
+    (hiddenSelected ? `（${hiddenSelected} 項被篩選隱藏）` : "");
+}
+
+function readEffects(container) {
+  return [...$(container).children]
+    .filter(row => row.querySelector(".effect-toggle").checked)
+    .map(row => {
+      const {level, seconds: duration, ...performer} = Object.fromEntries(
+        [...row.querySelectorAll("[data-parameter]")].map(input => [input.dataset.parameter, Number(input.value)])
+      );
+      return {id: row.dataset.effect, level, seconds: duration, performer};
+    });
+}
+
+function updateBuffTabBadge() {
+  const activeCount = $("active-buffs").querySelectorAll("input:checked").length;
+  const manualCount = $("extra-buffs").querySelectorAll(".effect-toggle:checked").length;
+  const statusCount = $("monster-statuses").querySelectorAll(".effect-toggle:checked").length;
+  const total = activeCount + manualCount + statusCount;
+  const badge = $("tab-badge-buffs");
+  badge.hidden = total === 0;
+  badge.textContent = String(total);
+}
+
+function syncActiveBuffControls() {
+  const boxes = [...$("active-buffs").querySelectorAll('input[type="checkbox"]')];
+  const total = boxes.length;
+  const checkedBoxes = boxes.filter(box => box.checked);
+  const checked = checkedBoxes.length;
+
+  $("snapshot-buff-card").hidden = total === 0;
+  $("quick-active-buffs-wrap").hidden = total === 0;
+  $("active-buffs-all").disabled = total === 0 || checked === total;
+  $("active-buffs-none").disabled = checked === 0;
+
+  const quick = $("quick-active-buffs");
+  quick.checked = total > 0 && checked === total;
+  quick.indeterminate = checked > 0 && checked < total;
+  $("quick-active-buffs-label").textContent = checked > 0 && checked < total
+    ? `套用角色目前身上的 Buff（已選 ${checked}／${total} 項）`
+    : `套用角色目前身上的 Buff（共 ${total} 項）`;
+  $("snapshot-buff-summary").textContent = `匯入遊戲身上的 Buff（已選 ${checked}／${total} 項）`;
+
+  const activeIds = new Set();
+  const activeGroups = new Set();
+  for (const box of checkedBoxes) {
+    const entry = scenario?.active?.[Number(box.value)];
+    if (!entry) continue;
+    if (entry.id) activeIds.add(entry.id);
+    if (entry.group) activeGroups.add(entry.group);
+  }
+  for (const row of $("extra-buffs").children) {
+    const tag = row.querySelector(".effect-active-tag");
+    if (!tag) continue;
+    const sameId = activeIds.has(row.dataset.effect);
+    const sameGroup = !sameId && Boolean(row.dataset.group && activeGroups.has(row.dataset.group));
+    const active = sameId || sameGroup;
+    row.classList.toggle("is-active-from-snapshot", active);
+    tag.hidden = !active;
+    if (sameId) tag.textContent = "身上已套用（勾選將覆蓋，不疊加）";
+    else if (sameGroup) tag.textContent = "同類已套用（勾選將取代）";
+  }
+  updateBuffTabBadge();
+}
+
+function setAllActiveBuffs(checked) {
+  for (const box of $("active-buffs").querySelectorAll('input[type="checkbox"]')) {
+    box.checked = checked;
+  }
+  syncActiveBuffControls();
+  scheduleStats();
+}
+
+function renderScenario() {
+  const ammo = $("ammo-choice");
+  const selected = ammo.value;
+  ammo.replaceChildren(
+    new Option("依換裝／目前裝備／補箭", ""),
+    ...scenario.ammo.map(arrow => new Option(
+      `${arrow.name} · ${element[arrow.element] ?? arrow.element} · ${arrow.quantity ? `背包 ${format(arrow.quantity)}` : "模擬 1,000"}${arrow.configured ? " · 換裝規則" : ""}`,
+      arrow.id
+    ))
+  );
+  if (scenario.ammo.some(arrow => String(arrow.id) === selected)) ammo.value = selected;
+  ammo.disabled = !scenario.ammo.length;
+
+  $("active-buffs").replaceChildren(...scenario.active.map(({index, name, level, remainingMs}) => {
+    const label = document.createElement("label");
+    label.className = "check";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = false;
+    input.value = String(index);
+    const rem = Number.isFinite(remainingMs) && remainingMs > 0 && remainingMs < 1e12
+      ? ` · 剩 ${seconds(remainingMs)}`
+      : "";
+    label.append(input, `${level ? `${name} Lv ${level}` : name}${rem}`);
+    return label;
+  }));
+
+  if (!$("extra-buffs").children.length) {
+    $("extra-buffs").replaceChildren(...scenario.buffs.map(d => effectRow(d, true)));
+    $("monster-statuses").replaceChildren(...scenario.statuses.map(d => effectRow(d, false)));
+  }
+  syncActiveBuffControls();
+  filterEffects("buff");
+  filterEffects("status");
+}
+
+function cleanEquipOverrides() {
+  const keys = Object.keys(equipOverrides);
+  return keys.length ? structuredClone(equipOverrides) : undefined;
+}
+
+function readScenario() {
+  return {
+    includeActive: [...$("active-buffs").querySelectorAll("input:checked")].map(input => Number(input.value)),
+    keepActiveBuffs: $("keep-active-buffs").checked,
+    buffs: readEffects("extra-buffs"),
+    statuses: readEffects("monster-statuses"),
+    autoBuffs: $("auto-buffs").checked,
+    ammoItemId: $("ammo-choice").value ? Number($("ammo-choice").value) : undefined,
+    equipOverrides: cleanEquipOverrides(),
+  };
+}
+
+// =========================================================================
+// TAB 5: Monsters, Live Stats Sidebar & DPS Results
+// =========================================================================
+
+function updateMonsterPreview() {
+  const id = Number($("monster").value);
+  const mob = targets.find(m => m.id === id);
+  const box = $("selected-monster-preview");
+  if (!mob) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.replaceChildren();
+  const title = document.createElement("strong");
+  title.textContent = `${mob.name}（Lv ${mob.lv} · #${mob.id}）${mob.boss ? " 👑 BOSS" : ""}`;
+  const detail = document.createElement("span");
+  detail.className = "muted";
+  detail.textContent = `HP ${format(mob.hp)} · ${element[mob.element] ?? mob.element} ${mob.elementLv} · ${race[mob.race] ?? mob.race} · ${size[mob.size] ?? mob.size} · DEF ${mob.def}／MDEF ${mob.mdef}`;
+  box.append(title, detail);
+}
+
+function fillMonsters() {
+  const term = $("search").value.trim().normalize("NFKC").toLowerCase();
+  const current = $("monster").value;
+  const found = targets.filter(({id, name}) => String(id).includes(term) || name.toLowerCase().includes(term));
+  $("monster").replaceChildren(
+    new Option(found.length ? "請選擇怪物" : "沒有符合的怪物", ""),
+    ...found.map(({name, lv, id, boss}) => new Option(`${name}${boss ? " [BOSS]" : ""} · Lv ${lv} · #${id}`, id))
+  );
+  if (found.some(({id}) => String(id) === current)) $("monster").value = current;
+  else if (term && found.length === 1) $("monster").value = String(found[0].id);
+  else if (!current && found.length) {
+    const defaultMob = found.find(m => m.id === 1023) ?? found[0];
+    if (defaultMob) $("monster").value = String(defaultMob.id);
+  }
+  updateMonsterPreview();
+  scheduleStats();
+}
+
+function fillLevels() {
+  const skill = skills.find(entry => entry.id === $("skill").value);
+  $("skill-level").replaceChildren(...Array.from({length: skill?.lv ?? 0}, (_, index) =>
+    new Option(`Lv ${index + 1}`, index + 1)));
+  if (skill) $("skill-level").value = String(skill.lv);
+}
+
+function renderAttackSkillSelector() {
+  const prevSkill = $("skill").value;
+  $("skill").replaceChildren(...skills.map(({id, name}) => new Option(name, id)));
+  if (skills.some(s => s.id === prevSkill)) $("skill").value = prevSkill;
+  $("mode").querySelector('option[value="skill"]').disabled = !skills.length;
+  if (!skills.length && $("mode").value === "skill") $("mode").value = "auto";
+  $("skill-fields").hidden = $("mode").value !== "skill";
+  fillLevels();
+}
 
 let statsVersion = 0;
 let statsTimeout;
 function scheduleStats() {
   clearTimeout(statsTimeout);
-  statsTimeout = setTimeout(() => { void showStats(); }, 160);
+  statsTimeout = setTimeout(() => { void showStats(); }, 130);
 }
 
 function showEquipment({equipment, ammo, weaponType, attackElement, missingRuleAmmo}) {
   const arrow = ammo
-    ? `${ammo.name} ×${format(ammo.quantity)} · 箭矢 ATK ${format(ammo.atk)} · ${element[ammo.element] ?? ammo.element}屬性${ammo.simulated ? "（模擬庫存）" : ammo.manual ? "（手動指定）" : ammo.fromRule ? "（自動換裝）" : ammo.fromBag ? "（從背包補上）" : ""}`
-    : weaponType === "bow" ? "目前使用弓，箭矢欄和背包都沒有可用的散裝箭矢。" : "箭矢欄為空。";
-  $("ammo-summary").textContent = `${arrow}　｜　起始普攻：${element[attackElement] ?? attackElement}屬性` +
-    (missingRuleAmmo ? `。換裝規則指定的 ${missingRuleAmmo} 目前沒有背包庫存。` : "");
-  $("equipment-list").replaceChildren(...equipment.map(({slot, name, refine, broken, cards}) => {
+    ? `${ammo.name} ×${format(ammo.quantity)} · 箭 ATK ${format(ammo.atk)} · ${element[ammo.element] ?? ammo.element}屬性${ammo.simulated ? "（模擬）" : ammo.manual ? "（手動）" : ammo.fromRule ? "（自動換裝）" : ammo.fromBag ? "（背包補）" : ""}`
+    : weaponType === "bow" ? "目前使用弓，尚未選擇或裝備箭矢。" : "箭矢欄為空。";
+  $("ammo-summary").textContent = `${arrow} ｜ 普攻屬性：${element[attackElement] ?? attackElement}` +
+    (missingRuleAmmo ? `。換裝規則指定的 ${missingRuleAmmo} 無庫存。` : "");
+  $("equipment-list").replaceChildren(...(equipment.length ? equipment.map(({slot, name, refine, broken, cards}) => {
     const row = document.createElement("li");
     row.textContent = `${slot} · ${refine ? `+${refine} ` : ""}${name}${broken ? "（損壞）" : ""}` +
       (cards.length ? ` · ${cards.join("、")}` : "");
     return row;
-  }));
+  }) : [Object.assign(document.createElement("li"), {textContent: "目前尚未穿戴任何裝備"})]));
 }
 
 async function showStats() {
@@ -865,15 +1543,43 @@ async function showStats() {
   const version = ++statsVersion;
   try {
     const preview = await engine("character", {
-      scenario: readScenario(), mode: $("mode").value, monsterId: Number($("monster").value),
+      scenario: readScenario(), mode: $("mode").value, monsterId: Number($("monster").value) || 0,
     });
-    const {base, current, names, allocated, hasEquipOverrides} = preview;
     if (version !== statsVersion) return;
-    $("character-panel").hidden = false;
+    lastPreview = preview;
+    const {base, current, names, allocated, hasEquipOverrides} = preview;
     const parts = [];
     if (hasEquipOverrides) parts.push("自訂裝備");
     parts.push(names.length ? names.join("、") : "無起始 Buff");
-    $("stats-caption").textContent = `基本素質＋額外加成 · ${parts.join(" · ")}`;
+    $("stats-caption").textContent = parts.join(" · ");
+
+    const kpiKeys = [
+      {key: "ATK", label: "ATK"},
+      {key: "ASPD", label: "ASPD"},
+      {key: "最大 HP", label: "HP"},
+      {key: "CRIT", label: "CRIT"},
+    ];
+    $("stats-kpi").replaceChildren(...kpiKeys.map(({key, label}) => {
+      const tile = document.createElement("div");
+      tile.className = "stats-kpi-tile";
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      const orig = base[key];
+      const active = current?.[key] ?? orig;
+      dd.textContent = format(active);
+      if (active !== orig) {
+        const diff = active - orig;
+        const small = document.createElement("span");
+        small.className = "delta-tag";
+        small.dataset.direction = diff > 0 ? "up" : "down";
+        small.textContent = `${diff > 0 ? "+" : "−"}${format(Math.abs(diff))}`;
+        dd.append(small);
+      }
+      tile.append(dt, dd);
+      return tile;
+    }));
+
     $("character-stats").replaceChildren(...Object.entries(base).map(([key, original]) => {
       const cell = document.createElement("div");
       const label = document.createElement("dt");
@@ -886,42 +1592,74 @@ async function showStats() {
           return `${format(allocated[key])} ${extra < 0 ? "−" : "+"} ${format(Math.abs(extra))}`;
         };
         value.textContent = split(active);
-        value.title = `原始：${split(original)} ＝ ${format(original)}${active !== original ? `。變更後合計：${format(active)}` : ""}`;
+        value.title = `原始：${split(original)} ＝ ${format(original)}${active !== original ? `；變更後合計：${format(active)}` : ""}`;
         if (active !== original) {
           const diff = active - original;
-          const badge = document.createElement("small");
+          const badge = document.createElement("span");
+          badge.className = "delta-tag";
           badge.textContent = `${diff > 0 ? "+" : "−"}${format(Math.abs(diff))}`;
           badge.dataset.direction = diff > 0 ? "up" : "down";
           value.append(badge);
         }
       } else {
         value.textContent = format(original);
-      }
-      if (active !== original && !Object.hasOwn(allocated, key)) {
-        const updated = document.createElement("small");
-        updated.textContent = `→ ${format(active)}`;
-        updated.dataset.direction = active > original ? "up" : "down";
-        value.append(updated);
+        if (active !== original) {
+          const updated = document.createElement("span");
+          updated.className = "delta-tag";
+          updated.textContent = `→ ${format(active)}`;
+          updated.dataset.direction = active > original ? "up" : "down";
+          value.append(updated);
+        }
       }
       cell.append(label, value);
       return cell;
     }));
+
     showEquipment(preview);
+    if (activeTab === "build") renderStatAllocator();
   } catch (error) {
     if (version === statsVersion) $("stats-caption").textContent = error.message;
   }
 }
 
-async function applyLoadedSnapshot(nextSnapshot, {save = true, sourceLabel = ""} = {}) {
-  $("fields").disabled = $("refresh").disabled = true;
-  $("character-panel").hidden = true;
-  $("gear-section").hidden = true;
+async function refreshAttackSkillsAndStats() {
+  if (!snapshot) return;
+  skills = await engine("skills");
+  renderAttackSkillSelector();
+  await showStats();
+}
+
+async function refreshDerivedCatalogs() {
+  if (!snapshot) return;
+  const [nextSkills, nextCatalog] = await Promise.all([engine("skills"), engine("equipment")]);
+  skills = nextSkills;
+  renderAttackSkillSelector();
+  initEquipmentEditor(nextCatalog, true);
+  await showStats();
+}
+
+async function applyLoadedSnapshot(nextSnapshot, {
+  save = true,
+  isCustom = false,
+  rebirths,
+  firstJobLv = 50,
+  overrides = {},
+  sourceLabel = "",
+} = {}) {
+  $("fields").disabled = true;
+  if ($("refresh")) $("refresh").disabled = true;
   statsVersion++;
   $("result").hidden = true;
-  $("status").textContent = "正在初始化角色與裝備資料…";
+  $("status").textContent = "正在載入角色與配點資料…";
   try {
+    await Promise.all([ensureTargets(), ensureBuilder()]);
     snapshot = normalizeSnapshot(nextSnapshot);
-    await ensureTargets();
+    currentIsCustom = Boolean(isCustom);
+    originalImportedSnapshot = isCustom ? null : structuredClone(snapshot);
+    const jobDef = jobMap.get(snapshot.character.job);
+    currentRebirths = rebirths ?? (jobDef?.upper ? 1 : 0);
+    currentFirstJobLv = firstJobLv ?? 50;
+
     const [nextSkills, nextScenario, nextCatalog] = await Promise.all([
       engine("skills"),
       engine("scenario"),
@@ -930,41 +1668,44 @@ async function applyLoadedSnapshot(nextSnapshot, {save = true, sourceLabel = ""}
     skills = nextSkills;
     scenario = nextScenario;
     renderScenario();
-    initEquipmentEditor(nextCatalog);
-    $("role").textContent = `${snapshot.character.name} · Base ${snapshot.character.baseLv}／Job ${snapshot.character.jobLv}`;
-    $("skill").replaceChildren(...skills.map(({id, name}) => new Option(name, id)));
-    $("mode").querySelector('option[value="skill"]').disabled = !skills.length;
-    if (!skills.length && $("mode").value === "skill") $("mode").value = "auto";
-    $("skill-fields").hidden = $("mode").value !== "skill";
-    fillLevels();
+    equipOverrides = overrides ? structuredClone(overrides) : {};
+    selectedSlot = null;
+    initEquipmentEditor(nextCatalog, true);
+    renderAttackSkillSelector();
     fillMonsters();
-    if (save && !isExtension) upsertSavedCharacter(snapshot);
-    if (!isExtension) $("import-panel").open = false;
+    renderBuildTab();
+    renderSkillTree();
+
+    if (save && !isExtension) {
+      upsertSavedCharacter(snapshot, {
+        isCustom: currentIsCustom,
+        rebirths: currentRebirths,
+        firstJobLv: currentFirstJobLv,
+        overrides: equipOverrides,
+      });
+    } else if (!isExtension) {
+      renderSavedBar();
+    }
+    if (!isExtension) $("import-drawer").hidden = true;
     $("fields").disabled = false;
-    $("status").textContent = sourceLabel ? `已載入角色「${snapshot.character.name}」（${sourceLabel}）。` : "";
+    $("status").textContent = sourceLabel ? `已載入「${snapshot.character.name}」（${sourceLabel}）。` : "";
     await showStats();
   } catch (error) {
-    snapshot = null;
-    $("role").textContent = "尚未讀取角色";
     $("status").textContent = error.message;
   } finally {
-    $("refresh").disabled = false;
+    if ($("refresh")) $("refresh").disabled = false;
   }
 }
 
 async function loadFromExtension() {
   $("fields").disabled = $("refresh").disabled = true;
-  $("character-panel").hidden = true;
-  $("gear-section").hidden = true;
   statsVersion++;
   $("result").hidden = true;
-  $("status").textContent = "正在讀取角色資料…";
+  $("status").textContent = "正在讀取遊戲分頁角色資料…";
   try {
-    const [loadedSnap, loadedTargets] = await Promise.all([readCharacterFromExtension(), engine("targets")]);
-    targets = loadedTargets;
-    await applyLoadedSnapshot(loadedSnap, {save: false});
+    const [loadedSnap] = await Promise.all([readCharacterFromExtension(), ensureTargets(), ensureBuilder()]);
+    await applyLoadedSnapshot(loadedSnap, {save: false, isCustom: false});
   } catch (error) {
-    snapshot = null;
     $("role").textContent = "尚未讀取角色";
     $("status").textContent = error.message;
     $("refresh").disabled = false;
@@ -979,7 +1720,7 @@ function showDefense(defense, trials) {
   $("survival").textContent = `存活 ${trials - defense.deaths}／${trials} 次 · 期末平均 HP ${format(defense.endingHp)}` +
     (defense.averageDeath === null ? "" : ` · 倒下樣本平均撐 ${seconds(defense.averageDeath)}`);
   $("incoming-sources").textContent = defense.received.length
-    ? `平均承傷來源　${defense.received.map(({name, average}) => `${name} ${format(average)}`).join(" · ")}`
+    ? `平均承傷來源：${defense.received.map(({name, average}) => `${name} ${format(average)}`).join(" · ")}`
     : "這些樣本中沒有受到怪物傷害。";
 }
 
@@ -991,8 +1732,7 @@ function showTimeline(timeline, total) {
     const row = document.createElement("li");
     row.dataset.kind = kind;
     const time = document.createElement("time");
-    const stamp = (at / 1000).toFixed(2);
-    time.textContent = stamp.padStart(6, "0");
+    time.textContent = (at / 1000).toFixed(2).padStart(6, "0");
     const content = document.createElement("span");
     content.textContent = text;
     const health = document.createElement("span");
@@ -1025,12 +1765,15 @@ function show(result) {
   $("monster-stats").textContent = `HP ${format(monster.hp)} · ${element[panel.elementTarget] ?? panel.elementTarget} ${panel.elementLvTarget} · ${race[monster.race] ?? monster.race} · ${size[monster.size]} · DEF ${format(panel.def)}／MDEF ${format(panel.mdef)}`;
   $("dps").textContent = format(result.dps);
   $("ttk").textContent = result.averageKill == null ? "未擊殺" : seconds(result.averageKill);
+  $("kpi-cardrate").textContent = `×${format(panel.cardRate)}`;
+  $("kpi-combat").textContent = `${format(panel.hit)}% ／ ${format(panel.crit)}% ／ ${format(panel.aspd)}`;
   $("summon-summary").hidden = result.summons.count === 0;
   $("summon-summary").textContent = `召喚物 DPS ${format(result.summons.dps)} · 含召喚物 DPS ${format(result.summons.totalDps)} · ${result.trials} 次合計召喚 ${format(result.summons.count)} 隻、擊倒 ${format(result.summons.kills)} 隻`;
   $("summary").textContent = `${result.trials} 次 × ${result.seconds} 秒 · ${result.killedTrials} 次完成首殺 · ${result.unlimitedSp ? "無限 SP" : `期末平均 SP ${format(result.endingSp)}`}${result.invincible ? " · 角色免傷" : ""}`;
-  $("combat-stats").textContent = `起始普攻：${element[panel.element] ?? panel.element}屬性 ×${format(panel.modifier / 100)} · ASPD ${format(panel.aspd)}／間隔 ${seconds(panel.interval)} · 命中 ${format(panel.hit)}% · 爆擊 ${format(panel.crit)}% · 對目標物理卡片與裝備倍率 ×${format(panel.cardRate)}`;
+  $("combat-stats").textContent = `起始普攻：${element[panel.element] ?? panel.element}屬性 ×${format(panel.modifier / 100)} · 攻擊間隔 ${seconds(panel.interval)}`;
+
   const share = lines.reduce((sum, entry) => sum + entry.share, 0);
-  const displayed = result.dps > 0 && share < 0.999 ? [...lines, {name:"其他傷害", share:1 - share, casts:0}] : lines;
+  const displayed = result.dps > 0 && share < 0.999 ? [...lines, {name: "其他傷害", share: 1 - share, casts: 0}] : lines;
   $("damage").replaceChildren(...displayed.map(entry => {
     const row = document.createElement("tr");
     const timing = entry.casts ? [entry.castMs, entry.delayMs, entry.cooldownMs]
@@ -1038,57 +1781,197 @@ function show(result) {
     const range = hit => hit.min === hit.max ? format(hit.min) : `${format(hit.min)}～${format(hit.max)}`;
     const damage = [entry.normal && `一般 ${range(entry.normal)}`, entry.critical && `爆擊 ${range(entry.critical)}`]
       .filter(Boolean).join("\n") || "—";
-    for (const value of [entry.name, `${format(entry.share * 100)}%`, damage, timing]) {
-      const cell = document.createElement("td");
-      cell.textContent = value;
-      row.append(cell);
-    }
+
+    const c1 = document.createElement("td");
+    c1.textContent = entry.name;
+
+    const c2 = document.createElement("td");
+    const wrap = document.createElement("div");
+    wrap.className = "share-bar-wrap";
+    const pct = Math.max(0, Math.min(100, entry.share * 100));
+    const bar = document.createElement("div");
+    bar.className = "share-bar";
+    const fill = document.createElement("div");
+    fill.className = "share-bar-fill";
+    fill.style.width = `${pct.toFixed(1)}%`;
+    bar.append(fill);
+    const pctText = document.createElement("span");
+    pctText.textContent = `${format(pct)}%`;
+    wrap.append(bar, pctText);
+    c2.append(wrap);
+
+    const c3 = document.createElement("td");
+    c3.textContent = damage;
+
+    const c4 = document.createElement("td");
+    c4.textContent = timing;
+
+    row.append(c1, c2, c3, c4);
     return row;
   }));
   renderSongEffects(result.songs);
   showDefense(result.defense, result.trials);
   showTimeline(result.timeline, result.timelineCount);
   $("result").hidden = false;
+  $("result").scrollIntoView({behavior: "smooth", block: "nearest"});
 }
 
 // =========================================================================
 // Event Wiring
 // =========================================================================
 
-$("scenario").addEventListener("input", event => {
-  if (event.target.closest("#active-buffs")) syncActiveBuffControls();
-  if (event.target.type !== "search") scheduleStats();
-});
-if ($("quick-active-buffs")) $("quick-active-buffs").onchange = () => setAllActiveBuffs($("quick-active-buffs").checked);
-if ($("keep-active-buffs")) $("keep-active-buffs").onchange = scheduleStats;
-if ($("active-buffs-all")) $("active-buffs-all").onclick = () => setAllActiveBuffs(true);
-if ($("active-buffs-none")) $("active-buffs-none").onclick = () => setAllActiveBuffs(false);
-$("ammo-choice").onchange = scheduleStats;
-$("buff-filter").oninput = () => filterEffects("buff");
-$("status-filter").oninput = () => filterEffects("status");
-$("search").oninput = fillMonsters;
-$("skill").onchange = fillLevels;
-$("mode").onchange = () => {
-  $("skill-fields").hidden = $("mode").value !== "skill";
+// Theme toggle
+$("theme-toggle").onclick = () => {
+  const isDark = document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  const next = isDark ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch {}
+};
+
+// Mobile stats expand/collapse
+$("mobile-stats-toggle").onclick = () => {
+  const sidebar = $("character-panel");
+  const expanded = sidebar.classList.toggle("is-expanded");
+  $("mobile-stats-toggle").setAttribute("aria-expanded", String(expanded));
+  $("mobile-stats-toggle").textContent = expanded ? "收合完整能力" : "展開完整能力";
+};
+
+// Tabs
+for (const btn of document.querySelectorAll(".tab-btn")) {
+  btn.onclick = () => switchTab(btn.dataset.tab);
+}
+$("quick-go-sim").onclick = () => switchTab("simulate");
+
+// Build tab events
+$("build-name").oninput = () => {
+  if (!snapshot) return;
+  snapshot.character.name = $("build-name").value.trim() || "自訂角色";
+  updateHeaderRole();
+};
+
+function setRebirthCount(nextCount) {
+  if (!snapshot || !builderInfo) return;
+  const clamped = Math.max(0, Math.min(99, Math.trunc(nextCount) || 0));
+  const wasUpper = currentRebirths >= 1;
+  const nowUpper = clamped >= 1;
+  currentRebirths = clamped;
+  let jobChanged = false;
+  if (wasUpper !== nowUpper) {
+    const curJob = snapshot.character.job;
+    const mapped = nowUpper ? (NORMAL_TO_UPPER[curJob] ?? "lord_knight") : (UPPER_TO_NORMAL[curJob] ?? "knight");
+    if (jobMap.has(mapped)) {
+      snapshot.character.job = mapped;
+      jobChanged = true;
+    }
+  }
+  void handleJobOrLevelChange({jobChanged});
+}
+
+$("rebirth-0").onclick = () => setRebirthCount(0);
+$("rebirth-1").onclick = () => setRebirthCount(1);
+$("build-rebirths").onchange = () => setRebirthCount(Number($("build-rebirths").value));
+
+$("build-job").onchange = () => {
+  if (!snapshot) return;
+  snapshot.character.job = $("build-job").value;
+  const jobDef = jobMap.get(snapshot.character.job);
+  if (jobDef) snapshot.character.jobLv = jobDef.maxJobLv;
+  void handleJobOrLevelChange({jobChanged: true});
+};
+
+$("build-base-lv").onchange = () => {
+  if (!snapshot) return;
+  snapshot.character.baseLv = Math.max(1, Math.min(99, Math.trunc(Number($("build-base-lv").value) || 1)));
+  void handleJobOrLevelChange();
+};
+$("build-base-max").onclick = () => {
+  if (!snapshot) return;
+  snapshot.character.baseLv = 99;
+  void handleJobOrLevelChange();
+};
+
+$("build-job-lv").onchange = () => {
+  if (!snapshot) return;
+  const maxJL = jobMap.get(snapshot.character.job)?.maxJobLv ?? 70;
+  snapshot.character.jobLv = Math.max(1, Math.min(maxJL, Math.trunc(Number($("build-job-lv").value) || 1)));
+  void handleJobOrLevelChange();
+};
+$("build-job-max").onclick = () => {
+  if (!snapshot) return;
+  const maxJL = jobMap.get(snapshot.character.job)?.maxJobLv ?? 70;
+  snapshot.character.jobLv = maxJL;
+  void handleJobOrLevelChange();
+};
+
+$("build-first-job-lv").onchange = () => {
+  currentFirstJobLv = Math.max(40, Math.min(50, Math.trunc(Number($("build-first-job-lv").value) || 50)));
+  $("build-first-job-lv").value = String(currentFirstJobLv);
+  renderSkillTree();
+};
+
+$("build-riding").onchange = () => {
+  if (!snapshot) return;
+  snapshot.character.riding = $("build-riding").checked;
   scheduleStats();
 };
-$("monster").onchange = scheduleStats;
-
-$("invincible").onchange = () => {
-  if ($("invincible").checked) $("counterattack").checked = true;
-};
-$("counterattack").onchange = () => {
-  if (!$("counterattack").checked) $("invincible").checked = false;
+$("build-falcon").onchange = () => {
+  if (!snapshot) return;
+  snapshot.character.falcon = $("build-falcon").checked;
+  scheduleStats();
 };
 
-// Gear editor events
+$("build-free-stats").onchange = renderStatAllocator;
+$("build-stats-reset").onclick = () => {
+  if (!snapshot) return;
+  for (const k of STAT_KEYS) snapshot.character.stats[k] = 1;
+  renderStatAllocator();
+  scheduleStats();
+};
+
+$("revert-imported-char").onclick = () => {
+  if (!originalImportedSnapshot) return;
+  void applyLoadedSnapshot(structuredClone(originalImportedSnapshot), {
+    save: false, isCustom: false, sourceLabel: "已還原原遊戲快照",
+  });
+};
+
+// Skill tab events
+$("build-free-skills").onchange = renderSkillTree;
+$("skill-tree-search").oninput = renderSkillTree;
+for (const pill of document.querySelectorAll("[data-skill-filter]")) {
+  pill.onclick = () => {
+    skillFilterMode = pill.dataset.skillFilter;
+    for (const p of document.querySelectorAll("[data-skill-filter]")) p.classList.toggle("is-active", p === pill);
+    renderSkillTree();
+  };
+}
+$("skills-learn-quests").onclick = () => {
+  if (!snapshot || !builderInfo) return;
+  const jobDef = jobMap.get(snapshot.character.job);
+  if (!jobDef) return;
+  for (const entry of jobDef.skillTree) {
+    if (entry.questJobLv != null) snapshot.character.skills[entry.id] = entry.maxLv;
+  }
+  renderSkillTree();
+  void refreshAttackSkillsAndStats();
+};
+$("skills-reset").onclick = () => {
+  if (!snapshot || !builderInfo) return;
+  const jobDef = jobMap.get(snapshot.character.job);
+  snapshot.character.skills = jobDef?.skillTree.some(s => s.id === "NV_BASIC") ? {NV_BASIC: 9} : {};
+  if (snapshot.config?.skills) snapshot.config.skills = [];
+  renderSkillTree();
+  void refreshAttackSkillsAndStats();
+};
+
+// Gear tab events
 $("gear-reset-all").onclick = () => {
   equipOverrides = {};
   renderGearGrid();
   if (selectedSlot) renderSlotEditor(selectedSlot, {preserveSearch: true});
   scheduleStats();
 };
-
 $("slot-reset").onclick = () => {
   if (!selectedSlot) return;
   delete equipOverrides[selectedSlot];
@@ -1096,35 +1979,24 @@ $("slot-reset").onclick = () => {
   renderSlotEditor(selectedSlot, {preserveSearch: true});
   scheduleStats();
 };
-
 $("slot-unequip").onclick = () => {
   if (!selectedSlot) return;
   setSlotOverride(selectedSlot, {itemId: null});
 };
-
 $("slot-owned-select").onchange = () => {
   if (!selectedSlot || !$("slot-owned-select").value) return;
   const uid = Number($("slot-owned-select").value);
   const stack = equipCatalog?.owned.find(item => item.uid === uid);
   $("slot-owned-select").value = "";
   if (!stack) return;
-  setSlotOverride(selectedSlot, {
-    itemId: stack.itemId,
-    refine: stack.refine ?? 0,
-    cards: [...(stack.cards ?? [])],
-  });
+  setSlotOverride(selectedSlot, {itemId: stack.itemId, refine: stack.refine ?? 0, cards: [...(stack.cards ?? [])]});
 };
-
 $("slot-item-search").oninput = () => {
-  if (!selectedSlot) return;
-  renderSlotItemOptions(selectedSlot, effectiveSlotEntry(selectedSlot));
+  if (selectedSlot) renderSlotItemOptions(selectedSlot, effectiveSlotEntry(selectedSlot));
 };
-
 $("slot-equippable-only").onchange = () => {
-  if (!selectedSlot) return;
-  renderSlotItemOptions(selectedSlot, effectiveSlotEntry(selectedSlot));
+  if (selectedSlot) renderSlotItemOptions(selectedSlot, effectiveSlotEntry(selectedSlot));
 };
-
 $("slot-item-select").onchange = () => {
   if (!selectedSlot) return;
   const val = $("slot-item-select").value;
@@ -1146,84 +2018,147 @@ function updateRefine(nextRefine) {
   if (!selectedSlot) return;
   const entry = effectiveSlotEntry(selectedSlot);
   if (!entry) return;
-  const clamped = Math.max(0, Math.min(10, nextRefine));
   setSlotOverride(selectedSlot, {
     itemId: entry.itemId,
-    refine: clamped,
+    refine: Math.max(0, Math.min(10, nextRefine)),
     cards: [...(entry.cards ?? [])],
   });
 }
-
 $("slot-refine-select").onchange = () => updateRefine(Number($("slot-refine-select").value));
 $("slot-refine-minus").onclick = () => updateRefine(Number($("slot-refine-select").value) - 1);
 $("slot-refine-plus").onclick = () => updateRefine(Number($("slot-refine-select").value) + 1);
-
 $("slot-card-search").oninput = () => {
   if (!selectedSlot) return;
   const entry = effectiveSlotEntry(selectedSlot);
   const def = entry ? itemMap.get(entry.itemId) : null;
   if (def && def.cardSlots > 0) renderSlotCardPickers(selectedSlot, entry, def);
 };
-
 $("slot-cards-fill-all").onclick = () => {
   if (!selectedSlot) return;
   const entry = effectiveSlotEntry(selectedSlot);
   const def = entry ? itemMap.get(entry.itemId) : null;
   if (!entry || !def || def.cardSlots < 2) return;
   const firstCard = entry.cards?.[0] ?? 0;
-  const cards = firstCard ? Array(def.cardSlots).fill(firstCard) : [];
-  setSlotOverride(selectedSlot, {
-    itemId: entry.itemId,
-    refine: entry.refine,
-    cards,
-  });
+  setSlotOverride(selectedSlot, {itemId: entry.itemId, refine: entry.refine, cards: firstCard ? Array(def.cardSlots).fill(firstCard) : []});
 };
 
-// Form submit
+// Buff tab events
+$("scenario").addEventListener("input", event => {
+  if (event.target.closest("#active-buffs")) syncActiveBuffControls();
+  if (event.target.type !== "search") scheduleStats();
+});
+$("quick-active-buffs").onchange = () => setAllActiveBuffs($("quick-active-buffs").checked);
+$("keep-active-buffs").onchange = scheduleStats;
+$("active-buffs-all").onclick = () => setAllActiveBuffs(true);
+$("active-buffs-none").onclick = () => setAllActiveBuffs(false);
+$("buff-filter").oninput = () => filterEffects("buff");
+$("status-filter").oninput = () => filterEffects("status");
+
+for (const pill of document.querySelectorAll("[data-buff-cat]")) {
+  pill.onclick = () => {
+    buffCategoryFilter = pill.dataset.buffCat;
+    for (const p of document.querySelectorAll("[data-buff-cat]")) p.classList.toggle("is-active", p === pill);
+    filterEffects("buff");
+  };
+}
+$("clear-manual-buffs").onclick = () => {
+  for (const row of $("extra-buffs").children) {
+    const cb = row.querySelector(".effect-toggle");
+    if (cb.checked) {
+      cb.checked = false;
+      const fs = row.querySelector(".effect-parameters");
+      fs.hidden = fs.disabled = true;
+    }
+  }
+  filterEffects("buff");
+  updateBuffTabBadge();
+  scheduleStats();
+};
+$("clear-monster-statuses").onclick = () => {
+  for (const row of $("monster-statuses").children) {
+    const cb = row.querySelector(".effect-toggle");
+    if (cb.checked) {
+      cb.checked = false;
+      const fs = row.querySelector(".effect-parameters");
+      fs.hidden = fs.disabled = true;
+    }
+  }
+  filterEffects("status");
+  updateBuffTabBadge();
+  scheduleStats();
+};
+
+// Simulate tab events
+$("ammo-choice").onchange = scheduleStats;
+$("search").oninput = fillMonsters;
+$("monster").onchange = () => { updateMonsterPreview(); scheduleStats(); };
+$("skill").onchange = fillLevels;
+$("mode").onchange = () => {
+  $("skill-fields").hidden = $("mode").value !== "skill";
+  scheduleStats();
+};
+$("invincible").onchange = () => { if ($("invincible").checked) $("counterattack").checked = true; };
+$("counterattack").onchange = () => { if (!$("counterattack").checked) $("invincible").checked = false; };
+
 $("calculator").addEventListener("invalid", event => {
   const row = event.target.closest(".effect-row");
   if (!row) return;
-  $("scenario").open = true;
+  switchTab("buffs");
   if (!row.hidden) return;
   const type = row.parentElement.id === "extra-buffs" ? "buff" : "status";
   $(`${type}-filter`).value = "";
+  if (type === "buff") buffCategoryFilter = "all";
   filterEffects(type);
 }, true);
 
 $("calculator").onsubmit = async event => {
   event.preventDefault();
   if (!snapshot) return;
+  if (!$("monster").value) {
+    $("status").textContent = "請先選擇目標怪物。";
+    return;
+  }
   const options = {
-    monsterId: Number($("monster").value), mode: $("mode").value,
-    skill: $("skill").value, level: Number($("skill-level").value), seconds: Number($("seconds").value),
+    monsterId: Number($("monster").value),
+    mode: $("mode").value,
+    skill: $("skill").value,
+    level: Number($("skill-level").value),
+    seconds: Number($("seconds").value),
     counterattack: $("counterattack").checked,
     invincible: $("invincible").checked,
     unlimitedSp: $("unlimited-sp").checked,
     scenario: readScenario(),
   };
-  $("fields").disabled = $("refresh").disabled = true;
+  $("fields").disabled = true;
+  if ($("refresh")) $("refresh").disabled = true;
   $("result").hidden = true;
-  $("status").textContent = "正在本機模擬戰鬥…";
+  $("status").textContent = "正在本機模擬 16 場戰鬥…";
   try {
     show(await engine("simulate", options));
     $("status").textContent = "";
   } catch (error) {
     $("status").textContent = error.message;
   } finally {
-    $("fields").disabled = $("refresh").disabled = false;
+    $("fields").disabled = false;
+    if ($("refresh")) $("refresh").disabled = false;
   }
 };
 
-// Web mode initialization & events
+// =========================================================================
+// Web Mode Setup & Character Management
+// =========================================================================
+
 function setupWebMode() {
-  $("web-loader").hidden = false;
-  if ($("back-route")) $("back-route").hidden = false;
-  $("refresh").textContent = "匯入／切換角色";
-  $("refresh").onclick = () => {
-    const panel = $("import-panel");
-    panel.open = !panel.open;
-    if (panel.open) $("web-loader").scrollIntoView({behavior: "smooth", block: "nearest"});
+  $("back-route").hidden = false;
+  $("toggle-import").hidden = false;
+  $("char-bar").hidden = false;
+
+  $("toggle-import").onclick = () => {
+    const drawer = $("import-drawer");
+    drawer.hidden = !drawer.hidden;
+    if (!drawer.hidden) drawer.scrollIntoView({behavior: "smooth", block: "nearest"});
   };
+  $("close-import").onclick = () => { $("import-drawer").hidden = true; };
 
   const isHttp = location.protocol === "http:" || location.protocol === "https:";
   const pageUrl = `${location.origin}${location.pathname}`;
@@ -1234,7 +2169,7 @@ function setupWebMode() {
     $("copy-status").textContent = "請把此按鈕拖曳到書籤列，或點左邊「複製書籤程式碼」。";
   };
   if (!isHttp) {
-    $("bookmarklet-origin-hint").textContent = "目前是以本機檔案開啟，書籤跨分頁傳送需要透過 https://（如 GitHub Pages）或 localhost 網址開啟。本機檔案請先使用下方「方式二：貼上 JSON」。";
+    $("bookmarklet-origin-hint").textContent = "目前是以本機檔案開啟，書籤跨分頁傳送需要透過 https://（如 GitHub Pages）或 localhost 網址開啟。";
   }
 
   $("copy-bookmarklet").onclick = async () => {
@@ -1258,12 +2193,20 @@ function setupWebMode() {
   $("import-json").onclick = async () => {
     const raw = $("json-input").value.trim();
     if (!raw) {
-      $("status").textContent = "請先貼上角色快照 JSON。";
+      $("status").textContent = "請先貼上角色快照或配點 JSON。";
       return;
     }
     try {
       const parsed = JSON.parse(raw);
-      await applyLoadedSnapshot(parsed, {save: true, sourceLabel: "手動匯入"});
+      const isBuildExport = Boolean(parsed?.roDpsBuild && parsed?.snapshot);
+      await applyLoadedSnapshot(isBuildExport ? parsed.snapshot : parsed, {
+        save: true,
+        isCustom: isBuildExport ? Boolean(parsed.isCustom) : false,
+        rebirths: isBuildExport ? parsed.rebirths : undefined,
+        firstJobLv: isBuildExport ? parsed.firstJobLv : 50,
+        overrides: isBuildExport ? parsed.equipOverrides : {},
+        sourceLabel: "手動匯入",
+      });
       $("json-input").value = "";
     } catch (error) {
       $("status").textContent = error instanceof SyntaxError
@@ -1277,8 +2220,16 @@ function setupWebMode() {
     $("import-file").value = "";
     if (!file) return;
     try {
-      const text = await file.text();
-      await applyLoadedSnapshot(JSON.parse(text), {save: true, sourceLabel: file.name});
+      const parsed = JSON.parse(await file.text());
+      const isBuildExport = Boolean(parsed?.roDpsBuild && parsed?.snapshot);
+      await applyLoadedSnapshot(isBuildExport ? parsed.snapshot : parsed, {
+        save: true,
+        isCustom: isBuildExport ? Boolean(parsed.isCustom) : false,
+        rebirths: isBuildExport ? parsed.rebirths : undefined,
+        firstJobLv: isBuildExport ? parsed.firstJobLv : 50,
+        overrides: isBuildExport ? parsed.equipOverrides : {},
+        sourceLabel: file.name,
+      });
     } catch (error) {
       $("status").textContent = error instanceof SyntaxError
         ? "檔案不是有效的 JSON 格式。"
@@ -1286,94 +2237,135 @@ function setupWebMode() {
     }
   };
 
+  $("new-custom-char").onclick = async () => {
+    await ensureBuilder();
+    const count = savedCharacters.filter(c => c.isCustom).length + 1;
+    const fresh = createCustomSnapshot({name: `自訂角色 ${count}`, job: "lord_knight", rebirths: 1, baseLv: 99, jobLv: 70});
+    activeSavedKey = "";
+    await applyLoadedSnapshot(fresh, {
+      save: false, isCustom: true, rebirths: 1, firstJobLv: 50, overrides: {},
+      sourceLabel: "已建立新自訂角色",
+    });
+    switchTab("build");
+  };
+
+  $("save-current-char").onclick = () => {
+    if (!snapshot) return;
+    const entry = upsertSavedCharacter(snapshot, {
+      isCustom: currentIsCustom,
+      rebirths: currentRebirths,
+      firstJobLv: currentFirstJobLv,
+      overrides: equipOverrides,
+    });
+    $("status").textContent = `已儲存「${entry.name}」配點與裝備到瀏覽器。`;
+  };
+
   $("saved-character").onchange = async () => {
-    const found = savedCharacters.find(entry => entry.key === $("saved-character").value);
+    const key = $("saved-character").value;
+    if (!key) return;
+    const found = savedCharacters.find(entry => entry.key === key);
     if (!found) return;
     activeSavedKey = found.key;
-    await applyLoadedSnapshot(found.snapshot, {save: false, sourceLabel: "本機已存角色"});
+    await applyLoadedSnapshot(found.snapshot, {
+      save: false,
+      isCustom: Boolean(found.isCustom),
+      rebirths: found.rebirths,
+      firstJobLv: found.firstJobLv ?? 50,
+      overrides: found.equipOverrides ?? {},
+      sourceLabel: found.isCustom ? "已存自訂配點" : "已存匯入角色",
+    });
   };
 
   $("export-json").onclick = () => {
     if (!snapshot) return;
-    const blob = new Blob([JSON.stringify(snapshot, null, 2)], {type: "application/json"});
+    const payload = {
+      roDpsBuild: 1,
+      isCustom: currentIsCustom,
+      rebirths: currentRebirths,
+      firstJobLv: currentFirstJobLv,
+      equipOverrides: cleanEquipOverrides() ?? {},
+      snapshot,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `ro-idle-${snapshot.character.name}.json`;
+    a.download = `ro-idle-build-${snapshot.character.name}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  $("delete-saved").onclick = () => {
+  $("delete-saved").onclick = async () => {
     if (!activeSavedKey) return;
     savedCharacters = savedCharacters.filter(entry => entry.key !== activeSavedKey);
     persistSavedList();
     if (savedCharacters.length) {
-      activeSavedKey = savedCharacters[0].key;
+      const next = savedCharacters[0];
+      activeSavedKey = next.key;
       renderSavedBar();
-      void applyLoadedSnapshot(savedCharacters[0].snapshot, {save: false, sourceLabel: "本機已存角色"});
+      await applyLoadedSnapshot(next.snapshot, {
+        save: false,
+        isCustom: Boolean(next.isCustom),
+        rebirths: next.rebirths,
+        firstJobLv: next.firstJobLv ?? 50,
+        overrides: next.equipOverrides ?? {},
+        sourceLabel: "已切換角色",
+      });
     } else {
       activeSavedKey = "";
-      snapshot = null;
       renderSavedBar();
-      $("character-panel").hidden = true;
-      $("gear-section").hidden = true;
-      $("result").hidden = true;
-      $("fields").disabled = true;
-      $("role").textContent = "尚未載入角色";
-      $("import-panel").open = true;
-      $("status").textContent = "已刪除該角色紀錄。";
+      const fresh = createCustomSnapshot({name: "自訂角色", job: "lord_knight", rebirths: 1, baseLv: 99, jobLv: 70});
+      await applyLoadedSnapshot(fresh, {
+        save: false, isCustom: true, rebirths: 1, firstJobLv: 50, overrides: {},
+        sourceLabel: "已刪除紀錄並建立預設自訂角色",
+      });
     }
   };
 
-  // Listen for cross-tab snapshot delivery from the bookmarklet on ro-idle.app
   window.addEventListener("message", event => {
     if (event.origin !== host) return;
     if (event.data?.type !== "ro-dps-snapshot" || !event.data.snapshot) return;
-    try {
-      event.source?.postMessage({type: "ro-dps-ack"}, event.origin);
-    } catch {
-      // Ignore cross-origin ack errors.
-    }
+    try { event.source?.postMessage({type: "ro-dps-ack"}, event.origin); } catch {}
     if (location.hash === "#waiting") history.replaceState(null, "", location.pathname + location.search);
-    void applyLoadedSnapshot(event.data.snapshot, {save: true, sourceLabel: "從遊戲分頁傳送"});
+    void applyLoadedSnapshot(event.data.snapshot, {save: true, isCustom: false, sourceLabel: "從遊戲分頁傳送"});
   });
 
   window.addEventListener("hashchange", async () => {
     try {
       const fromHash = await decodeHashSnapshot();
-      if (fromHash) await applyLoadedSnapshot(fromHash, {save: true, sourceLabel: "從遊戲分頁傳送"});
+      if (fromHash) await applyLoadedSnapshot(fromHash, {save: true, isCustom: false, sourceLabel: "從遊戲分頁傳送"});
     } catch (error) {
       $("status").textContent = error.message;
     }
   });
 
   if (window.opener) {
-    try { window.opener.postMessage({type: "ro-dps-ready"}, host); }
-    catch { /* ignore */ }
+    try { window.opener.postMessage({type: "ro-dps-ready"}, host); } catch {}
   }
 }
 
 async function init() {
   try {
     if (isExtension) {
+      $("refresh").hidden = false;
       $("refresh").onclick = loadFromExtension;
+      switchTab("simulate");
       await loadFromExtension();
       return;
     }
+
     setupWebMode();
     savedCharacters = loadSavedList();
     renderSavedBar();
+    $("role").textContent = "正在載入職業與戰鬥引擎…";
 
-    // Preload engine targets in background so the UI is immediately interactive.
-    void ensureTargets().catch(error => {
-      if (!snapshot) $("status").textContent = error.message;
-    });
+    await Promise.all([ensureTargets(), ensureBuilder()]);
 
     try {
       const fromHash = await decodeHashSnapshot();
       if (fromHash) {
-        await applyLoadedSnapshot(fromHash, {save: true, sourceLabel: "從遊戲分頁傳送"});
+        await applyLoadedSnapshot(fromHash, {save: true, isCustom: false, sourceLabel: "從遊戲分頁傳送"});
+        switchTab("simulate");
         return;
       }
     } catch (error) {
@@ -1387,12 +2379,28 @@ async function init() {
     }
 
     if (savedCharacters.length) {
-      activeSavedKey = savedCharacters[0].key;
+      const first = savedCharacters[0];
+      activeSavedKey = first.key;
       renderSavedBar();
-      await applyLoadedSnapshot(savedCharacters[0].snapshot, {save: false, sourceLabel: "本機已存角色"});
+      await applyLoadedSnapshot(first.snapshot, {
+        save: false,
+        isCustom: Boolean(first.isCustom),
+        rebirths: first.rebirths,
+        firstJobLv: first.firstJobLv ?? 50,
+        overrides: first.equipOverrides ?? {},
+        sourceLabel: first.isCustom ? "已存自訂配點" : "已存匯入角色",
+      });
     } else {
-      $("role").textContent = "尚未載入角色 · 請選擇下方載入方式";
-      $("import-panel").open = true;
+      // Immediately ready to use with a standalone custom character!
+      const fresh = createCustomSnapshot({name: "自訂騎士領主", job: "lord_knight", rebirths: 1, baseLv: 99, jobLv: 70});
+      await applyLoadedSnapshot(fresh, {
+        save: false,
+        isCustom: true,
+        rebirths: 1,
+        firstJobLv: 50,
+        overrides: {},
+        sourceLabel: "可直接開始自訂配點，或點右上「匯入遊戲角色」",
+      });
     }
   } catch (error) {
     $("role").textContent = "初始化失敗";
