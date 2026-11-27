@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261128-5";
+const ASSET_VER = "20261128-6";
 const MAX_REBIRTHS = 11;
 const EXTRA_STAT_PER_REBIRTH = 20;
 const host = "https://ro-idle.app";
@@ -976,6 +976,12 @@ function createSkillIconEl(entry) {
   return box;
 }
 
+function skillDescriptionAt(entry, level) {
+  const shownLevel = Math.max(1, level);
+  const text = entry.descs?.[shownLevel - 1];
+  return text ? `Lv.${shownLevel} · ${text}` : entry.desc || "遊戲資料未提供技能描述。";
+}
+
 function renderSkillInspector(jobDef, autoCastSet, skillNameById) {
   const box = $("skill-inspector");
   if (!box) return;
@@ -1018,7 +1024,7 @@ function renderSkillInspector(jobDef, autoCastSet, skillNameById) {
   }
   const desc = document.createElement("p");
   desc.className = "skill-inspector-desc";
-  desc.textContent = entry.desc || entry.id;
+  desc.textContent = skillDescriptionAt(entry, lv);
   main.append(head, desc);
 
   const actions = document.createElement("div");
@@ -1065,14 +1071,26 @@ function createSkillNodeElement(entry, {c, matchesFilter, isStatic = false, onHo
   if (!reqsMet && lv === 0) node.classList.add("is-locked");
   if (selectedSkillId === entry.id) node.classList.add("is-selected");
   if (!matchesFilter) node.classList.add("is-dimmed");
-  node.title = `${entry.name} (Lv ${lv}/${entry.maxLv})\n${entry.desc || ""}\n左鍵升級、右鍵降級`;
+  node.title = `${entry.name} (Lv ${lv}/${entry.maxLv})\n${skillDescriptionAt(entry, lv)}\n左鍵升級、右鍵降級`;
 
   const top = document.createElement("div");
   top.className = "skill-node-top";
   const title = document.createElement("div");
   title.className = "skill-node-title";
   title.textContent = entry.name;
-  top.append(createSkillIconEl(entry), title);
+  const info = document.createElement("button");
+  info.type = "button";
+  info.className = "skill-node-info";
+  info.textContent = "ⓘ";
+  info.setAttribute("aria-label", `查看${entry.name}描述`);
+  info.title = "查看技能描述";
+  info.onclick = event => {
+    event.stopPropagation();
+    selectedSkillId = entry.id;
+    renderSkillTree();
+    $("skill-inspector").scrollIntoView({block: "nearest"});
+  };
+  top.append(createSkillIconEl(entry), title, info);
 
   const bottom = document.createElement("div");
   bottom.className = "skill-node-bottom";
@@ -1436,8 +1454,7 @@ function renderSkillTree() {
 
     const desc = document.createElement("p");
     desc.className = "skill-desc";
-    desc.textContent = entry.desc || entry.id;
-    desc.title = entry.desc || entry.id;
+    desc.textContent = skillDescriptionAt(entry, lv);
 
     const foot = document.createElement("div");
     foot.className = "skill-card-foot";

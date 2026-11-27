@@ -106,7 +106,8 @@ export function builderCatalog() {
           minJobLv: entry.minJobLv ?? null,
           attack: canAttackWithSkill(entry.id),
           kind: sk?.kind ?? "passive",
-          desc: sk?.desc ?? "",
+          desc: sk?.descs?.[0] ?? "",
+          descs: sk?.descs ?? [],
         };
       }),
     };
