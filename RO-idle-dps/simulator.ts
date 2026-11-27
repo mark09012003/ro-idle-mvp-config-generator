@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import { createGameState, type GameState, type ActiveMonster, type ActiveBuff } from "./src/game/sim/state";
-import { derived, moveTime, nextEventTime, observeDamage, processAt } from "./src/game/sim/engine";
+import { derived, moveTime, nextEventTime, observeDamage, processAt, receiveHealing } from "./src/game/sim/engine";
+import { SONGS, type PerformerCtx } from "./src/game/combat/songs";
 import { defaultAutoConfig } from "./src/game/ai/config";
 import { MONSTERS, type MonsterDef } from "./src/game/data/monsters";
 import { MAPS } from "./src/game/data/maps";
@@ -36,6 +37,16 @@ const manualBuffIds = [
   "aspdPotion1", "aspdPotion2", "aspdPotion3", "resistFire", "resistWater", "resistWind", "resistEarth",
   "strFood5", "agiFood5", "vitFood5", "intFood5", "dexFood5", "lukFood5",
 ].filter(isKnownBuff);
+const songStats: Record<string, readonly (keyof PerformerCtx["stats"])[]> = {
+  BA_WHISTLE:["agi", "luk"],
+  BA_ASSASSINCROSS:["agi"],
+  BA_POEMBRAGI:["dex", "int"],
+  BA_APPLEIDUN:["vit"],
+  DC_HUMMING:["dex"],
+  DC_FORTUNEKISS:["luk"],
+  DC_SERVICEFORYOU:["int"],
+};
+const songIds = Object.keys(songStats).filter(id => SONGS[id]?.party && SKILLS.has(id));
 const manualStatuses: Partial<Record<MobStatusId, number>> = {
   aeterna:1, provoke:10, quagmire:5, crucis:10, decagi:10, mindBreaker:5,
   freeze:1, stone:1, stun:1, sleep:1, silence:1, blind:1, poison:1, deadlyPoison:1, bleeding:1,
@@ -49,12 +60,15 @@ export function scenarioCatalog(snapshot: GameSnapshot) {
     active: previewBuffs(snapshot).map((buff, index) => ({
       index, name: buffDisplayName(buff.id), level: "lv" in buff ? buff.lv : undefined,
     })),
-    buffs: manualBuffIds.map(id => ({id, name:buffDisplayName(id), max:maximumBuffLevel(id)})),
+    buffs: [...manualBuffIds, ...songIds].map(id => ({
+      id, name:buffDisplayName(id), max:maximumBuffLevel(id),
+      ...(songIds.includes(id) && {stats:songStats[id], lessonName:id.startsWith("DC_") ? "練習舞蹈等級" : "操控樂器等級"}),
+    })),
     statuses: Object.entries(manualStatuses).map(([id, max]) => ({id, name:STATUS_NAMES[id as MobStatusId], max})),
   };
 }
 
-type Effect = {id: string; level: number; seconds: number};
+type Effect = {id: string; level: number; seconds: number; performer?: Partial<PerformerCtx["stats"]> & {lesson?: number}};
 type Scenario = {excludeActive?: number[]; buffs?: Effect[]; statuses?: Effect[]; autoBuffs?: boolean};
 
 function effectTime(effect: Effect, max: number) {
@@ -63,6 +77,20 @@ function effectTime(effect: Effect, max: number) {
     throw new Error("請確認效果等級及持續秒數。");
   }
   return effect.seconds * 1000;
+}
+
+function songParameters(effect: Effect) {
+  const entry = SONGS[effect.id];
+  const stats = {str:1, agi:1, vit:1, int:1, dex:1, luk:1};
+  const lesson = effect.performer?.lesson ?? 0;
+  if (!Number.isInteger(lesson) || lesson < 0 || lesson > 10) throw new Error("操控樂器或練習舞蹈等級須為 0～10。");
+  for (const key of songStats[effect.id]) {
+    const value = effect.performer?.[key] ?? 1;
+    if (!Number.isInteger(value) || value < 0 || value > 999) throw new Error(`演奏者 ${key.toUpperCase()} 須為 0～999。`);
+    stats[key] = value;
+  }
+  const ctx = {stats, lesson};
+  return {bonuses:entry.party!(effect.level, ctx), heal:entry.heal?.(effect.level, ctx) ?? 0, interval:entry.drainSec * 1000};
 }
 
 function buffGroup(id: string, level = 1) {
@@ -77,13 +105,14 @@ function initialBuffs(snapshot: GameSnapshot, scenario?: Scenario): ActiveBuff[]
     return Number.isFinite(remaining) && remaining > 0 ? [{...structuredClone(buff), until: remaining}] : [];
   });
   for (const effect of scenario?.buffs ?? []) {
-    if (!manualBuffIds.includes(effect.id)) throw new Error("所選 Buff 不支援手動加入。");
+    if (!manualBuffIds.includes(effect.id) && !songIds.includes(effect.id)) throw new Error("所選 Buff 不支援手動加入。");
     const until = effectTime(effect, maximumBuffLevel(effect.id)) || NEVER;
     const group = buffGroup(effect.id, effect.level);
     for (let index = buffs.length - 1; index >= 0; index--) {
       if (buffs[index].id === effect.id || (group && buffGroup(buffs[index].id) === group)) buffs.splice(index, 1);
     }
-    buffs.push({id:effect.id, lv:effect.level, until});
+    const song = songIds.includes(effect.id) ? songParameters(effect) : null;
+    buffs.push({id:effect.id, lv:effect.level, until, ...(song && {party:true, bonuses:song.bonuses})});
   }
   return buffs;
 }
@@ -176,6 +205,10 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   registerItemDefs(snapshot.heldItems ?? []);
   const duration = options.seconds * 1000;
   const trials = 16;
+  const songs = (options.scenario?.buffs ?? []).filter(effect => songIds.includes(effect.id)).map(effect => {
+    effectTime(effect, maximumBuffLevel(effect.id));
+    return {id:effect.id, name:buffDisplayName(effect.id), ...songParameters(effect)};
+  });
   const lines = new Map<string, DamageLine>();
   const line = (id: string) => {
     if (!lines.has(id)) lines.set(id, {name: SKILLS.get(id)?.name ?? id, damage:0, hits:0, casts:0, castMs:0, delayMs:0, cooldownMs:0});
@@ -192,6 +225,8 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   for (let run = 0; run < trials; run++) {
     const state = setup(snapshot, options, 91237 + 7919 * run);
     let current = replaceTarget(state, monster, options);
+    const pulses = songs.filter(song => song.heal > 0).map(song => ({...song, at:song.interval,
+      buff:state.buffs.find(buff => buff.id === song.id)}));
     function record(text: string) {
       if (!options.counterattack || run !== 0) return;
       timelineCount++;
@@ -219,9 +254,17 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
       };
     }
     for (let steps = 0; steps < 15000; steps++) {
-      const next = nextEventTime(state);
+      const pulse = pulses.find(entry => entry.buff && state.buffs.includes(entry.buff) && entry.at < entry.buff.until);
+      const engineTime = nextEventTime(state);
+      const next = Math.min(engineTime, pulse?.at ?? NEVER);
       if (next > duration || state.activity.kind === "stopped" || state.activity.kind === "dead") break;
       moveTime(state, Math.max(state.time, next));
+      if (pulse && pulse.at < engineTime) {
+        const healed = receiveHealing(state, pulse.heal);
+        if (healed > 0) record(`${pulse.name} · HP +${healed}`);
+        pulse.at += pulse.interval;
+        continue;
+      }
       processAt(state, event => {
         if (event.type === "skillCast") {
           const entry = line(event.skill);
@@ -290,7 +333,7 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   } : null;
   return {monster: {name:monster.name, lv:monster.lv, hp:monster.hp, element:monster.element,
     elementLv:monster.elementLv, race:monster.race, size:monster.size}, panel,
-    defense, dps: total / trials / options.seconds,
+    defense, songs, dps: total / trials / options.seconds,
     averageKill: killTimes.length ? killTimes.reduce((sum, t) => sum + t, 0) / killTimes.length : null,
     killedTrials: killTimes.length, kills, casts, endingSp:endingSp / trials, trials, seconds:options.seconds,
     lines: [...lines.values()].sort((a,b) => b.damage - a.damage)

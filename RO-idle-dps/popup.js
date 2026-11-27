@@ -161,6 +161,25 @@ function addScenarioEffect(type) {
   remove.textContent = "移除";
   remove.onclick = () => row.remove();
   row.append(name, level, seconds, remove);
+  if (definition.stats) {
+    const performer = document.createElement("div");
+    performer.className = "performer-fields";
+    for (const [key, text] of [...definition.stats.map(stat => [stat, `演奏者 ${stat.toUpperCase()}`]),
+      ["lesson", definition.lessonName]]) {
+      const label = document.createElement("label");
+      label.textContent = text;
+      const input = document.createElement("input");
+      input.type = "number";
+      input.dataset.stat = key;
+      input.min = "0";
+      input.max = key === "lesson" ? "10" : "999";
+      input.value = key === "lesson" ? "0" : "1";
+      input.required = true;
+      label.append(input);
+      performer.append(label);
+    }
+    row.append(performer);
+  }
   container.append(row);
 }
 
@@ -169,6 +188,8 @@ function readEffects(container) {
     id: row.dataset.effect,
     level: Number(row.querySelector(".effect-level").value),
     seconds: Number(row.querySelector(".effect-seconds").value),
+    performer: Object.fromEntries([...row.querySelectorAll("[data-stat]")]
+      .map(input => [input.dataset.stat, Number(input.value)])),
   }));
 }
 
@@ -221,6 +242,22 @@ function showDefense(defense, trials) {
   }));
 }
 
+function renderSongEffects(songs) {
+  const block = $("song-effects");
+  block.hidden = !songs.length;
+  const labels = {flee:"迴避", perfectDodge:"完全迴避", songHaste:"攻速加成", castRate:"詠唱時間",
+    delayRate:"施放延遲", maxHpRate:"最大 HP", hit:"命中", crit:"暴擊", maxSpRate:"最大 SP", useSpRate:"SP 消耗"};
+  const percent = new Set(["perfectDodge","songHaste","castRate","delayRate","maxHpRate","maxSpRate","useSpRate"]);
+  $("song-breakdown").replaceChildren(...songs.map(song => {
+    const row = document.createElement("li");
+    const effects = Object.entries(song.bonuses).map(([key,value]) =>
+      `${labels[key] ?? key} ${value >= 0 ? "+" : ""}${format(value)}${percent.has(key) ? "%" : ""}`);
+    if (song.heal > 0) effects.push(`每 ${seconds(song.interval)}回復 ${format(song.heal)} HP`);
+    row.textContent = `${song.name} · ${effects.join("、")}`;
+    return row;
+  }));
+}
+
 function show(result) {
   const {monster,panel,lines} = result;
   $("target").textContent = `${monster.name} · Lv ${monster.lv}`;
@@ -242,6 +279,7 @@ function show(result) {
     }
     return row;
   }));
+  renderSongEffects(result.songs);
   showDefense(result.defense, result.trials);
   $("result").hidden = false;
 }

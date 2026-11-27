@@ -52,6 +52,7 @@
           <button id="add-buff" type="button">加入 Buff</button>
         </div>
         <div id="extra-buffs"></div>
+        <p>歌舞請填演奏者施放當下的總素質（含裝備與增益）。</p>
         <h2>怪物起始狀態</h2>
         <div class="effect-picker">
           <select id="status-choice" aria-label="怪物狀態"></select>
@@ -79,6 +80,10 @@
         <tbody id="damage"></tbody>
       </table>
     </div>
+    <details id="song-effects" hidden>
+      <summary>歌舞加成明細</summary>
+      <ul id="song-breakdown"></ul>
+    </details>
     <section id="defense" hidden aria-label="承傷與生存">
       <h2>承傷與生存</h2>
       <dl class="metrics">

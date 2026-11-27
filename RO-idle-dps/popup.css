@@ -44,3 +44,5 @@ summary { cursor: pointer; }
 .effect-picker { grid-template-columns: 1fr auto; }
 .effect-row { grid-template-columns: minmax(0, 1fr) 66px 55px auto; }
 .effect-row select, .effect-row input, .effect-picker select { margin: 3px 0; }
+.performer-fields { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 6px; padding: 6px; background: var(--tint); border-radius: 5px; }
+#song-effects ul { padding-left: 20px; }
