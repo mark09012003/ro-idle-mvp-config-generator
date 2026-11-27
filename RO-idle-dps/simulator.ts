@@ -8,7 +8,7 @@ import { MAPS } from "./src/game/data/maps";
 import { JOBS } from "./src/game/data/jobs";
 import { isUpper } from "./src/game/data/jobFamily";
 import { SKILLS, atLv } from "./src/game/data/skills";
-import { canAttackWithSkill } from "./src/game/combat/skillEffects";
+import { canAttackWithSkill, SUPPORT_SCOPE } from "./src/game/combat/skillEffects";
 import { cardfixPermille, monsterDefender, playerHitRate, playerCritRate } from "./src/game/combat/damage";
 import { effectiveMonster, POISON_INTERVAL_MS, STATUS_NAMES, type MobStatusId, type MobStatuses } from "./src/game/combat/monsterStatus";
 import { buffDisplayName, getBuff, isKnownBuff } from "./src/game/data/buffs";
@@ -1002,7 +1002,18 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
       timelineCount++;
       if (timeline.length < 1000) timeline.push({at:state.time, text, hp:state.character.hp, sp:state.character.sp, kind});
     }
+    const partyBuffs = new Map(state.buffs.filter(buff => SUPPORT_SCOPE[buff.id] || SONGS[buff.id]?.party)
+      .map(buff => [buff.id, structuredClone(buff)]));
+    const pendingPartyBuffs = new Map<string, number>();
+    let nextPartyBuffAt = NEVER;
+    function schedulePartyBuff(id: string) {
+      if (!partyBuffs.has(id)) return;
+      const readyAt = state.time + 1000;
+      pendingPartyBuffs.set(id, readyAt);
+      nextPartyBuffAt = Math.min(...pendingPartyBuffs.values());
+    }
     function logMobDefenseEvent(ev: Record<string, unknown>) {
+      if (ev.type === "buffEnd" && ev.dispelled === true) schedulePartyBuff(String(ev.buffId));
       if (ev.type === "mobSkillCast") {
         const mid = Number(ev.monsterId);
         record(`${MONSTERS.get(mid)?.name ?? "怪物"} 開始詠唱 ${skillDisplayName(String(ev.skill), mid)}（${Number(ev.castMs) / 1000} 秒）`, "monster");
@@ -1163,9 +1174,27 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           casterActionAt = Math.max(state.time, casterReadyAt, nextSoulChangeAttemptAt);
         }
       }
-      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt, nextGospelAt, nextSoulChangeAt, casterActionAt, nextCasterHpRegenAt, nextCasterSpRegenAt, nextCasterHealAt);
+      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt, nextGospelAt, nextSoulChangeAt, casterActionAt, nextCasterHpRegenAt, nextCasterSpRegenAt, nextCasterHealAt, nextPartyBuffAt);
       if (next > duration || state.activity.kind === "stopped" || state.activity.kind === "dead") break;
       moveTime(state, Math.max(state.time, next));
+      if (nextPartyBuffAt === next) {
+        nextPartyBuffAt = NEVER;
+        for (const [id, readyAt] of pendingPartyBuffs) {
+          if (readyAt > state.time) {
+            nextPartyBuffAt = Math.min(nextPartyBuffAt, readyAt);
+            continue;
+          }
+          pendingPartyBuffs.delete(id);
+          const buff = partyBuffs.get(id)!;
+          const group = buffGroup(buff);
+          if (state.buffs.some(active => active.until > state.time &&
+              (active.id === id || (group && buffGroup(active) === group)))) continue;
+          const until = buff.until === NEVER ? NEVER : state.time + buff.until;
+          state.buffs.push({...structuredClone(buff), until});
+          record(`隊友補回 ${buffDisplayName(id)}`, "player");
+        }
+        continue;
+      }
       if (nextCasterHealAt === next) {
         nextCasterHealAt += casterHealInterval;
         const healed = Math.min(casterMaxHp - casterHp, casterHealAmount);
@@ -1285,7 +1314,9 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
           record(`${MONSTERS.get(event.monsterId)?.name ?? "怪物"} 離開戰鬥`, "monster");
         }
         if (event.type === "buffStart" || event.type === "buffEnd") {
-          record(`角色 ${buffDisplayName(event.buffId)} ${event.type === "buffStart" ? "生效" : "結束"}`);
+          const dispelled = event.type === "buffEnd" && event.dispelled;
+          if (dispelled) schedulePartyBuff(event.buffId);
+          record(`角色 ${buffDisplayName(event.buffId)} ${dispelled ? "被解除" : event.type === "buffStart" ? "生效" : "結束"}`);
         }
         if (event.type === "playerAttack" && event.uid === current.uid && !event.damage) {
           record(`角色普攻 · ${event.result === "miss" ? "未命中" : "未造成傷害"}`, "player");
