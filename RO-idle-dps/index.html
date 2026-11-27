@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RO 放置仙境 · 配點與單怪 DPS 試算</title>
+  <title>RO 放置仙境 · 單怪 DPS 試算</title>
   <script>
     try {
       const savedTheme = localStorage.getItem("ro-idle-dps-theme");
@@ -12,8 +12,8 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="popup.css?v=20261127-12">
-  <script type="module" src="popup.js?v=20261127-12"></script>
+  <link rel="stylesheet" href="popup.css?v=20261127-13">
+  <script type="module" src="popup.js?v=20261127-13"></script>
 </head>
 <body>
   <div class="shell">
@@ -22,395 +22,95 @@
       <div class="topbar-brand">
         <div class="brand-mark" aria-hidden="true">⚔</div>
         <div class="brand-text">
-          <h1>RO 放置仙境 · 配點＆DPS 試算</h1>
-          <p id="role" class="brand-sub">正在準備模擬工作室…</p>
+          <h1>RO 放置仙境 · 單怪 DPS 試算</h1>
+          <p id="role" class="brand-sub">正在初始化戰鬥引擎…</p>
         </div>
       </div>
       <div class="topbar-actions">
         <a id="back-route" class="btn btn-ghost" href="../" hidden>← 巡迴配置</a>
         <button id="theme-toggle" class="btn btn-ghost" type="button" aria-label="切換淺色或深色模式">深／淺色</button>
-        <button id="toggle-import" class="btn btn-outline" type="button" hidden>匯入遊戲角色</button>
+        <button id="toggle-import" class="btn btn-primary" type="button" hidden>匯入遊戲角色</button>
         <button id="refresh" class="btn btn-primary" type="button" hidden>更新角色</button>
       </div>
     </header>
 
-    <!-- Character Switcher Strip -->
-    <section id="char-bar" class="char-bar" hidden aria-label="角色切換與管理">
+    <!-- Imported Character Switcher Strip -->
+    <section id="char-bar" class="char-bar" hidden aria-label="已匯入角色切換">
       <div class="char-bar-select">
-        <label class="sr-only" for="saved-character">切換角色或自訂配點</label>
+        <label class="sr-only" for="saved-character">切換已匯入角色</label>
         <select id="saved-character"></select>
       </div>
       <div class="char-bar-actions">
-        <button id="new-custom-char" class="btn btn-primary" type="button">＋ 新建自訂</button>
-        <button id="save-current-char" class="btn btn-outline" type="button">儲存配點</button>
-        <button id="export-json" class="btn btn-ghost" type="button">匯出</button>
-        <button id="delete-saved" class="btn btn-danger-ghost" type="button">刪除</button>
+        <button id="delete-saved" class="btn btn-danger-ghost" type="button">刪除紀錄</button>
       </div>
     </section>
 
-    <!-- Collapsible Web Import Drawer -->
-    <section id="import-drawer" class="panel import-drawer" hidden aria-label="匯入遊戲角色">
+    <!-- Web Import Drawer (Game Bookmarklet Only) -->
+    <section id="import-drawer" class="panel import-drawer" hidden aria-label="從遊戲分頁匯入角色">
       <div class="panel-head">
         <div>
-          <h2>從 ro-idle.app 匯入遊戲角色</h2>
-          <p class="hint">可從遊戲分頁直接傳送角色，或直接使用下方「角色配點」分頁自訂角色。</p>
+          <h2>從 ro-idle.app 遊戲分頁匯入角色</h2>
+          <p class="hint">僅支援直接由 <code>ro-idle.app</code> 遊戲分頁透過書籤小工具傳送目前角色進行模擬試算。</p>
         </div>
         <button id="close-import" class="btn btn-ghost" type="button">收合</button>
       </div>
-      <div class="import-grid">
-        <div class="subcard">
-          <h3>方式一：書籤小工具（手機／電腦跨分頁傳送）</h3>
-          <p class="hint" id="bookmarklet-origin-hint">建立一次書籤後，在 <code>ro-idle.app</code> 遊戲分頁點選該書籤，就會自動讀取目前角色並傳送到本頁。</p>
-          <ol class="steps-list">
-            <li>點「複製書籤程式碼」（電腦可直接拖曳按鈕到書籤列）。</li>
-            <li>在瀏覽器新增書籤並將網址改為剛複製的程式碼。</li>
-            <li>切回 <code>ro-idle.app</code> 點選該書籤即可傳送角色。</li>
-          </ol>
-          <div class="btn-row">
-            <button id="copy-bookmarklet" class="btn btn-primary" type="button">複製書籤程式碼</button>
-            <a id="bookmarklet-link" class="btn btn-outline" href="#">拖曳到書籤列：RO DPS</a>
-          </div>
-          <p id="copy-status" class="copy-status" aria-live="polite"></p>
+      <div class="subcard">
+        <h3>書籤小工具（手機／電腦跨分頁傳送）</h3>
+        <p class="hint" id="bookmarklet-origin-hint">建立一次書籤後，在 <code>ro-idle.app</code> 遊戲分頁點選該書籤，就會自動讀取目前角色並傳送到本頁。</p>
+        <ol class="steps-list">
+          <li>點「複製書籤程式碼」（電腦可直接拖曳按鈕到書籤列）。</li>
+          <li>在瀏覽器新增書籤並將網址改為剛複製的程式碼。</li>
+          <li>切回 <code>ro-idle.app</code> 進入角色畫面後，點選該書籤即可傳送角色。</li>
+        </ol>
+        <div class="btn-row">
+          <button id="copy-bookmarklet" class="btn btn-primary" type="button">複製書籤程式碼</button>
+          <a id="bookmarklet-link" class="btn btn-outline" href="#">拖曳到書籤列：RO DPS</a>
         </div>
-        <div class="subcard">
-          <h3>方式二：手動貼上遊戲 API JSON 或匯入檔案</h3>
-          <div class="api-helper">
-            <a class="btn btn-outline" href="https://ro-idle.app/api/characters" target="_blank" rel="noopener">1. 開啟角色清單（查 ID）</a>
-            <div class="api-id-row">
-              <input id="char-id-input" type="number" min="1" placeholder="角色 ID">
-              <button id="open-char-api" class="btn btn-outline" type="button">2. 開啟快照</button>
-            </div>
-          </div>
-          <textarea id="json-input" rows="3" placeholder="全選複製 /api/characters/ID?deferCatchup=1 的 JSON 貼上到這裡，或貼上先前匯出的配點 JSON"></textarea>
-          <div class="btn-row">
-            <button id="import-json" class="btn btn-primary" type="button">載入貼上的 JSON</button>
-            <label class="btn btn-outline file-label">匯入 JSON 檔<input id="import-file" type="file" accept=".json,application/json" hidden></label>
-          </div>
-        </div>
+        <p id="copy-status" class="copy-status" aria-live="polite"></p>
       </div>
     </section>
 
     <p id="status" class="status-banner" role="status" aria-live="polite"></p>
 
-    <!-- Main 2-Column Studio Workspace -->
+    <!-- Main 2-Column Workspace -->
     <div class="studio-layout">
-      <!-- Live Character Stats Sidebar (Sticky on Desktop, Compact Collapsible on Mobile) -->
+      <!-- Live Character Stats Sidebar (Read-Only) -->
       <aside id="character-panel" class="stats-sidebar panel" aria-labelledby="stats-title">
         <div class="stats-head">
           <div>
-            <h2 id="stats-title">即時角色能力</h2>
-            <p id="stats-caption" class="hint">載入中…</p>
+            <h2 id="stats-title">角色能力面板</h2>
+            <p id="stats-caption" class="hint">尚未匯入角色</p>
           </div>
           <button id="mobile-stats-toggle" class="btn btn-ghost mobile-only" type="button" aria-expanded="false">展開完整能力</button>
         </div>
 
-        <!-- Always-visible Key KPI Row -->
         <div id="stats-kpi" class="stats-kpi"></div>
 
-        <!-- Full Stats Sheet -->
         <div id="stats-detail-wrap" class="stats-detail-wrap">
           <dl id="character-stats" class="stats-grid"></dl>
           <details id="equipment-details" class="mini-details">
-            <summary>試算裝備與箭矢明細</summary>
+            <summary>裝備、卡片與箭矢明細</summary>
             <p id="ammo-summary" class="hint"></p>
             <ul id="equipment-list" class="equip-summary-list"></ul>
           </details>
         </div>
-
-        <div class="sidebar-footer desktop-only">
-          <button id="quick-go-sim" class="btn btn-primary btn-full" type="button">前往 DPS 試算 →</button>
-        </div>
       </aside>
 
-      <!-- Tabbed Editor & Simulator Workspace -->
+      <!-- Tabbed Simulator Workspace (DPS & Buffs Only) -->
       <main class="workspace">
         <nav class="tab-nav" role="tablist" aria-label="功能分頁">
-          <button class="tab-btn is-active" type="button" role="tab" data-tab="build" aria-selected="true">角色配點</button>
-          <button class="tab-btn" type="button" role="tab" data-tab="skills" aria-selected="false">技能配點 <span id="tab-badge-skills" class="tab-badge"></span></button>
-          <button class="tab-btn" type="button" role="tab" data-tab="gear" aria-selected="false">裝備／卡片 <span id="tab-badge-gear" class="tab-badge" hidden></span></button>
+          <button class="tab-btn tab-btn-sim is-active" type="button" role="tab" data-tab="simulate" aria-selected="true">DPS 試算</button>
           <button class="tab-btn" type="button" role="tab" data-tab="buffs" aria-selected="false">角色 Buff <span id="tab-badge-buffs" class="tab-badge" hidden></span></button>
-          <button class="tab-btn tab-btn-sim" type="button" role="tab" data-tab="simulate" aria-selected="false">DPS 試算</button>
         </nav>
 
-        <!-- TAB 1: Character Identity, Rebirth, Levels & Stats -->
-        <section id="tab-build" class="tab-panel" role="tabpanel">
-          <div class="panel">
-            <div class="panel-head">
-              <div>
-                <h2>基本資料與職業設定</h2>
-                <p id="char-source-hint" class="hint">可自由設定轉生次數、職業與等級，完全不依賴匯入。</p>
-              </div>
-              <button id="revert-imported-char" class="btn btn-outline" type="button" hidden>還原原快照數值</button>
-            </div>
-
-            <div class="form-grid-2">
-              <label class="field">
-                <span>角色名稱</span>
-                <input id="build-name" type="text" maxlength="24" placeholder="例如：測試神射手">
-              </label>
-
-              <div class="field">
-                <span>轉生次數（0 轉或 1～11 轉）</span>
-                <div class="rebirth-row">
-                  <select id="build-rebirths" class="rebirth-select" aria-label="轉生次數">
-                    <option value="0">0 轉（一般 · 起始 48 點）</option>
-                    <option value="1" selected>1 轉（進階 · 起始 100 點）</option>
-                    <option value="2">2 轉（進階 · 起始 120 點）</option>
-                    <option value="3">3 轉（進階 · 起始 140 點）</option>
-                    <option value="4">4 轉（進階 · 起始 160 點）</option>
-                    <option value="5">5 轉（進階 · 起始 180 點）</option>
-                    <option value="6">6 轉（進階 · 起始 200 點）</option>
-                    <option value="7">7 轉（進階 · 起始 220 點）</option>
-                    <option value="8">8 轉（進階 · 起始 240 點）</option>
-                    <option value="9">9 轉（進階 · 起始 260 點）</option>
-                    <option value="10">10 轉（進階 · 起始 280 點）</option>
-                    <option value="11">11 轉（進階 · 起始 300 點）</option>
-                  </select>
-                  <button id="rebirth-0" class="btn btn-outline btn-sm" type="button">0轉</button>
-                  <button id="rebirth-1" class="btn btn-outline btn-sm" type="button">1轉</button>
-                  <button id="rebirth-11" class="btn btn-outline btn-sm" type="button">11轉</button>
-                </div>
-                <p id="rebirth-hint" class="hint"></p>
-              </div>
-            </div>
-
-            <div class="form-grid-3">
-              <label class="field">
-                <span>職業</span>
-                <select id="build-job"></select>
-              </label>
-
-              <div class="field">
-                <span>Base Lv（1–99）</span>
-                <div class="inline-input-btn">
-                  <input id="build-base-lv" type="number" min="1" max="99" value="99">
-                  <button id="build-base-max" class="btn btn-outline btn-sm" type="button">99</button>
-                </div>
-              </div>
-
-              <div class="field">
-                <span>Job Lv（1–<span id="build-job-lv-max-label">70</span>）</span>
-                <div class="inline-input-btn">
-                  <input id="build-job-lv" type="number" min="1" max="70" value="70">
-                  <button id="build-job-max" class="btn btn-outline btn-sm" type="button">滿</button>
-                </div>
-              </div>
-            </div>
-
-            <div class="extra-char-flags">
-              <label id="first-job-lv-wrap" class="field field-compact">
-                <span>一轉轉職時 Job Lv（算總技能點）</span>
-                <input id="build-first-job-lv" type="number" min="40" max="50" value="50">
-              </label>
-              <label id="build-riding-wrap" class="check" hidden>
-                <input id="build-riding" type="checkbox"> 騎乘大嘴鳥（槍系對中體型補正＆騎兵修練攻速）
-              </label>
-              <label id="build-falcon-wrap" class="check" hidden>
-                <input id="build-falcon" type="checkbox"> 攜帶獵鷹（普攻自動閃電衝擊）
-              </label>
-            </div>
-
-            <div class="pet-picker-box">
-              <div class="pet-picker-head">
-                <span class="pet-picker-title">攜帶寵物（忠誠加成）</span>
-                <label class="check inline-check">
-                  <input id="build-pet-loyal" type="checkbox" checked> 親密度達忠誠（≥ 910）
-                </label>
-              </div>
-              <div class="pet-picker-controls">
-                <input id="build-pet-search" type="search" placeholder="篩選寵物名稱或效果（例如：ATK、暴擊、MATK、伊絲）" autocomplete="off">
-                <select id="build-pet" aria-label="選擇寵物"></select>
-              </div>
-              <p id="build-pet-desc" class="hint"></p>
-            </div>
-          </div>
-
-          <div class="panel stats-builder-panel">
-            <div class="panel-head">
-              <div>
-                <h2>六圍屬性配點與雷達圖</h2>
-                <p id="stat-points-summary" class="points-pill">剩餘素質點數：—</p>
-              </div>
-              <div class="panel-head-actions">
-                <label class="check inline-check"><input id="build-free-stats" type="checkbox"> 自由配點（不限上限）</label>
-                <button id="build-stats-reset" class="btn btn-outline btn-sm" type="button">全部重置</button>
-              </div>
-            </div>
-            <div class="stats-builder-layout">
-              <div class="radar-card">
-                <svg id="stat-radar" class="stat-radar" viewBox="0 0 360 300" role="img" aria-label="六圍屬性雷達圖"></svg>
-                <div class="radar-legend">
-                  <span><i class="legend-swatch swatch-base"></i>內圈：純配點</span>
-                  <span><i class="legend-swatch swatch-total"></i>外圈：含加成總值</span>
-                </div>
-              </div>
-              <div id="stat-allocator" class="stat-allocator"></div>
-            </div>
-          </div>
-        </section>
-
-        <!-- TAB 2: Skill Tree Allocator -->
-        <section id="tab-skills" class="tab-panel" role="tabpanel" hidden>
-          <div class="panel">
-            <div class="panel-head">
-              <div>
-                <h2>技能樹配點</h2>
-                <p id="skill-points-summary" class="points-pill">已配技能點：—</p>
-              </div>
-              <div class="panel-head-actions">
-                <label class="check inline-check"><input id="build-free-skills" type="checkbox"> 不限技能點</label>
-                <button id="skills-learn-quests" class="btn btn-outline btn-sm" type="button">全學任務技能</button>
-                <button id="skills-reset" class="btn btn-outline btn-sm" type="button">重置技能</button>
-              </div>
-            </div>
-            <div class="skill-mode-bar" role="group" aria-label="技能顯示方式">
-              <button id="skill-view-tree" class="mode-tab is-active" type="button" data-skill-view="tree">⊞ 圖示化技能樹（含箭頭）</button>
-              <button id="skill-view-list" class="mode-tab" type="button" data-skill-view="list">☰ 清單模式</button>
-            </div>
-            <div class="skill-toolbar">
-              <input id="skill-tree-search" type="search" placeholder="搜尋技能名稱或說明…" autocomplete="off">
-              <div class="filter-pills" id="skill-filter-pills">
-                <button class="pill is-active" type="button" data-skill-filter="all">全部</button>
-                <button class="pill" type="button" data-skill-filter="attack">主動攻擊</button>
-                <button class="pill" type="button" data-skill-filter="learned">已學習</button>
-              </div>
-            </div>
-            <p id="skill-view-hint" class="hint">點擊技能或「＋」會自動補足前置等級（綠色實線箭頭＝已達成，虛線箭頭＝未達成）；右鍵或「−」降級。</p>
-
-            <!-- Visual RO Skill Tree Graph View -->
-            <div id="skill-tree-graph-wrap" class="skill-graph-wrap">
-              <div id="skill-inspector" class="skill-inspector" hidden></div>
-              <div class="skill-graph-section" id="skill-graph-connected-sec">
-                <div class="skill-section-title">前置連動技能樹</div>
-                <div class="skill-graph-scroll">
-                  <div id="skill-graph-canvas" class="skill-graph-canvas"></div>
-                </div>
-              </div>
-              <div class="skill-graph-section" id="skill-graph-standalone-sec" hidden>
-                <div class="skill-section-title">無前置獨立技能</div>
-                <div id="skill-graph-standalone" class="skill-node-grid"></div>
-              </div>
-              <div class="skill-graph-section" id="skill-graph-quests-sec" hidden>
-                <div class="skill-section-title">任務技能（免技能點）</div>
-                <div id="skill-graph-quests" class="skill-node-grid"></div>
-              </div>
-            </div>
-
-            <!-- List View -->
-            <div id="skill-tree-list" class="skill-tree-list" hidden></div>
-          </div>
-        </section>
-
-        <!-- TAB 3: Equipment / Refine / Cards -->
-        <section id="tab-gear" class="tab-panel" role="tabpanel" hidden>
-          <div class="panel">
-            <div class="panel-head">
-              <div>
-                <h2>裝備／精煉／卡片</h2>
-                <p class="hint">點選任一部位更換裝備、設定精煉（+0～+10）與插卡。已自訂部位不會被掛機自動換裝覆蓋。</p>
-              </div>
-              <div class="panel-head-actions">
-                <span id="gear-override-badge" class="badge" hidden></span>
-                <button id="gear-reset-all" class="btn btn-outline btn-sm" type="button" disabled>還原全部裝備</button>
-              </div>
-            </div>
-
-            <div id="gear-grid" class="gear-grid" role="list"></div>
-
-            <div id="slot-editor" class="slot-editor" hidden>
-              <div class="slot-editor-head">
-                <h3 id="slot-editor-title">編輯部位</h3>
-                <div class="slot-editor-actions">
-                  <button id="slot-unequip" class="btn btn-outline btn-sm" type="button">卸下裝備</button>
-                  <button id="slot-reset" class="btn btn-outline btn-sm" type="button">還原此部位</button>
-                </div>
-              </div>
-              <div id="slot-owned-row" class="slot-block" hidden>
-                <label for="slot-owned-select">從角色背包快速套用（含原精煉與卡片）</label>
-                <select id="slot-owned-select"></select>
-              </div>
-              <div class="slot-block">
-                <div class="slot-filter-row">
-                  <input id="slot-item-search" type="search" placeholder="搜尋裝備名稱、ID 或效果說明" autocomplete="off">
-                  <label class="check inline-check"><input id="slot-equippable-only" type="checkbox" checked> 只顯示可裝備</label>
-                </div>
-                <label for="slot-item-select">選擇裝備 <span id="slot-item-count" class="muted"></span></label>
-                <select id="slot-item-select"></select>
-                <p id="slot-item-desc" class="item-desc"></p>
-              </div>
-              <div id="slot-refine-block" class="slot-block" hidden>
-                <label for="slot-refine-select">精煉等級</label>
-                <div class="refine-controls">
-                  <button id="slot-refine-minus" class="btn btn-outline" type="button" aria-label="減少精煉">−</button>
-                  <select id="slot-refine-select"></select>
-                  <button id="slot-refine-plus" class="btn btn-outline" type="button" aria-label="增加精煉">＋</button>
-                </div>
-              </div>
-              <div id="slot-cards-block" class="slot-block" hidden>
-                <div class="cards-head">
-                  <label for="slot-card-search">卡片插槽</label>
-                  <button id="slot-cards-fill-all" class="btn btn-outline btn-sm" type="button" hidden>全部插槽套用插槽 1</button>
-                </div>
-                <input id="slot-card-search" type="search" placeholder="篩選卡片名稱、效果或 ID（例如：海葵、人形、ATK）" autocomplete="off">
-                <div id="slot-cards-list" class="cards-list"></div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- TAB 4: Buffs & Monster Statuses -->
-        <section id="tab-buffs" class="tab-panel" role="tabpanel" hidden>
-          <div id="scenario" class="buffs-stack">
-            <div id="snapshot-buff-card" class="panel" hidden>
-              <div class="panel-head">
-                <div>
-                  <h2 id="snapshot-buff-summary">匯入遊戲身上的 Buff</h2>
-                  <p class="hint">可一鍵全部套用，預設視為常駐模擬隊友到期續補。</p>
-                </div>
-                <div id="active-buff-actions" class="panel-head-actions">
-                  <button id="active-buffs-all" class="btn btn-primary btn-sm" type="button">全部勾選</button>
-                  <button id="active-buffs-none" class="btn btn-outline btn-sm" type="button">全部取消</button>
-                </div>
-              </div>
-              <label class="check" id="keep-active-buffs-wrap">
-                <input id="keep-active-buffs" type="checkbox" checked> 身上 Buff 到期自動續補（常駐，模擬隊友補 Buff）
-              </label>
-              <div id="active-buffs" class="active-buffs-grid"></div>
-            </div>
-
-            <div class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2>角色手動 Buff 與歌舞</h2>
-                  <p class="hint">設為 0 秒代表整場常駐。歌舞請填演奏者施放當下的總素質。與身上重複或同類 Buff 會直接覆蓋，不會雙倍疊加。</p>
-                </div>
-                <button id="clear-manual-buffs" class="btn btn-outline btn-sm" type="button">清除勾選</button>
-              </div>
-              <div class="buff-toolbar">
-                <input id="buff-filter" type="search" aria-label="篩選 Buff" placeholder="篩選 Buff 名稱或代碼">
-                <div class="filter-pills" id="buff-category-pills">
-                  <button class="pill is-active" type="button" data-buff-cat="all">全部</button>
-                  <button class="pill" type="button" data-buff-cat="skill">技能</button>
-                  <button class="pill" type="button" data-buff-cat="element">屬性附加</button>
-                  <button class="pill" type="button" data-buff-cat="item">藥水・料理</button>
-                  <button class="pill" type="button" data-buff-cat="song">歌舞</button>
-                </div>
-              </div>
-              <div id="extra-buffs" class="effect-list" aria-label="手動 Buff"></div>
-              <p class="filter-count" id="buff-count" aria-live="polite"></p>
-              <label class="check"><input id="auto-buffs" type="checkbox"> 允許使用 Buff 道具及掛機模式自補 Buff</label>
-            </div>
-          </div>
-        </section>
-
-        <!-- TAB 5: DPS Simulation & Results -->
-        <section id="tab-simulate" class="tab-panel" role="tabpanel" hidden>
+        <!-- TAB 1: DPS Simulation & Results -->
+        <section id="tab-simulate" class="tab-panel" role="tabpanel">
           <form id="calculator" class="panel">
-            <fieldset id="fields">
+            <fieldset id="fields" disabled>
               <div class="panel-head">
                 <div>
                   <h2>戰鬥目標與模擬條件</h2>
-                  <p class="hint">在本機使用 RO 放置仙境原始戰鬥引擎連續模擬 16 場求平均。</p>
+                  <p class="hint">以匯入的遊戲角色在本機使用 RO 放置仙境原始戰鬥引擎連續模擬 16 場求平均。</p>
                 </div>
               </div>
 
@@ -555,9 +255,54 @@
 
             <details class="mini-details">
               <summary>試算條件說明</summary>
-              <p class="hint">以角色目前配點／快照的 HP、SP、裝備、卡片與 Buff 開始，連續模擬 16 次取平均。目標倒下後立即換上同種滿血怪物並計入有效傷害。指定技能模式會自動搭配該技能所需的蓄氣／爆氣或武僧連技前置。勾選「角色不死」時 HP 最低維持 1 點不倒下，並照常完整計算每次實際承傷與傷害來源。</p>
+              <p class="hint">以匯入角色快照的 HP、SP、素質、技能、裝備、卡片、寵物與 Buff 開始，連續模擬 16 次取平均。目標倒下後立即換上同種滿血怪物並計入有效傷害。指定技能模式會自動搭配該技能所需的蓄氣／爆氣或武僧連技前置。勾選「角色不死」時 HP 最低維持 1 點不倒下，並照常完整計算每次實際承傷與傷害來源。</p>
             </details>
           </section>
+        </section>
+
+        <!-- TAB 2: Character Buffs -->
+        <section id="tab-buffs" class="tab-panel" role="tabpanel" hidden>
+          <div id="scenario" class="buffs-stack">
+            <div id="snapshot-buff-card" class="panel" hidden>
+              <div class="panel-head">
+                <div>
+                  <h2 id="snapshot-buff-summary">匯入遊戲身上的 Buff</h2>
+                  <p class="hint">可一鍵全部套用，預設視為常駐模擬隊友到期續補。</p>
+                </div>
+                <div id="active-buff-actions" class="panel-head-actions">
+                  <button id="active-buffs-all" class="btn btn-primary btn-sm" type="button">全部勾選</button>
+                  <button id="active-buffs-none" class="btn btn-outline btn-sm" type="button">全部取消</button>
+                </div>
+              </div>
+              <label class="check" id="keep-active-buffs-wrap">
+                <input id="keep-active-buffs" type="checkbox" checked> 身上 Buff 到期自動續補（常駐，模擬隊友補 Buff）
+              </label>
+              <div id="active-buffs" class="active-buffs-grid"></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>角色手動 Buff 與歌舞</h2>
+                  <p class="hint">設為 0 秒代表整場常駐。歌舞請填演奏者施放當下的總素質。與身上重複或同類 Buff 會直接覆蓋，不會雙倍疊加。</p>
+                </div>
+                <button id="clear-manual-buffs" class="btn btn-outline btn-sm" type="button">清除勾選</button>
+              </div>
+              <div class="buff-toolbar">
+                <input id="buff-filter" type="search" aria-label="篩選 Buff" placeholder="篩選 Buff 名稱或代碼">
+                <div class="filter-pills" id="buff-category-pills">
+                  <button class="pill is-active" type="button" data-buff-cat="all">全部</button>
+                  <button class="pill" type="button" data-buff-cat="skill">技能</button>
+                  <button class="pill" type="button" data-buff-cat="element">屬性附加</button>
+                  <button class="pill" type="button" data-buff-cat="item">藥水・料理</button>
+                  <button class="pill" type="button" data-buff-cat="song">歌舞</button>
+                </div>
+              </div>
+              <div id="extra-buffs" class="effect-list" aria-label="手動 Buff"></div>
+              <p class="filter-count" id="buff-count" aria-live="polite"></p>
+              <label class="check"><input id="auto-buffs" type="checkbox"> 允許使用 Buff 道具及掛機模式自補 Buff</label>
+            </div>
+          </div>
         </section>
       </main>
     </div>
