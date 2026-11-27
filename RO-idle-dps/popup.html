@@ -13,10 +13,7 @@
       <h1>單怪 DPS 試算</h1>
       <p id="role">正在讀取目前角色…</p>
     </div>
-    <div class="header-actions">
-      <button id="open-floating" type="button" hidden>懸浮視窗</button>
-      <button id="refresh" type="button">更新角色</button>
-    </div>
+    <button id="refresh" type="button">更新角色</button>
   </header>
   <section id="character-panel" class="card" hidden aria-labelledby="stats-title">
     <h2 id="stats-title">角色能力</h2>
@@ -53,23 +50,19 @@
       <details id="scenario">
         <summary>角色 Buff 與怪物狀態</summary>
         <h2>角色起始 Buff</h2>
+        <input id="buff-filter" type="search" aria-label="篩選 Buff" placeholder="篩選 Buff 名稱或代碼">
+        <div id="extra-buffs" class="effect-list" aria-label="手動 Buff"></div>
+        <p class="filter-count" id="buff-count" aria-live="polite"></p>
         <details id="snapshot-buff-options">
           <summary>匯入遊戲身上的 Buff（預設不選）</summary>
           <div id="active-buffs"></div>
         </details>
         <label class="check"><input id="auto-buffs" type="checkbox"> 允許使用 Buff 道具及掛機模式自補 Buff</label>
-        <div class="effect-picker">
-          <select id="buff-choice" aria-label="額外角色 Buff"></select>
-          <button id="add-buff" type="button">加入 Buff</button>
-        </div>
-        <div id="extra-buffs"></div>
         <p>歌舞請填演奏者施放當下的總素質（含裝備與增益）。</p>
         <h2>怪物起始狀態</h2>
-        <div class="effect-picker">
-          <select id="status-choice" aria-label="怪物狀態"></select>
-          <button id="add-status" type="button">加入狀態</button>
-        </div>
-        <div id="monster-statuses"></div>
+        <input id="status-filter" type="search" aria-label="篩選怪物狀態" placeholder="篩選怪物狀態名稱或代碼">
+        <div id="monster-statuses" class="effect-list" aria-label="怪物狀態"></div>
+        <p class="filter-count" id="status-count" aria-live="polite"></p>
         <p>可設定等級與持續時間（秒）。設為 0 秒時不自然到期。消耗或解除仍依遊戲規則。怪物狀態會在每次換上新目標時套用。</p>
       </details>
       <button id="calculate" type="submit">開始試算</button>

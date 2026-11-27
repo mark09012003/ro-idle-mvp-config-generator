@@ -1,8 +1,6 @@
 const $ = id => document.getElementById(id);
 const host = "https://ro-idle.app";
 const gameTab = new URL(location.href).searchParams.get("gameTab");
-const floating = gameTab !== null;
-document.body.classList.toggle("floating", floating);
 const number = new Intl.NumberFormat("zh-TW", {maximumFractionDigits: 2});
 const format = value => Number.isFinite(value) ? number.format(value) : "—";
 const seconds = ms => `${format(ms / 1000)} 秒`;
@@ -15,7 +13,7 @@ const race = {
   demon:"惡魔", demihuman:"人形", angel:"天使", dragon:"龍",
 };
 const size = {small:"小型", medium:"中型", large:"大型"};
-let worker, snapshot, scenario, gameTabId, targets = [], skills = [], sequence = 0;
+let worker, snapshot, scenario, targets = [], skills = [], sequence = 0;
 const requests = new Map();
 
 function getWorker() {
@@ -55,19 +53,16 @@ function engine(action, options) {
 
 async function readCharacter() {
   if (!globalThis.chrome?.scripting) throw new Error("請從 Chrome 工具列開啟已安裝的擴充。");
-  let tab;
-  if (floating) {
-    const id = Number(gameTab);
-    if (!/^\d+$/.test(gameTab) || !Number.isSafeInteger(id)) throw new Error("找不到原本的遊戲分頁。");
-    try { tab = await chrome.tabs.get(id); }
-    catch { throw new Error("原本的遊戲分頁已關閉，請到遊戲分頁重新開啟 DPS 試算。"); }
-  } else {
-    [tab] = await chrome.tabs.query({currentWindow:true, active:true});
+  const id = Number(gameTab);
+  if (!gameTab || !/^\d+$/.test(gameTab) || !Number.isSafeInteger(id)) {
+    throw new Error("請從 Chrome 工具列開啟單怪 DPS 試算。");
   }
+  let tab;
+  try { tab = await chrome.tabs.get(id); }
+  catch { throw new Error("原本的遊戲分頁已關閉，請到遊戲分頁重新開啟 DPS 試算。"); }
   if (!tab?.url || new URL(tab.url).origin !== host || new URL(tab.url).pathname.startsWith("/info")) {
     throw new Error("請先到 ro-idle.app 進入角色，再開啟擴充。");
   }
-  gameTabId = tab.id;
   const [reply] = await chrome.scripting.executeScript({
     target:{tabId:tab.id},
     func: async allowedOrigin => {
@@ -111,27 +106,6 @@ async function readCharacter() {
   return result.snapshot;
 }
 
-async function openFloating() {
-  if (floating || gameTabId === undefined) return;
-  const button = $("open-floating");
-  button.disabled = true;
-  try {
-    const url = new URL(chrome.runtime.getURL("popup.html"));
-    url.searchParams.set("gameTab", String(gameTabId));
-    const windows = await chrome.windows.getAll({populate:true, windowTypes:["popup"]});
-    const existing = windows.find(candidate => candidate.tabs?.some(tab => tab.url === url.href));
-    if (existing) await chrome.windows.update(existing.id, {focused:true, state:"normal"});
-    else await chrome.windows.create({url:url.href, type:"popup", width:480, height:730, focused:true});
-    window.close();
-  } catch (error) {
-    $("status").textContent = `無法開啟懸浮視窗。${error.message}`;
-  } finally {
-    button.disabled = false;
-  }
-}
-
-$("open-floating").onclick = openFloating;
-
 function fillMonsters() {
   const term = $("search").value.trim().normalize("NFKC").toLowerCase();
   const current = $("monster").value;
@@ -161,70 +135,83 @@ function renderScenario() {
     return label;
   }));
   if (!scenario.active.length) $("active-buffs").textContent = "角色目前沒有 Buff。";
-  $("buff-choice").replaceChildren(...scenario.buffs.map(({name,id}) => new Option(name,id)));
-  $("status-choice").replaceChildren(...scenario.statuses.map(({name,id}) => new Option(name,id)));
+  if (!$("extra-buffs").children.length) {
+    $("extra-buffs").replaceChildren(...scenario.buffs.map(effectRow));
+    $("monster-statuses").replaceChildren(...scenario.statuses.map(effectRow));
+  }
+  filterEffects("buff");
+  filterEffects("status");
 }
 
-function addScenarioEffect(type) {
-  const buff = type === "buff";
-  const id = $(buff ? "buff-choice" : "status-choice").value;
-  const container = $(buff ? "extra-buffs" : "monster-statuses");
-  const definition = (buff ? scenario.buffs : scenario.statuses).find(effect => effect.id === id);
-  if (!definition || [...container.children].some(row => row.dataset.effect === id)) return;
+function numberField(text, name, initial, min, max) {
+  const label = document.createElement("label");
+  label.textContent = text;
+  const input = document.createElement("input");
+  input.type = "number";
+  input.dataset.parameter = name;
+  input.min = String(min);
+  input.max = String(max);
+  input.value = String(initial);
+  input.required = true;
+  label.append(input);
+  return label;
+}
+
+function effectRow(definition) {
   const row = document.createElement("div");
   row.className = "effect-row";
-  row.dataset.effect = id;
-  const name = document.createElement("strong");
-  name.textContent = definition.name;
-  const level = document.createElement("select");
-  level.className = "effect-level";
-  level.setAttribute("aria-label", `${definition.name} 等級`);
-  level.replaceChildren(...Array.from({length:definition.max}, (_, i) => new Option(`Lv ${i+1}`, i+1)));
-  level.value = String(definition.max);
-  const seconds = document.createElement("input");
-  seconds.type = "number";
-  seconds.className = "effect-seconds";
-  seconds.min = "0";
-  seconds.max = "120";
-  seconds.required = true;
-  seconds.value = "0";
-  seconds.setAttribute("aria-label", `${definition.name} 持續秒數`);
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.textContent = "移除";
-  remove.onclick = () => { row.remove(); scheduleStats(); };
-  row.append(name, level, seconds, remove);
+  row.dataset.effect = definition.id;
+  row.dataset.name = definition.name;
+  const label = document.createElement("label");
+  label.className = "check";
+  const select = document.createElement("input");
+  select.type = "checkbox";
+  select.className = "effect-toggle";
+  label.append(select, definition.name);
+  const settings = document.createElement("fieldset");
+  settings.className = "effect-parameters";
+  settings.hidden = settings.disabled = true;
+  settings.append(numberField("等級", "level", definition.max, 1, definition.max),
+    numberField("持續（秒）", "seconds", 0, 0, 120));
   if (definition.stats) {
-    const performer = document.createElement("div");
-    performer.className = "performer-fields";
-    for (const [key, text] of [...definition.stats.map(stat => [stat, `演奏者 ${stat.toUpperCase()}`]),
-      ["lesson", definition.lessonName]]) {
-      const label = document.createElement("label");
-      label.textContent = text;
-      const input = document.createElement("input");
-      input.type = "number";
-      input.dataset.stat = key;
-      input.min = "0";
-      input.max = key === "lesson" ? "10" : "999";
-      input.value = key === "lesson" ? "10" : "90";
-      input.required = true;
-      label.append(input);
-      performer.append(label);
-    }
-    row.append(performer);
+    for (const stat of definition.stats) settings.append(numberField(`演奏者 ${stat.toUpperCase()}`, stat, 90, 0, 999));
+    settings.append(numberField(definition.lessonName, "lesson", 10, 0, 10));
   }
-  container.append(row);
-  scheduleStats();
+  select.onchange = () => {
+    settings.hidden = settings.disabled = !select.checked;
+    filterEffects(row.parentElement.id === "extra-buffs" ? "buff" : "status");
+  };
+  row.append(label, settings);
+  return row;
+}
+
+const effectLists = {buff:"extra-buffs", status:"monster-statuses"};
+
+function filterEffects(type) {
+  const term = $(`${type}-filter`).value.trim().normalize("NFKC").toLowerCase();
+  const rows = [...$(effectLists[type]).children];
+  let visible = 0;
+  let selected = 0;
+  let hiddenSelected = 0;
+  for (const row of rows) {
+    const match = `${row.dataset.name} ${row.dataset.effect}`.normalize("NFKC").toLowerCase().includes(term);
+    row.hidden = !match;
+    if (match) visible++;
+    if (row.querySelector(".effect-toggle").checked) {
+      selected++;
+      if (!match) hiddenSelected++;
+    }
+  }
+  $(`${type}-count`).textContent = `顯示 ${visible} 項 · 已勾選 ${selected} 項` +
+    (hiddenSelected ? `（${hiddenSelected} 項被篩選隱藏）` : "");
 }
 
 function readEffects(container) {
-  return [...$(container).children].map(row => ({
-    id: row.dataset.effect,
-    level: Number(row.querySelector(".effect-level").value),
-    seconds: Number(row.querySelector(".effect-seconds").value),
-    performer: Object.fromEntries([...row.querySelectorAll("[data-stat]")]
-      .map(input => [input.dataset.stat, Number(input.value)])),
-  }));
+  return [...$(container).children].filter(row => row.querySelector(".effect-toggle").checked).map(row => {
+    const {level, seconds, ...performer} = Object.fromEntries([...row.querySelectorAll("[data-parameter]")]
+      .map(input => [input.dataset.parameter, Number(input.value)]));
+    return {id:row.dataset.effect, level, seconds, performer};
+  });
 }
 
 function readScenario() {
@@ -273,17 +260,16 @@ async function showStats() {
   }
 }
 
-$("scenario").addEventListener("input", scheduleStats);
-
-$("add-buff").onclick = () => addScenarioEffect("buff");
-$("add-status").onclick = () => addScenarioEffect("status");
+$("scenario").addEventListener("input", event => {
+  if (event.target.type !== "search") scheduleStats();
+});
+$("buff-filter").oninput = () => filterEffects("buff");
+$("status-filter").oninput = () => filterEffects("status");
 
 async function load() {
   $("fields").disabled = $("refresh").disabled = true;
-  $("open-floating").hidden = true;
   $("character-panel").hidden = true;
   statsVersion++;
-  gameTabId = undefined;
   $("result").hidden = true;
   $("status").textContent = "正在讀取角色資料…";
   try {
@@ -306,7 +292,6 @@ async function load() {
     $("status").textContent = error.message;
   } finally {
     $("refresh").disabled = false;
-    $("open-floating").hidden = floating || gameTabId === undefined;
   }
 }
 
@@ -389,6 +374,15 @@ $("search").oninput = fillMonsters;
 $("skill").onchange = fillLevels;
 $("mode").onchange = () => { $("skill-fields").hidden = $("mode").value !== "skill"; };
 $("refresh").onclick = load;
+$("calculator").addEventListener("invalid", event => {
+  const row = event.target.closest(".effect-row");
+  if (!row) return;
+  $("scenario").open = true;
+  if (!row.hidden) return;
+  const type = row.parentElement.id === "extra-buffs" ? "buff" : "status";
+  $(`${type}-filter`).value = "";
+  filterEffects(type);
+}, true);
 $("calculator").onsubmit = async event => {
   event.preventDefault();
   if (!snapshot) return;
@@ -398,7 +392,7 @@ $("calculator").onsubmit = async event => {
     counterattack:$("counterattack").checked,
     scenario: readScenario(),
   };
-  $("fields").disabled = $("refresh").disabled = $("open-floating").disabled = true;
+  $("fields").disabled = $("refresh").disabled = true;
   $("result").hidden = true;
   $("status").textContent = "正在本機模擬戰鬥…";
   try {
@@ -407,7 +401,7 @@ $("calculator").onsubmit = async event => {
   } catch (error) {
     $("status").textContent = error.message;
   } finally {
-    $("fields").disabled = $("refresh").disabled = $("open-floating").disabled = false;
+    $("fields").disabled = $("refresh").disabled = false;
   }
 };
 void load();

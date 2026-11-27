@@ -4,7 +4,7 @@
   --line: color-mix(in srgb, CanvasText 20%, Canvas);
   --tint: color-mix(in srgb, Highlight 10%, Canvas);
 }
-body { width: 406px; margin: 0; padding: 16px; color: CanvasText; background: Canvas; }
+body { width: auto; box-sizing: border-box; margin: 0; padding: 16px; color: CanvasText; background: Canvas; }
 [hidden] { display: none !important; }
 header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 h1, h2, p { margin: 0; }
@@ -38,14 +38,14 @@ summary { cursor: pointer; }
 #survival, #incoming-sources { font-size: 12px; margin-bottom: 7px; }
 #scenario { margin-bottom: 10px; padding: 7px; border: 1px solid var(--line); border-radius: 6px; }
 #scenario h2 { margin: 9px 0 5px; font-size: 13px; }
-.effect-picker, .effect-row { display: grid; align-items: center; gap: 5px; }
-.effect-picker { grid-template-columns: 1fr auto; }
-.effect-row { grid-template-columns: minmax(0, 1fr) 66px 55px auto; }
-.effect-row select, .effect-row input, .effect-picker select { margin: 3px 0; }
-.performer-fields { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 6px; padding: 6px; background: var(--tint); border-radius: 5px; }
+.effect-list { max-height: 230px; overflow: auto; border: 1px solid var(--line); border-radius: 5px; }
+.effect-row { padding: 4px 6px; }
+.effect-row + .effect-row { border-top: 1px solid var(--line); }
+.effect-row .check { margin: 0; cursor: pointer; }
+.effect-parameters { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 5px; margin: 5px 0 0; padding: 5px; background: var(--tint); font-size: 11px; }
+.effect-parameters input { margin: 3px 0 0; }
+.filter-count { font-size: 12px; }
 #song-effects ul { padding-left: 20px; }
-body.floating { width: auto; box-sizing: border-box; }
-.header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
 .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
 #stats-caption { font-size: 12px; }
 #character-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; margin: 8px 0 0; }
