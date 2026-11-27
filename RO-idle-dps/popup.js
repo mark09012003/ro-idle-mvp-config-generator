@@ -260,14 +260,17 @@ function renderScenario() {
     new Option(`${arrow.name} · ${element[arrow.element] ?? arrow.element} · ${arrow.quantity ? `背包 ${format(arrow.quantity)} 支` : "模擬 1,000 支"}${arrow.configured ? " · 換裝規則" : ""}`, arrow.id)));
   if (scenario.ammo.some(arrow => String(arrow.id) === selected)) ammo.value = selected;
   ammo.disabled = !scenario.ammo.length;
-  $("active-buffs").replaceChildren(...scenario.active.map(({index, name, level}) => {
+  $("active-buffs").replaceChildren(...scenario.active.map(({index, name, level, remainingMs}) => {
     const label = document.createElement("label");
     label.className = "check";
     const input = document.createElement("input");
     input.type = "checkbox";
     input.checked = false;
     input.value = String(index);
-    label.append(input, level ? `${name} Lv ${level}` : name);
+    const rem = Number.isFinite(remainingMs) && remainingMs > 0 && remainingMs < 1e12
+      ? ` · 剩 ${seconds(remainingMs)}`
+      : "";
+    label.append(input, `${level ? `${name} Lv ${level}` : name}${rem}`);
     return label;
   }));
   if (!scenario.active.length) $("active-buffs").textContent = "角色目前沒有 Buff。";
@@ -286,6 +289,7 @@ function syncActiveBuffControls() {
   const checked = boxes.filter(box => box.checked).length;
   $("active-buff-actions").hidden = total === 0;
   $("quick-active-buffs-wrap").hidden = total === 0;
+  $("keep-active-buffs-wrap").hidden = total === 0;
   $("active-buffs-all").disabled = total === 0 || checked === total;
   $("active-buffs-none").disabled = checked === 0;
   const quick = $("quick-active-buffs");
@@ -387,6 +391,7 @@ function cleanEquipOverrides() {
 function readScenario() {
   return {
     includeActive: [...$("active-buffs").querySelectorAll("input:checked")].map(input => Number(input.value)),
+    keepActiveBuffs: $("keep-active-buffs").checked,
     buffs: readEffects("extra-buffs"),
     statuses: readEffects("monster-statuses"),
     autoBuffs: $("auto-buffs").checked,
@@ -975,6 +980,7 @@ $("scenario").addEventListener("input", event => {
   if (event.target.type !== "search") scheduleStats();
 });
 $("quick-active-buffs").onchange = () => setAllActiveBuffs($("quick-active-buffs").checked);
+$("keep-active-buffs").onchange = scheduleStats;
 $("active-buffs-all").onclick = () => setAllActiveBuffs(true);
 $("active-buffs-none").onclick = () => setAllActiveBuffs(false);
 $("ammo-choice").onchange = scheduleStats;

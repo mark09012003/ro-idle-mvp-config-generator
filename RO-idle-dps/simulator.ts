@@ -31,7 +31,7 @@ export function attackSkills(snapshot: GameSnapshot) {
 
 const manualBuffIds = [
   "AL_BLESSING", "AL_INCAGI", "AL_ANGELUS", "AC_CONCENTRATION", "SN_SIGHT", "SN_WINDWALK",
-  "PR_IMPOSITIO", "PR_SUFFRAGIUM", "PR_ASPERSIO", "PR_BENEDICTIO", "HP_ASSUMPTIO",
+  "PR_IMPOSITIO", "PR_SUFFRAGIUM", "PR_ASPERSIO", "PR_BENEDICTIO", "PR_GLORIA", "PR_MAGNIFICAT", "PR_KYRIE", "HP_ASSUMPTIO",
   "MG_ENERGYCOAT", "BS_ADRENALINE", "BS_WEAPONPERFECT", "BS_OVERTHRUST", "BS_MAXIMIZE",
   "KN_TWOHANDQUICKEN", "AS_ENCHANTPOISON", "SA_FLAMELAUNCHER", "SA_FROSTWEAPON",
   "SA_LIGHTNINGLOADER", "SA_SEISMICWEAPON", "itemEndowWater",
@@ -81,6 +81,7 @@ export function scenarioCatalog(snapshot: GameSnapshot) {
     ammo: ammoChoices(snapshot),
     active: previewBuffs(snapshot).map((buff, index) => ({
       index, name: buffDisplayName(buff.id), level: "lv" in buff ? buff.lv : undefined,
+      remainingMs: "remainingMs" in buff ? Number(buff.remainingMs) : undefined,
     })),
     buffs: [...manualBuffIds, ...songIds].map(id => ({
       id, name:buffDisplayName(id), max:maximumBuffLevel(id),
@@ -172,7 +173,7 @@ export function equipmentCatalog(snapshot: GameSnapshot) {
 }
 
 type Effect = {id: string; level: number; seconds: number; performer?: Partial<PerformerCtx["stats"]> & {lesson?: number}};
-type Scenario = {includeActive?: number[]; buffs?: Effect[]; statuses?: Effect[]; autoBuffs?: boolean; ammoItemId?: number; equipOverrides?: EquipOverrides};
+type Scenario = {includeActive?: number[]; keepActiveBuffs?: boolean; buffs?: Effect[]; statuses?: Effect[]; autoBuffs?: boolean; ammoItemId?: number; equipOverrides?: EquipOverrides};
 
 function effectTime(effect: Effect, max: number) {
   if (!Number.isInteger(effect.level) || effect.level < 1 || effect.level > max ||
@@ -214,7 +215,9 @@ function initialBuffs(snapshot: GameSnapshot, scenario?: Scenario): ActiveBuff[]
   for (const [index, buff] of previewBuffs(snapshot).entries()) {
     if (!scenario?.includeActive?.includes(index) || !isKnownBuff(buff.id)) continue;
     const remaining = "remainingMs" in buff ? Number(buff.remainingMs) : NEVER;
-    if (Number.isFinite(remaining) && remaining > 0) add({...structuredClone(buff), until:remaining});
+    if (Number.isFinite(remaining) && remaining > 0) {
+      add({...structuredClone(buff), until: scenario.keepActiveBuffs ? NEVER : remaining});
+    }
   }
   for (const effect of scenario?.buffs ?? []) {
     if (!manualBuffIds.includes(effect.id) && !songIds.includes(effect.id)) throw new Error("所選 Buff 不支援手動加入。");
