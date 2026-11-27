@@ -18,6 +18,7 @@ import { getAmmo, getEquipped, SLOT_NAMES } from "./src/game/items/equipment";
 import { PETS, PET_INTIMATE, petOf } from "./src/game/data/pets";
 import { AILMENT_NAMES, BLEEDING_TICK_MS } from "./src/game/combat/ailments";
 import { randInt } from "./src/game/core/rng";
+import { HP_REGEN_INTERVAL_MS, SP_REGEN_INTERVAL_MS } from "./src/game/character/stats";
 import { NEVER } from "./src/game/config/gameplay";
 import type { GameSnapshot } from "./src/game/view";
 
@@ -392,7 +393,7 @@ function initialStatuses(effects: Effect[], time: number): MobStatuses {
   return status;
 }
 
-type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; soulChange?: ({interval: number; spBelow?: never} | {spBelow: number; interval?: never}) & {casterSp: number}; scenario?: Scenario};
+type Options = {monsterId: number; mode: "normal" | "skill" | "auto"; skill?: string; level?: number; seconds: number; counterattack?: boolean; invincible?: boolean; mobDefense?: boolean; soulChange?: ({interval: number; spBelow?: never} | {spBelow: number; interval?: never}) & {casterDex: number; casterMaxHp: number; casterMaxSp: number; casterMinSp: number}; scenario?: Scenario};
 type HitRange = {min: number; max: number; count: number};
 type DamageLine = {normal?: HitRange; critical?: HitRange; name: string; damage: number; hits: number; casts: number; castMs: number; delayMs: number; cooldownMs: number};
 
@@ -982,11 +983,14 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
   let damageTaken = 0, timeExposed = 0, endingHp = 0;
   const soulChange = options.soulChange;
   const soulChangeSkill = SKILLS.get("PF_SOULCHANGE");
-  const soulChangeInterval = soulChange?.interval === undefined ? NEVER : Math.max(1, soulChange.interval) * 1000;
-  const soulChangeSp = soulChange ? Math.max(0, soulChange.casterSp - (soulChangeSkill?.sp[0] ?? 5)) : 0;
-  const soulChangeThreshold = soulChange?.spBelow;
-  const soulChangeCastMs = soulChangeSkill?.castMs[0] ?? 3000;
-  const soulChangeDelayMs = soulChangeSkill?.delayMs[0] ?? 5000;
+  const conversionSkill = SKILLS.get("PF_HPCONVERSION");
+  const soulChangeCost = soulChangeSkill?.sp[0] ?? 5;
+  const conversionCost = conversionSkill?.sp[4] ?? 5;
+  const soulChangeInterval = soulChange?.interval === undefined ? 0 : soulChange.interval * 1000;
+  if (soulChange && (!Number.isSafeInteger(soulChange.casterMinSp) ||
+      soulChange.casterMinSp < soulChangeCost || soulChange.casterMinSp > soulChange.casterMaxSp)) {
+    throw new Error("智者的互換 SP 門檻須介於技能消耗與最大 SP 之間。");
+  }
   let panel;
   for (let run = 0; run < trials; run++) {
     const state = setup(snapshot, options, 91237 + 7919 * run);
@@ -1026,8 +1030,23 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     let credited = 0;
     const defenseTickMs = Math.max(500, monster.attackDelay);
     let nextDefenseCheckAt = !counterattack && mobDefense ? state.time + defenseTickMs : NEVER;
-    let nextSoulChangeAt = state.time + soulChangeInterval;
-    let soulChangeReadyAt = state.time;
+    const bragi = state.buffs.find(buff => buff.id === "BA_POEMBRAGI");
+    const casterMaxHp = soulChange?.casterMaxHp ?? 0;
+    const casterMaxSp = soulChange?.casterMaxSp ?? 0;
+    const conversionHp = Math.max(1, Math.floor(casterMaxHp / 10));
+    let casterHp = casterMaxHp;
+    let nextCasterHpRegenAt = soulChange ? state.time + HP_REGEN_INTERVAL_MS : NEVER;
+    let nextCasterSpRegenAt = soulChange ? state.time + SP_REGEN_INTERVAL_MS : NEVER;
+    let casterSp = casterMaxSp;
+    let nextSoulChangeAt = NEVER;
+    let nextSoulChangeAttemptAt = state.time + soulChangeInterval;
+    let casterReadyAt = state.time;
+    function bragiRate(stat: "castRate" | "delayRate") {
+      return bragi && bragi.until > state.time ? bragi.bonuses?.[stat] ?? 0 : 0;
+    }
+    function casterDelay(baseMs: number) {
+      return Math.max(0, Math.floor(baseMs * (100 + bragiRate("delayRate")) / 100));
+    }
     let nextGospelAt = gospelConfig ? state.time : NEVER;
     function applyGospelPulse() {
       if (!gospelConfig) return;
@@ -1126,31 +1145,58 @@ export function simulate(snapshot: GameSnapshot, options: Options) {
     for (let steps = 0; steps < 15000; steps++) {
       const pulse = pulses.find(entry => entry.buff && state.buffs.includes(entry.buff) && entry.at < entry.buff.until);
       const engineTime = nextEventTime(state);
-      let soulChangeCheckAt = NEVER;
-      if (soulChangeThreshold !== undefined && nextSoulChangeAt >= NEVER) {
+      let casterActionAt = NEVER;
+      let convertHp = false;
+      if (soulChange && nextSoulChangeAt === NEVER) {
         const maxSp = derived(state).maxSp;
         const sp = state.character.sp;
-        if (sp < Math.min(maxSp, soulChangeSp) && sp * 100 < soulChangeThreshold * maxSp) {
-          soulChangeCheckAt = Math.max(state.time, soulChangeReadyAt);
+        convertHp = casterSp < soulChange.casterMinSp && casterHp > conversionHp &&
+          casterSp >= conversionCost && conversionHp * 5 > conversionCost;
+        const targetNeedsSp = soulChange.spBelow === undefined || sp * 100 < soulChange.spBelow * maxSp;
+        if (convertHp) {
+          casterActionAt = Math.max(state.time, casterReadyAt);
+        } else if (targetNeedsSp && casterSp >= soulChange.casterMinSp &&
+            sp < Math.min(maxSp, casterSp - soulChangeCost)) {
+          casterActionAt = Math.max(state.time, casterReadyAt, nextSoulChangeAttemptAt);
         }
       }
-      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt, nextGospelAt, nextSoulChangeAt, soulChangeCheckAt);
+      const next = Math.min(engineTime, pulse?.at ?? NEVER, nextDefenseCheckAt, nextGospelAt, nextSoulChangeAt, casterActionAt, nextCasterHpRegenAt, nextCasterSpRegenAt);
       if (next > duration || state.activity.kind === "stopped" || state.activity.kind === "dead") break;
       moveTime(state, Math.max(state.time, next));
-      if (soulChangeCheckAt === next) {
-        nextSoulChangeAt = state.time + soulChangeCastMs;
-        record("智者開始詠唱 心神互換", "player");
+      if (nextCasterHpRegenAt === next || nextCasterSpRegenAt === next) {
+        if (nextCasterHpRegenAt === next) {
+          casterHp = Math.min(casterMaxHp, casterHp + 1 + Math.floor(casterMaxHp / 200));
+          nextCasterHpRegenAt += HP_REGEN_INTERVAL_MS;
+        }
+        if (nextCasterSpRegenAt === next) {
+          casterSp = Math.min(casterMaxSp, casterSp + 1 + Math.floor(casterMaxSp / 100));
+          nextCasterSpRegenAt += SP_REGEN_INTERVAL_MS;
+        }
+        continue;
+      }
+      if (casterActionAt === next && soulChange) {
+        if (convertHp) {
+          casterHp -= conversionHp;
+          casterSp = Math.min(casterMaxSp, casterSp - conversionCost + conversionHp * 5);
+          casterReadyAt = state.time + casterDelay(conversionSkill?.delayMs[4] ?? 1800);
+          record(`智者施放 血魔轉換 Lv.5 · 智者 HP ${casterHp}／SP ${casterSp}`, "player");
+        } else {
+          const baseCastMs = Math.floor((soulChangeSkill?.castMs[0] ?? 3000) * Math.max(0, 150 - soulChange.casterDex) / 150);
+          const castMs = Math.max(0, Math.floor(baseCastMs * (100 + bragiRate("castRate")) / 100));
+          nextSoulChangeAt = state.time + castMs;
+          nextSoulChangeAttemptAt = state.time + soulChangeInterval;
+          record(`智者開始詠唱 心神互換（${castMs / 1000} 秒）`, "player");
+        }
         continue;
       }
       if (nextSoulChangeAt === next) {
-        nextSoulChangeAt = state.time + soulChangeInterval;
-        soulChangeReadyAt = state.time + soulChangeDelayMs;
+        nextSoulChangeAt = NEVER;
+        casterReadyAt = state.time + casterDelay(soulChangeSkill?.delayMs[0] ?? 5000);
         const oldSp = state.character.sp;
-        const receivedSp = Math.min(derived(state).maxSp, soulChangeSp);
-        if (receivedSp > oldSp) {
-          state.character.sp = receivedSp;
-          record(`智者施放 心神互換 · SP +${receivedSp - oldSp}`, "player");
-        }
+        const casterSpBeforeSwap = casterSp;
+        casterSp = Math.min(casterMaxSp, oldSp);
+        state.character.sp = Math.min(derived(state).maxSp, casterSpBeforeSwap - soulChangeCost);
+        record(`智者施放 心神互換 · 角色 SP ${oldSp} → ${state.character.sp} · 智者 SP ${casterSp}`, "player");
         continue;
       }
       if (pulse && pulse.at <= next && pulse.at < engineTime) {

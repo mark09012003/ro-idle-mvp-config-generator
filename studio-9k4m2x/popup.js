@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261127-17";
+const ASSET_VER = "20261127-18";
 const MAX_REBIRTHS = 11;
 const EXTRA_STAT_PER_REBIRTH = 20;
 const host = "https://ro-idle.app";
@@ -3002,10 +3002,14 @@ function syncSoulChangeFields() {
     input.parentElement.hidden = !show;
     input.disabled = disabled || !show;
   }
-  $("soul-change-sp").disabled = disabled;
+  for (const id of ["soul-change-dex", "soul-change-hp", "soul-change-sp", "soul-change-min-sp"]) {
+    $(id).disabled = disabled;
+  }
+  $("soul-change-min-sp").max = $("soul-change-sp").value;
 }
 $("soul-change").addEventListener("change", syncSoulChangeFields);
 $("soul-change-trigger").addEventListener("change", syncSoulChangeFields);
+$("soul-change-sp").addEventListener("input", syncSoulChangeFields);
 syncSoulChangeFields();
 
 $("counterattack").onchange = () => { if (!$("counterattack").checked) $("invincible").checked = false; };
@@ -3047,7 +3051,10 @@ $("calculator").onsubmit = async event => {
       ...($("soul-change-trigger").value === "threshold"
         ? {spBelow: Number($("soul-change-threshold").value)}
         : {interval: Number($("soul-change-interval").value)}),
-      casterSp: Number($("soul-change-sp").value),
+      casterDex: Number($("soul-change-dex").value),
+      casterMaxHp: Number($("soul-change-hp").value),
+      casterMaxSp: Number($("soul-change-sp").value),
+      casterMinSp: Number($("soul-change-min-sp").value),
     } : undefined,
     scenario: readScenario(),
   };

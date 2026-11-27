@@ -12,8 +12,8 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="popup.css?v=20261127-17">
-  <script type="module" src="popup.js?v=20261127-17"></script>
+  <link rel="stylesheet" href="popup.css?v=20261127-18">
+  <script type="module" src="popup.js?v=20261127-18"></script>
 </head>
 <body>
   <div class="shell">
@@ -505,8 +505,17 @@
                 <label hidden>角色 SP 低於（%）
                   <input id="soul-change-threshold" type="number" min="1" max="100" value="30" required disabled>
                 </label>
-                <label>智者每次施放前的 SP
-                  <input id="soul-change-sp" type="number" min="5" max="99999" value="1000" required disabled>
+                <label>智者 DEX
+                  <input id="soul-change-dex" type="number" min="0" max="999" value="80" required disabled>
+                </label>
+                <label>智者最大 HP
+                  <input id="soul-change-hp" type="number" min="1" value="5000" required disabled>
+                </label>
+                <label>智者最大 SP
+                  <input id="soul-change-sp" type="number" min="5" value="1000" required disabled>
+                </label>
+                <label>智者 SP 達到多少才互換（點）
+                  <input id="soul-change-min-sp" type="number" min="5" value="500" required disabled>
                 </label>
               </div>
 
