@@ -993,6 +993,20 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 #route-sequence-status[data-error="true"] { color: #b91c1c; font-weight: 600; }
 :root[data-theme="dark"] #route-sequence-status[data-error="true"] { color: #fca5a5; }
 .route-repeat-badge { display: inline-block; margin-inline-start: 6px; padding: 0 5px; border-radius: 999px; font-size: 11px; font-weight: 700; background: var(--using); border: 1px solid var(--accent); color: var(--accent); vertical-align: middle; }
+.route-profile-pill { display: inline-block; margin-inline-start: 6px; padding: 0 6px; border-radius: 999px; font-size: 11px; font-weight: 700; background: var(--head); border: 1px solid var(--line); color: var(--title); vertical-align: middle; }
+.route-split-header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 8px; margin-bottom: 2px; border-radius: 6px; border-left: 3px solid var(--accent); background: var(--using); font-size: 12px; color: var(--title); }
+.route-split-header strong { color: var(--accent); }
+.route-split-banner { margin: 0 0 8px; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--using); font-size: 12.5px; line-height: 1.5; color: var(--title); }
+.route-split-banner[data-warn="true"] { border-left-color: #b91c1c; background: #fef2f2; color: #991b1b; font-weight: 600; }
+:root[data-theme="dark"] .route-split-banner[data-warn="true"] { border-left-color: #f87171; background: #3b1c1c; color: #fecaca; }
+.route-multi-notice { margin: 0 0 8px; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--head); font-size: 12px; line-height: 1.55; }
+.route-multi-notice summary { cursor: pointer; font-weight: 700; color: var(--title); }
+.route-multi-notice ul { margin: 6px 0 0; padding-inline-start: 1.4em; color: var(--dim); }
+.route-multi-notice li { margin-bottom: 2px; }
+.preview-checklist { margin: 0 0 10px; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--line); border-left: 3px solid var(--gold); background: var(--using); font-size: 12.5px; line-height: 1.55; }
+.preview-checklist[data-warn="true"] { border-left-color: #b91c1c; background: #fef2f2; color: #991b1b; }
+:root[data-theme="dark"] .preview-checklist[data-warn="true"] { border-left-color: #f87171; background: #3b1c1c; color: #fecaca; }
+.preview-checklist ol { margin: 4px 0 0; padding-inline-start: 1.4em; }
 .route-next.route-next-warn { color: #b91c1c; font-weight: 700; }
 :root[data-theme="dark"] .route-next.route-next-warn { color: #fca5a5; }
 .map-in-route-badge { display: inline-block; margin-inline-start: 6px; padding: 0 5px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--using); border: 1px solid var(--line); color: var(--accent); }
@@ -1329,6 +1343,16 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
   <button class="btn tiny primary" id="route-sequence-apply" type="button">套用順序</button>
   <p id="route-sequence-status" role="status"></p>
 </div>
+<div id="route-split-banner" class="route-split-banner" role="status" hidden></div>
+<details id="route-multi-notice" class="route-multi-notice" hidden>
+  <summary>多配置自動切分與遊戲匯入提醒</summary>
+  <ul>
+    <li>重複經過同一張地圖時，系統會自動切分到不同配置檔（<code>01</code>、<code>02</code>…），靠切換配置記住順序，不受打王時間長短影響、組隊也不會拆散。</li>
+    <li>匯入遊戲時請<strong>嚴格依檔名（<code>01</code>、<code>02</code>…）儲存</strong>，不要自行改名，否則巨集的「切換配置」會找不到目標。</li>
+    <li>帶隊／輔助／協助須各自匯入對應資料夾的 <code>01</code>～末份配置，全員統一先套用 <strong><code>01</code></strong> 再開始掛機。</li>
+    <li>中途死亡或回城補給後，角色會回到<strong>當下所在配置的第一張圖</strong>繼續往下巡迴。</li>
+  </ul>
+</details>
 <p id="empty-route">勾選地圖後，按「加入巡迴」。</p>
 <ol id="route" role="list" aria-labelledby="route-title"></ol>
 <p id="catalog-status" role="status"></p>
@@ -1462,6 +1486,85 @@ SOFTWARE.
   }
 
   const monsterActions = new Set(["attack", "priority", "defend", "lure"]);
+  const selectsCursedFly = row => row.map.id === "abbey03" && row.targets.includes(1873);
+  const profileLabel = index => String(index + 1).padStart(2, "0");
+
+  function planSegments(route, options) {
+    const retainedCount = (options.macros ?? []).filter(macro =>
+      Array.isArray(macro?.steps) && !macro.steps.some(step => ["map", "profile"].includes(step?.do))).length;
+    const partySize = Number(options.partySize);
+    const wait = Number.isInteger(partySize) && partySize > 1;
+    const rawGroupSize = Number(options.groupSize);
+    const groupSize = Number.isInteger(rawGroupSize) && rawGroupSize >= 1 ? rawGroupSize : 8;
+    const capacity = Math.min(groupSize, 10 - retainedCount - Number(Boolean(wait)));
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      throw new Error("自訂與等待巨集已占滿 10 個名額，請先移除幾條巨集，保留巡迴巨集空間。");
+    }
+    const groups = [];
+    let group = [];
+    let groupMapIds = new Set();
+    let monsters = new Set();
+    let rulesById = new Map();
+    let targetStatus = new Map();
+    let pendingSplitReason = null;
+
+    for (const row of route) {
+      const useTransformedTarget = selectsCursedFly(row);
+      const rowIds = row.map.monsters.map(monster => monster.id);
+      if (useTransformedTarget && !rowIds.includes(1874)) rowIds.push(1874);
+      if (rowIds.length > 200) throw new Error("單張地圖超出遊戲的 200 筆怪物規則上限。");
+      const rowRules = rowIds.map(id => {
+        const sourceId = useTransformedTarget && id === 1874 ? 1873 : id;
+        const selected = row.targets.includes(sourceId);
+        const override = options.customCombat ? row.smallRules?.[sourceId] : undefined;
+        const defaultAction = !options.supportOnly && selected ? "priority" : "defend";
+        const schemeAction = selected ? options.targetAction : options.otherAction;
+        const schemeDefault = options.mode === "leader" && selected ? "priority" : "defend";
+        const customAction = monsterActions.has(override?.action) ? override.action
+          : monsterActions.has(schemeAction) ? schemeAction : schemeDefault;
+        const escape = options.customCombat
+          ? override?.escape ?? (selected ? options.targetEscape : options.escape)
+          : options.supportOnly ? "sight" : selected ? "" : "afterTarget";
+        const action = options.customCombat ? customAction : defaultAction;
+        return [id, {monsterId: id, action, ...(escape ? {escape} : {})}, selected];
+      });
+      const conflicts = rowRules.some(([id, rule, selected]) => {
+        const prior = rulesById.get(id);
+        return prior && (prior.action !== rule.action || prior.escape !== rule.escape ||
+          (options.onlyMvp && targetStatus.get(id) !== selected));
+      });
+      const duplicateInGroup = groupMapIds.has(row.map.id);
+      const hitsCapacity = group.length === capacity;
+      const hitsMonsterLimit = new Set([...monsters, ...rowIds]).size > 200;
+      if (hitsCapacity || hitsMonsterLimit || conflicts || duplicateInGroup) {
+        const prevName = profileLabel(groups.length);
+        groups.push({name: prevName, segment: group, rulesById, splitReason: pendingSplitReason});
+        pendingSplitReason = duplicateInGroup
+          ? `因「${row.map.name}」已在配置 ${prevName} 出現，自動切分以區分順序`
+          : conflicts
+            ? "因怪物規則與前段不同而自動切分"
+            : hitsMonsterLimit
+              ? "達單配置 200 筆怪物規則上限"
+              : `達每份配置上限（${capacity} 站）`;
+        group = [];
+        groupMapIds = new Set();
+        monsters = new Set();
+        rulesById = new Map();
+        targetStatus = new Map();
+      }
+      group.push(row);
+      groupMapIds.add(row.map.id);
+      for (const id of rowIds) monsters.add(id);
+      for (const [id, rule, selected] of rowRules) {
+        rulesById.set(id, rule);
+        targetStatus.set(id, selected);
+      }
+    }
+    if (group.length) {
+      groups.push({name: profileLabel(groups.length), segment: group, rulesById, splitReason: pendingSplitReason});
+    }
+    return {capacity, groups};
+  }
 
   function generate(base, route, options) {
     if (base) validateBase(base);
@@ -1526,64 +1629,14 @@ SOFTWARE.
     if (buffBeforeMove && (!Number.isInteger(routeBuffLevel) || routeBuffLevel < 1 || routeBuffLevel > 10)) {
       throw new Error("換圖前自補需要有效的技能等級。");
     }
-    const capacity = Math.min(Number(options.groupSize), 10 - baseMacros.length - Number(Boolean(wait)));
-    if (!Number.isInteger(capacity) || capacity < 1) {
-      throw new Error("自訂與等待巨集已占滿 10 個名額，請先移除幾條巨集，保留巡迴巨集空間。");
-    }
+    const {groups} = planSegments(route, {
+      ...options,
+      macros: baseMacros,
+      partySize,
+    });
+    const label = profileLabel;
 
-    const groups = [];
-    let group = [];
-    let groupMapIds = new Set();
-    let monsters = new Set();
-    let rulesById = new Map();
-    let targetStatus = new Map();
-    const selectsCursedFly = row => row.map.id === "abbey03" && row.targets.includes(1873);
-    for (const row of route) {
-      const useTransformedTarget = selectsCursedFly(row);
-      const rowIds = row.map.monsters.map(monster => monster.id);
-      if (useTransformedTarget && !rowIds.includes(1874)) rowIds.push(1874);
-      if (rowIds.length > 200) throw new Error("單張地圖超出遊戲的 200 筆怪物規則上限。");
-      const rowRules = rowIds.map(id => {
-        const sourceId = useTransformedTarget && id === 1874 ? 1873 : id;
-        const selected = row.targets.includes(sourceId);
-        const override = options.customCombat ? row.smallRules?.[sourceId] : undefined;
-        const defaultAction = !options.supportOnly && selected ? "priority" : "defend";
-        const schemeAction = selected ? options.targetAction : options.otherAction;
-        const schemeDefault = options.mode === "leader" && selected ? "priority" : "defend";
-        const customAction = monsterActions.has(override?.action) ? override.action
-          : monsterActions.has(schemeAction) ? schemeAction : schemeDefault;
-        const escape = options.customCombat
-          ? override?.escape ?? (selected ? options.targetEscape : options.escape)
-          : options.supportOnly ? "sight" : selected ? "" : "afterTarget";
-        const action = options.customCombat ? customAction : defaultAction;
-        return [id, {monsterId: id, action, ...(escape ? {escape} : {})}, selected];
-      });
-      const conflicts = rowRules.some(([id, rule, selected]) => {
-        const prior = rulesById.get(id);
-        return prior && (prior.action !== rule.action || prior.escape !== rule.escape ||
-          (options.onlyMvp && targetStatus.get(id) !== selected));
-      });
-      const duplicateInGroup = groupMapIds.has(row.map.id);
-      if (group.length === capacity || new Set([...monsters, ...rowIds]).size > 200 || conflicts || duplicateInGroup) {
-        groups.push({segment: group, rulesById});
-        group = [];
-        groupMapIds = new Set();
-        monsters = new Set();
-        rulesById = new Map();
-        targetStatus = new Map();
-      }
-      group.push(row);
-      groupMapIds.add(row.map.id);
-      for (const id of rowIds) monsters.add(id);
-      for (const [id, rule, selected] of rowRules) {
-        rulesById.set(id, rule);
-        targetStatus.set(id, selected);
-      }
-    }
-    if (group.length) groups.push({segment: group, rulesById});
-    const label = index => String(index + 1).padStart(2, "0");
-
-    return groups.map(({segment, rulesById}, index) => {
+    return groups.map(({segment, rulesById, splitReason}, index) => {
       const next = (index + 1) % groups.length;
       const profile = structuredClone(template);
       profile.name = label(index);
@@ -1694,12 +1747,13 @@ SOFTWARE.
         file: `${label(index)}.ro-idle.json`,
         profile,
         segment,
+        splitReason,
         next: groups.length > 1 ? label(next) : null,
       };
     });
   }
 
-  globalThis.RoConfigBuilder = {validateBase, generate};
+  globalThis.RoConfigBuilder = {validateBase, generate, planSegments};
 })();
 
 </script>
@@ -2337,21 +2391,111 @@ function cloneRouteRow(row) {
   return {map: row.map, targets: [...row.targets], smallRules: structuredClone(row.smallRules ?? {})};
 }
 
+function computeRouteSplitPreview() {
+  if (!route.length) return {groups: [], error: null};
+  let macros = [];
+  try {
+    const parsed = JSON.parse(value("macros"));
+    if (Array.isArray(parsed)) macros = parsed;
+  } catch {
+    macros = customMacros;
+  }
+  const roleId = byId("combatMode")?.value || "output";
+  const supportOnly = roleId === "support";
+  const mode = roleId === "output" ? "leader" : "follower";
+  const roleOpts = byId("customCombat") && (roleId === "output" || byId(`role-${roleId}-customCombat`))
+    ? (() => { try { return combatOptionsForRole(roleId); } catch { return {}; } })()
+    : {};
+  try {
+    const {groups} = RoConfigBuilder.planSegments(route, {
+      ...roleOpts,
+      macros,
+      mode,
+      supportOnly,
+      partySize: value("partySize") || 1,
+      groupSize: value("groupSize") || 8,
+    });
+    return {groups, error: null};
+  } catch (error) {
+    return {groups: [], error: error.message};
+  }
+}
+
 function renderRoute() {
   if (lootDetails.open && lootEdit && checked("loot-route-only")) resetLootResults();
   const uniqueMapCount = new Set(route.map(row => row.map.id)).size;
+  const {groups, error: splitError} = computeRouteSplitPreview();
+  const multiProfile = groups.length > 1;
   byId("route-count").textContent = uniqueMapCount < route.length
-    ? `${route.length} 站（${uniqueMapCount} 張不同地圖）`
-    : `${route.length} 張地圖`;
+    ? `${route.length} 站（${uniqueMapCount} 張不同地圖 · ${groups.length || "?"} 份配置）`
+    : multiProfile
+      ? `${route.length} 張地圖（切分 ${groups.length} 份配置）`
+      : `${route.length} 張地圖`;
   byId("route-sequence-bar").hidden = route.length < 2;
   byId("empty-route").hidden = Boolean(route.length);
+
+  const banner = byId("route-split-banner");
+  const notice = byId("route-multi-notice");
+  if (!route.length) {
+    banner.hidden = true;
+    notice.hidden = true;
+  } else if (splitError) {
+    banner.hidden = false;
+    banner.dataset.warn = "true";
+    banner.textContent = `⚠ ${splitError}`;
+    notice.hidden = true;
+  } else if (groups.length > 10) {
+    banner.hidden = false;
+    banner.dataset.warn = "true";
+    banner.textContent = `⚠ 目前將自動切分為 ${groups.length} 份配置檔，已超過遊戲單一角色 10 份配置檔上限！請減少重複切段、調高「每份配置最多幾張地圖」或精簡路線。`;
+    notice.hidden = false;
+  } else if (multiProfile) {
+    const chain = groups.map(g => `${g.name}（${g.segment.length}站）`).join(" → ");
+    banner.hidden = false;
+    banner.dataset.warn = "false";
+    banner.textContent = `預計自動切分為 ${groups.length} 份配置檔（遊戲上限 10 份）：${chain} → 回到 01`;
+    notice.hidden = false;
+  } else {
+    banner.hidden = false;
+    banner.dataset.warn = "false";
+    banner.textContent = `目前為單一配置檔（01，共 ${route.length} 站）；若重複加入同一張地圖或超過單配置上限，系統會自動切分。`;
+    notice.hidden = true;
+  }
+
+  // Map each station index to its profile segment metadata
+  const stationMeta = new Map();
+  let cursor = 0;
+  groups.forEach((group, groupIdx) => {
+    const nextGroup = groups[(groupIdx + 1) % groups.length];
+    group.segment.forEach((_, pos) => {
+      stationMeta.set(cursor, {
+        profileName: group.name,
+        isGroupStart: pos === 0,
+        isGroupEnd: pos === group.segment.length - 1,
+        splitReason: pos === 0 ? group.splitReason : null,
+        nextProfileName: multiProfile ? nextGroup.name : null,
+      });
+      cursor++;
+    });
+  });
+
   const totalByMap = new Map();
   for (const row of route) totalByMap.set(row.map.id, (totalByMap.get(row.map.id) ?? 0) + 1);
   const seenByMap = new Map();
   byId("route").replaceChildren(...route.map((row, index) => {
     const visit = (seenByMap.get(row.map.id) ?? 0) + 1;
     seenByMap.set(row.map.id, visit);
+    const meta = stationMeta.get(index);
     const item = element("li", "");
+    if (multiProfile && meta?.isGroupStart && index > 0) {
+      const splitHead = element("div", "");
+      splitHead.className = "route-split-header";
+      splitHead.append(
+        element("strong", `⇄ 自動切分至 配置 ${meta.profileName}（起點）`),
+        element("span", meta.splitReason ? `· ${meta.splitReason}` : ""),
+      );
+      item.append(splitHead);
+    }
     const order = element("span", String(index + 1).padStart(2, "0"));
     order.className = "route-index";
     item.append(order);
@@ -2360,8 +2504,13 @@ function renderRoute() {
     const title = element("strong", row.map.name);
     title.className = "route-map-name";
     content.append(title);
+    if (multiProfile && meta) {
+      const pill = element("span", `配置 ${meta.profileName}`);
+      pill.className = "route-profile-pill";
+      title.append(pill);
+    }
     if (index === 0) {
-      const start = element("span", "起點");
+      const start = element("span", "總起點");
       start.className = "route-start";
       title.append(start);
     }
@@ -2395,6 +2544,9 @@ function renderRoute() {
         next.textContent = nextIndex === 0
           ? `⚠ 回到 01 ${destination.map.name} 與本站相同，請在中間穿插其他地圖`
           : `⚠ 下一站 ${String(nextIndex + 1).padStart(2, "0")} ${destination.map.name} 與本站相同，請調整順序`;
+      } else if (multiProfile && meta?.isGroupEnd && meta.nextProfileName) {
+        const prefix = nextIndex === 0 ? "↻" : "⇄";
+        next.textContent = `${prefix} 切換配置 ${meta.nextProfileName} → ${String(nextIndex + 1).padStart(2, "0")} ${destination.map.name}`;
       } else {
         next.textContent = nextIndex === 0
           ? `↻ 回到 01 ${destination.map.name}`
@@ -2570,6 +2722,7 @@ function defaultMacroStep(type) {
 function saveCustomMacros() {
   byId("macros").value = JSON.stringify(customMacros, null, 2);
   updateMacroCount();
+  renderRoute();
   clearPreview();
 }
 
@@ -3054,11 +3207,11 @@ function renderOperations() {
   const monsters = new Map(route.flatMap(row => row.map.monsters.map(monster => [monster.id, monster.name])));
   const fragment = document.createDocumentFragment();
   fragment.append(element("h3", "遊戲內執行順序"));
-  for (const [index, {profile, segment, next}] of results.entries()) {
+  for (const [index, {profile, segment, next, splitReason}] of results.entries()) {
     const detail = element("details", "");
     detail.className = "operation-profile";
     detail.open = index === 0;
-    detail.append(element("summary", `配置 ${profile.name} · ${segment[0].map.name}`));
+    detail.append(element("summary", `配置 ${profile.name} · ${segment[0].map.name}（${segment.length} 站）${splitReason ? ` · ${splitReason}` : ""}`));
     detail.append(element("p", [segment.map(row => row.map.name).join(" → "), next ? `接續配置 ${next}` : ""].filter(Boolean).join("；")));
     const whitelist = profile.config.targets.whitelist;
     if (whitelist.length) detail.append(element("p", `主動選怪白名單：${whitelist.map(id => monsters.get(id) ?? id).join("、")}`));
@@ -3077,6 +3230,25 @@ function renderOperations() {
 }
 
 function renderPreview() {
+  const nodes = [];
+  if (results.length > 1) {
+    const names = results.map(r => r.profile.name).join("、");
+    const checklist = element("aside", "");
+    checklist.className = "preview-checklist";
+    checklist.dataset.warn = String(results.length > 10);
+    checklist.append(element("strong", results.length > 10
+      ? `⚠ 共切分為 ${results.length} 份配置檔（超過遊戲單角色 10 份上限）`
+      : `多配置檔匯入檢查清單（共 ${results.length} 份：${names}）`));
+    const ol = element("ol", "");
+    ol.append(
+      element("li", `角色配置檔需預留至少 ${results.length} 格空位（遊戲單角色最多 10 份配置）。`),
+      element("li", `下載後請嚴格以名稱 ${names} 逐一儲存（勿改名，否則巨集的「切換配置」會找不到目標）。`),
+      element("li", "隊伍所有角色（帶隊／輔助／協助）皆須匯入對應檔案並統一先套用 01 再啟動掛機。"),
+      element("li", "中途死亡或回城補給後，會先回到當下所在配置的第一張圖繼續巡迴。"),
+    );
+    checklist.append(ol);
+    nodes.push(checklist);
+  }
   const table = element("table", "");
   const head = table.createTHead().insertRow();
   for (const label of ["配置", "起始 → 末張地圖", "接續配置", "怪物規則", "下載"]) head.append(element("th", label));
@@ -3095,12 +3267,16 @@ function renderPreview() {
     button.onclick = () => download(JSON.stringify(profile, null, 2) + "\n", file, "application/json");
     row.insertCell().append(button);
   }
-  byId("preview").replaceChildren(table, renderOperations());
+  nodes.push(table, renderOperations());
+  byId("preview").replaceChildren(...nodes);
 }
 
 byId("generator").addEventListener("input", event => {
   if (["source", "map-search", "mvp-filter", "route-sequence-input"].includes(event.target.id) || event.target.closest("#map-choices, #loot-section")) return;
   updateOptions();
+  if (["groupSize", "partySize", "combatMode", "macros"].includes(event.target.id) || event.target.closest("#custom-combat-fields, [id$='-custom-combat-fields']")) {
+    renderRoute();
+  }
   clearPreview();
 });
 
@@ -3402,8 +3578,8 @@ byId("generator").onsubmit = event => {
     if (exportAll) {
       const leaderSkill = leaderBuffs().find(([id]) => id === options.buff);
       const leaderPrecast = leaderSkill && leaderSkill[2].scope !== "others" && checked("buffBeforeMove");
-      const entries = combatRoles.flatMap(({id, label, mode, supportOnly}) =>
-        RoConfigBuilder.generate(null, route, {
+      const perRole = combatRoles.map(({id, label, mode, supportOnly}) => {
+        const list = RoConfigBuilder.generate(null, route, {
           ...options,
           ...combatOptionsForRole(id),
           mode,
@@ -3411,9 +3587,16 @@ byId("generator").onsubmit = event => {
           supportOnly,
           buff: mode === "leader" ? options.buff : "",
           buffBeforeMove: mode === "leader" && Boolean(leaderPrecast),
-        }).map(({file, profile}) => [`${label}/${file}`, profile]));
+        });
+        return {label, list};
+      });
+      const entries = perRole.flatMap(({label, list}) => list.map(({file, profile}) => [`${label}/${file}`, profile]));
       downloadProfileZip(entries, "RO-idle_MVP_route_三種模式.zip");
-      status(`已匯出三種模式，共 ${entries.length} 份配置。請依角色用途選擇資料夾。`);
+      const counts = perRole.map(({label, list}) => `${label} ${list.length} 份`).join("、");
+      const maxCount = Math.max(...perRole.map(({list}) => list.length));
+      const multiNote = maxCount > 1 ? ` 請依角色資料夾將 01～${String(maxCount).padStart(2, "0")} 原名儲存並全員從 01 啟動。` : " 請依角色用途選擇資料夾。";
+      const capWarn = maxCount > 10 ? " ⚠ 部分模式超過遊戲單角色 10 份配置檔上限，建議縮短或減少重複切段。" : "";
+      status(`已匯出三種模式（${counts}，共 ${entries.length} 份）。${multiNote}${capWarn}`, maxCount > 10);
       return;
     }
     results = RoConfigBuilder.generate(null, route, options);
@@ -3441,7 +3624,7 @@ const guideSteps = [
   ["guide-party-section", "選擇含自己的隊伍人數。兩人以上會自動啟用等待隊友。"],
   ["guide-job-section", "選擇帶隊職業和換圖用的 Buff。輔助與協助會用帶隊職業判斷是否等待。"],
   ["monster-section", "設定帶隊角色死亡後的行為，並確認三種角色換圖前的行動。"],
-  ["route-section", "按 MVP 或王名篩選，勾選地圖後按「加入巡迴」，再確認巡迴順序。"],
+  ["route-section", "按 MVP 或王名篩選，勾選地圖後按「加入巡迴」。可重複加入地圖或自訂編號順序，系統會即時顯示自動切分的配置檔。"],
   ["loot-section", "需要設定回城出售或存倉時，可展開掉落物篩選。也可以直接下一步。"],
   ["custom-macro-section", "需要額外動作時可新增自訂巨集，也可以直接下一步。"],
   ["preview-section", "確認每份配置的地圖上限。可預覽單一角色，或一次匯出三種角色的 ZIP。"],
