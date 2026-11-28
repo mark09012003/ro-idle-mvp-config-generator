@@ -15,6 +15,7 @@ function memoryStore(initial = {}) {
   return {
     getItem: key => (map.has(key) ? map.get(key) : null),
     setItem: (key, val) => map.set(key, String(val)),
+    removeItem: key => map.delete(key),
   };
 }
 
@@ -43,6 +44,7 @@ test("upsertMarketPreset and removeMarketPreset manage presets cleanly", () => {
 
 test("exportAllSettings and importAllSettings round-trip all persisted preferences", () => {
   const src = memoryStore({
+    [storageKeys.theme]: "dark",
     [storageKeys.activeTab]: "tab-handoff",
     [storageKeys.refineUi]: JSON.stringify({storageMaterials: true, storageWeapons: true, autoEquip: true, location: "storage", optionsOpen: false}),
     [storageKeys.refineSupply]: JSON.stringify({shopMetals: true, buyVending: true, caps: {984: "12000", 985: "25000", 1010: "", 1011: ""}}),
@@ -55,6 +57,7 @@ test("exportAllSettings and importAllSettings round-trip all persisted preferenc
 
   const dst = memoryStore();
   const imported = importAllSettings(exported, dst);
+  assert.equal(imported.theme, "dark");
   assert.equal(imported.activeTab, "tab-handoff");
   assert.equal(imported.refineUi.storageWeapons, true);
   assert.equal(imported.refineSupply.caps[985], "25000");

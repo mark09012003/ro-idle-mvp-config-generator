@@ -1,4 +1,5 @@
 export const storageKeys = {
+  theme: "ui-theme-v1",
   activeTab: "active-tool-tab-v1",
   refineUi: "refine-ui-prefs-v1",
   refineSupply: "refine-supply-options-v1",
@@ -8,6 +9,7 @@ export const storageKeys = {
   handoffOptions: "handoff-options-v1",
 };
 
+const validThemes = new Set(["", "light", "dark"]);
 const validTabs = new Set(["tab-refine", "tab-market", "tab-growth", "tab-handoff"]);
 const validLocations = new Set(["", "bag", "worn", "storage"]);
 const validHoles = new Set(["any", "non-equip", "0", "1", "2", "3", "4"]);
@@ -96,11 +98,13 @@ function readJson(store, key) {
 }
 
 export function exportAllSettings(store) {
+  const theme = store.getItem(storageKeys.theme) ?? "";
   const activeTab = store.getItem(storageKeys.activeTab);
   const autoStoreRaw = store.getItem(storageKeys.marketAutoStore);
   const presetsRaw = readJson(store, storageKeys.marketPresets);
   return {
     schema: "ro-idle-whitesmith-settings-v1",
+    theme: validThemes.has(theme) ? theme : "",
     activeTab: validTabs.has(activeTab) ? activeTab : "tab-refine",
     refineUi: sanitizeRefineUi(readJson(store, storageKeys.refineUi)),
     refineSupply: readJson(store, storageKeys.refineSupply) ?? {shopMetals: true, buyVending: false, caps: {}},
@@ -120,6 +124,10 @@ export function importAllSettings(jsonText, store) {
   }
   if (!parsed || typeof parsed !== "object" || parsed.schema !== "ro-idle-whitesmith-settings-v1") {
     throw new Error("這不是有效的「批次裝備精練」設定檔。");
+  }
+  if (typeof parsed.theme === "string" && validThemes.has(parsed.theme)) {
+    if (parsed.theme) store.setItem(storageKeys.theme, parsed.theme);
+    else store.removeItem?.(storageKeys.theme);
   }
   if (validTabs.has(parsed.activeTab)) store.setItem(storageKeys.activeTab, parsed.activeTab);
   store.setItem(storageKeys.refineUi, JSON.stringify(sanitizeRefineUi(parsed.refineUi)));

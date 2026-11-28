@@ -13,8 +13,8 @@ chrome.action.onClicked.addListener(async tab => {
   await chrome.windows.create({
     url: url.href,
     type: "popup",
-    width: 410,
-    height: 690,
+    width: 420,
+    height: 720,
     focused: true,
   });
 });

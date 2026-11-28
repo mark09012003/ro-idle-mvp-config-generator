@@ -9,6 +9,12 @@ const host = "https://ro-idle.app";
 const floatingTab = new URL(location.href).searchParams.get("gameTab");
 const floating = floatingTab !== null;
 const character = $("character");
+const themeToggle = $("theme-toggle");
+const roleMeta = $("role-meta");
+const roleTown = $("role-town");
+const roleWeight = $("role-weight");
+const roleSlots = $("role-slots");
+const roleZeny = $("role-zeny");
 const gear = $("gear");
 const selection = $("equipment");
 const mode = $("mode");
@@ -54,6 +60,59 @@ let cancelled = false;
 let needsRefresh = false;
 let focusCheckInFlight = false;
 
+function isDarkThemeActive(theme) {
+  return theme === "dark" || (!theme && Boolean(window.matchMedia?.("(prefers-color-scheme: dark)").matches));
+}
+
+function applyTheme(theme) {
+  if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  const dark = isDarkThemeActive(theme);
+  themeToggle.textContent = dark ? "☀" : "☾";
+  themeToggle.title = dark ? "切換為淺色主題" : "切換為深色主題";
+  themeToggle.setAttribute("aria-label", themeToggle.title);
+}
+
+function loadTheme() {
+  try {
+    const saved = localStorage.getItem(storageKeys.theme);
+    applyTheme(saved === "light" || saved === "dark" ? saved : "");
+  } catch {
+    applyTheme("");
+  }
+}
+
+loadTheme();
+themeToggle.onclick = () => {
+  const current = document.documentElement.dataset.theme ?? "";
+  const next = isDarkThemeActive(current) ? "light" : "dark";
+  try { localStorage.setItem(storageKeys.theme, next); } catch {}
+  applyTheme(next);
+};
+
+function renderRoleMeta(currentView = view) {
+  const snap = currentView?.snapshot;
+  if (!snap) {
+    roleMeta.hidden = true;
+    return;
+  }
+  roleMeta.hidden = false;
+  roleTown.textContent = marketTowns?.[snap.mapId] ?? snap.mapId ?? "未知城鎮";
+  const weight = Number(snap.weight ?? 0);
+  const weightMax = Number(snap.derived?.weightMax ?? 0);
+  const pct = Number.isFinite(snap.weightPercent)
+    ? Math.round(snap.weightPercent)
+    : weightMax > 0 ? Math.round((weight / weightMax) * 100) : 0;
+  const fmt = value => Number.isInteger(value) ? String(value) : value.toFixed(1);
+  roleWeight.textContent = weightMax > 0 ? `負重 ${pct}% (${fmt(weight)}/${fmt(weightMax)})` : `負重 ${fmt(weight)}`;
+  roleWeight.classList.toggle("meta-warn", isOverHalfWeight(snap));
+  const slots = Array.isArray(snap.inventory) ? snap.inventory.length : 0;
+  roleSlots.textContent = `背包 ${slots}/100`;
+  roleSlots.classList.toggle("meta-warn", slots >= 90);
+  const zeny = Number(snap.character?.zeny ?? 0);
+  roleZeny.textContent = `${zeny.toLocaleString()} Z`;
+}
+
 $("open-floating").onclick = async () => {
   if (!tabId || busy) return;
   $("open-floating").disabled = true;
@@ -65,7 +124,7 @@ $("open-floating").onclick = async () => {
     if (existing) {
       await chrome.windows.update(existing.id, {focused: true, state: "normal"});
     } else {
-      await chrome.windows.create({url: url.href, type: "popup", width: 410, height: 690, focused: true});
+      await chrome.windows.create({url: url.href, type: "popup", width: 420, height: 720, focused: true});
     }
     window.close();
   } catch (error) {
@@ -295,6 +354,7 @@ function planKey(plan) {
 }
 
 function renderEquipment(preserve = false) {
+  renderRoleMeta(view);
   const checked = new Set(preserve ? selectedPlans().map(planKey) : []);
   const level = Number(target.value);
   plans = [
@@ -492,6 +552,7 @@ async function runBatch() {
         const next = checkView(reply.view, id);
         verifyDeposited(beforeInventory, next.snapshot.inventory, deposit.items);
         view = next;
+        renderRoleMeta(view);
         storage = Array.isArray(reply.storage?.items) ? reply.storage : await getStorage();
         for (const {uid} of deposit.items) finishedStorageUids.delete(uid);
         returnedToStorage += deposit.totalQty;
@@ -537,6 +598,7 @@ async function runBatch() {
         const next = checkView(reply.view, id);
         wavePlans = associateWithdrawnEquipment(view, next, wavePlans);
         view = next;
+        renderRoleMeta(view);
         storage = Array.isArray(reply.storage?.items) ? reply.storage : await getStorage();
       } else {
         wavePlans = wavePlans.map(plan => ({...plan, uid: plan.uid ?? plan.item.uid}));
@@ -556,6 +618,7 @@ async function runBatch() {
         const next = checkView(reply.view, id);
         diffPurchasedBatch(beforeInventory, next.snapshot.inventory, [{itemId, qty}]);
         view = next;
+        renderRoleMeta(view);
         shopBought += qty;
         shopSpent += unitPrice * qty;
       }
@@ -591,6 +654,7 @@ async function runBatch() {
             : checkView(await gameRequest(`/api/characters/${id}?deferCatchup=1`), id);
           diffPurchasedBatch(beforeInventory, next.snapshot.inventory, group.orders);
           view = next;
+          renderRoleMeta(view);
           vendingBought += groupQty;
           vendingSpent += reply.result.paid;
         }
@@ -620,6 +684,7 @@ async function runBatch() {
             const reply = await gameRequest(`/api/characters/${id}/commands`, payload);
             const next = checkView(reply.view, id);
             view = next;
+            renderRoleMeta(view);
             const outcome = refineOutcome(next, plan, level);
             awaitingRefine = false;
             if (outcome === "failure") {
@@ -854,6 +919,7 @@ async function buyMarket() {
         const next = checkView(reply.view, role.id);
         verifyDeposited(beforeInventory, next.snapshot.inventory, deposit.items);
         currentView = next;
+        renderRoleMeta(currentView);
         storageBox = Array.isArray(reply.storage?.items) ? reply.storage : await getStorage();
         for (const {uid, qty} of deposit.items) {
           const remaining = (pendingDeposit.get(uid) ?? 0) - qty;
@@ -904,6 +970,7 @@ async function buyMarket() {
             pendingDeposit.set(entry.uid, (pendingDeposit.get(entry.uid) ?? 0) + entry.qty);
           }
           currentView = nextView;
+          renderRoleMeta(currentView);
           if (isOverHalfWeight(currentView.snapshot) && pendingDeposit.size) {
             await flushAutoDeposit("負重超過 50%");
           }
@@ -1644,6 +1711,7 @@ $("settings-import").onclick = async () => {
   if (!text) return;
   try {
     const imported = importAllSettings(text, localStorage);
+    loadTheme();
     loadRefineUiPrefs();
     loadRefineSupplyOptions();
     updateRefineSupplyVisibility();
