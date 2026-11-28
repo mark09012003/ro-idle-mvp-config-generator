@@ -10,8 +10,14 @@
   let lastSignal = "";
   let timer;
   let fallback;
+  const fallbackMs = 3 * 60_000;
+  const maxBackoffMs = 15 * 60_000;
+  let retryTimer;
+  let retryAt = 0;
+  let readFailures = 0;
   let backgroundStream;
   let backgroundSignal = "";
+  let lastSnapshotAt = 0;
   let message = "尚未啟用。";
   const observer = new MutationObserver(() => {
     if (timer !== undefined) return;
@@ -43,6 +49,9 @@
     document.removeEventListener("visibilitychange", syncBackgroundStream);
     closeBackgroundStream();
     clearInterval(fallback);
+    clearTimeout(retryTimer);
+    retryAt = 0;
+    readFailures = 0;
     clearTimeout(timer);
     timer = undefined;
     message = text;
@@ -52,6 +61,15 @@
     backgroundStream?.close();
     backgroundStream = undefined;
     backgroundSignal = "";
+    lastSnapshotAt = 0;
+  }
+
+  function streamHealthy() {
+    if (document.hidden) return lastSnapshotAt > 0 && Date.now() - lastSnapshotAt < fallbackMs;
+    const classic = document.querySelector(".xp-statusbar-scroll");
+    if (classic) return classic.textContent.includes("● 已連線");
+    const mobile = document.querySelector('.ui2-mstatus button[aria-label="打開完整狀態"]');
+    return Boolean(mobile && !mobile.textContent.includes("○ 連線中"));
   }
 
   function syncBackgroundStream() {
@@ -74,6 +92,7 @@
       }
       const character = snapshot?.character;
       if (!character || !Number.isInteger(character.baseLv) || !Number.isInteger(character.jobLv)) return;
+      lastSnapshotAt = Date.now();
       const signal = JSON.stringify([character.job, character.baseLv, character.jobLv, snapshot.activity === "dead"]);
       if (signal === backgroundSignal) return;
       backgroundSignal = signal;
@@ -84,7 +103,31 @@
         if (backgroundStream === stream) closeBackgroundStream();
       });
     }
+    stream.addEventListener("error", () => {
+      if (backgroundStream === stream) lastSnapshotAt = 0;
+    });
     inspect(true);
+  }
+
+  function retryAfterMs(header) {
+    if (!header) return 0;
+    if (/^\d+$/.test(header)) return Number(header) * 1000;
+    return Math.max(0, Date.parse(header) - Date.now()) || 0;
+  }
+
+  function retryRead(error) {
+    const backoff = Math.min(maxBackoffMs, fallbackMs * 2 ** readFailures++);
+    const delay = Math.max(backoff, error.retryAfterMs ?? 0);
+    retryAt = Date.now() + delay;
+    message = `暫時讀不到角色狀態，約 ${Math.ceil(delay / 60000)} 分鐘後重試。`;
+    clearTimeout(retryTimer);
+    function retry() {
+      if (!observing) return;
+      const remaining = retryAt - Date.now();
+      if (remaining > 0) retryTimer = setTimeout(retry, Math.min(remaining, 2_147_483_647));
+      else inspect(true, !streamHealthy());
+    }
+    retryTimer = setTimeout(retry, Math.min(delay, 2_147_483_647));
   }
 
   async function request(path, body) {
@@ -103,7 +146,9 @@
     });
     if (!reply.ok) {
       throw Object.assign(new Error(data?.error?.message ?? data?.message ??
-        (typeof data?.error === "string" ? data.error : `HTTP ${reply.status}`)), {status:reply.status});
+        (typeof data?.error === "string" ? data.error : `HTTP ${reply.status}`)), {
+        status:reply.status, retryAfterMs:retryAfterMs(reply.headers.get("Retry-After")),
+      });
     }
     return data;
   }
@@ -129,7 +174,7 @@
   }
 
   async function run() {
-    if (!observing || inFlight) return;
+    if (!observing || inFlight || Date.now() < retryAt) return;
     inFlight = true;
     pending = false;
     const refresh = pendingRefresh;
@@ -143,10 +188,13 @@
       } catch (error) {
         if (!(error instanceof TypeError) && error.name !== "TimeoutError" &&
             error.status !== 429 && !(error.status >= 500)) throw error;
-        message = "暫時讀不到角色狀態，稍後會自動重試。";
+        if (observing) retryRead(error);
         return;
       }
       if (!observing) return;
+      clearTimeout(retryTimer);
+      retryAt = 0;
+      readFailures = 0;
       let view = checkedView(response);
       await track(view);
       while (observing) {
@@ -223,8 +271,9 @@
         observing = true;
         observer.observe(document.documentElement, {subtree:true, childList:true, characterData:true});
         document.addEventListener("visibilitychange", syncBackgroundStream);
-        // Unlike stream-triggered reads, refresh elapsed progress even when the game closes its stream.
-        fallback = setInterval(() => inspect(true, true), 3 * 60_000);
+        fallback = setInterval(() => {
+          if (!streamHealthy() && Date.now() >= retryAt) inspect(true, true);
+        }, fallbackMs);
         syncBackgroundStream();
       }
     }
