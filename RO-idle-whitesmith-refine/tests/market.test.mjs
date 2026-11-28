@@ -8,6 +8,7 @@ import {
   diffPurchasedItems,
   groupVendorOrders,
   isOverHalfWeight,
+  isSkippableVendorError,
   marketPlan,
   planAutoDeposit,
   takeVendorBatch,
@@ -242,4 +243,39 @@ test("market-weights.json covers all market-slots and rebind-items including fra
   ];
   const batch = takeVendorBatch(zeroWeightQueue, {weight: 100, derived: {weightMax: 2000}, inventory: []}, true);
   assert.equal(batch.length, 2);
+});
+
+
+test("marketPlan excludes failed vendor IDs and isSkippableVendorError distinguishes seller vs buyer/network errors", () => {
+  const response = {
+    shops: [
+      {vendorId: 10, vendorName: "壞攤位", mapId: "prontera", items: [{cartUid: 1, itemId: 984, name: "神之金屬", price: 10000, qty: 20}]},
+      {vendorId: 20, vendorName: "好攤位B", mapId: "prontera", items: [{cartUid: 2, itemId: 984, name: "神之金屬", price: 11000, qty: 12}]},
+      {vendorId: 30, vendorName: "好攤位C", mapId: "prontera", items: [{cartUid: 3, itemId: 984, name: "神之金屬", price: 12000, qty: 15}]},
+    ],
+  };
+  const plan = marketPlan(
+    response,
+    {},
+    {id: 1, mapId: "prontera", zeny: 1_000_000},
+    {keyword: "神之金屬", itemId: 984, holes: "any", ceiling: 15000, quantity: 20},
+    {984: 20},
+    new Set([10]),
+  );
+  assert.equal(plan.count, 20);
+  assert.deepEqual(plan.orders.map(o => [o.vendorId, o.qty]), [[20, 12], [30, 8]]);
+
+  // Seller-side 4xx errors -> skip
+  assert.equal(isSkippableVendorError({status: 400, message: "攤位已關閉"}), true);
+  assert.equal(isSkippableVendorError({status: 404, message: "找不到該攤位或商品已售完"}), true);
+  assert.equal(isSkippableVendorError({status: 409, message: "賣家 Zeny 已達上限，無法完成交易"}), true);
+  assert.equal(isSkippableVendorError({status: 409, message: "商品價格已變動"}), true);
+
+  // Buyer-side, auth, role switch, and uncertain 5xx/network errors -> must NOT skip
+  assert.equal(isSkippableVendorError({status: 409, message: "遊戲分頁已切換角色。"}), false);
+  assert.equal(isSkippableVendorError({status: 400, message: "Zeny 不足"}), false);
+  assert.equal(isSkippableVendorError({status: 400, message: "背包負重已達上限"}), false);
+  assert.equal(isSkippableVendorError({status: 401, message: "未登入"}), false);
+  assert.equal(isSkippableVendorError({status: 500, message: "Internal Server Error"}), false);
+  assert.equal(isSkippableVendorError({status: null, message: "讀取遊戲逾時"}), false);
 });

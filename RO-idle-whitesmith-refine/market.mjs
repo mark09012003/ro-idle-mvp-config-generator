@@ -4,7 +4,22 @@ function toWeight10(weight) {
   return Math.round(weight * 10);
 }
 
-export function marketPlan(response, slots, buyer, criteria, weights = null) {
+export function isSkippableVendorError(error) {
+  const status = error?.status;
+  if (!Number.isInteger(status) || status < 400 || status >= 500 || status === 401 || status === 403) {
+    return false;
+  }
+  const msg = String(error?.message ?? "");
+  if (/切換角色|遊戲分頁|登入|權限/.test(msg)) return false;
+  // Seller-side Zeny/space limits mention 賣家 / 攤主 / 對方; buyer-side ones should stop buying.
+  const isSellerSide = /賣家|攤主|對方|攤位|商品|此攤|該攤/.test(msg);
+  if (!isSellerSide && /Zeny\s*不足|金幣不足|餘額不足|負重|背包|空間不足|欄位不足|掛機|死亡|擺攤中/.test(msg)) {
+    return false;
+  }
+  return true;
+}
+
+export function marketPlan(response, slots, buyer, criteria, weights = null, excludeVendorIds = null) {
   const {keyword = "", holes = "any", ceiling, quantity, itemId = null} = criteria;
   const term = String(keyword).trim().toLowerCase();
   const validHoles = holes === "any" || holes === "non-equip" || (Number.isInteger(holes) && holes >= 0);
@@ -17,7 +32,7 @@ export function marketPlan(response, slots, buyer, criteria, weights = null) {
 
   const definitions = new Map((response.heldItems ?? []).map(def => [def.id, def]));
   const lines = response.shops.flatMap(shop => {
-    if (shop.vendorId === buyer.id || typeof shop.mapId !== "string" ||
+    if (shop.vendorId === buyer.id || excludeVendorIds?.has(shop.vendorId) || typeof shop.mapId !== "string" ||
         !Number.isSafeInteger(shop.vendorId)) return [];
     return shop.items.filter(item => {
       const def = definitions.get(item.itemId);
