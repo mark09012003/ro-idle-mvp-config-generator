@@ -1,6 +1,6 @@
 import {destinationConfig, handoffItems, matchMoved, profileName, rebindPlan, sameBindings, sourceHandoffConfig} from "./handoff.mjs";
 import {itemFingerprint, remapRules, ruleReferences, suitableItem} from "./rebind.mjs";
-import {diffPurchasedItems, isOverHalfWeight, marketPlan, planAutoDeposit, verifyDeposited, wouldExceedMaxWeight} from "./market.mjs";
+import {diffPurchasedBatch, groupVendorOrders, isOverHalfWeight, marketPlan, planAutoDeposit, takeVendorBatch, verifyDeposited} from "./market.mjs";
 import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, planNextRefineWave, refineOutcome, restoreEquipment, skillLevel, equipmentPlan} from "./refine.mjs";
 
 const $ = id => document.getElementById(id);
@@ -21,13 +21,18 @@ const all = $("select-all");
 const target = $("target");
 const storageMaterials = $("storage-materials");
 const storageWeapons = $("storage-weapons");
+const refineShopMetals = $("refine-shop-metals");
+const refineBuyMaterials = $("refine-buy-materials");
+const refineBuyOptions = $("refine-buy-options");
+const refineMaxInputs = [984, 985, 1010, 1011].map(id => [id, $(`refine-max-${id}`)]);
 const marketAutoStore = $("market-auto-store");
 const results = $("results");
 const status = message => { $("status").textContent = message; };
-let catalog, marketSlots, marketTowns, rebindItems, tabId, view, storage, activeRole;
+let catalog, marketSlots, marketTowns, marketWeights, rebindItems, tabId, view, storage, activeRole;
 let marketPreview;
 let rebindPreview;
 const marketAutoStoreKey = "market-auto-store-v1";
+const refineSupplyKey = "refine-supply-options-v1";
 const rebindKey = "equipment-rebind-reference";
 const handoffKey = "archer-equipment-handoff-v1";
 let loadVersion = 0;
@@ -107,21 +112,88 @@ function selectedPlans() {
   return plans.filter((_, index) => selection.children[index]?.firstElementChild.checked);
 }
 
+function refineSupplyOptions() {
+  const vendingCaps = {};
+  for (const [id, input] of refineMaxInputs) {
+    const val = Number(input.value);
+    if (Number.isSafeInteger(val) && val > 0) vendingCaps[id] = val;
+  }
+  return {
+    useStorageMaterials: storageMaterials.checked,
+    buyShopMetals: refineShopMetals.checked,
+    buyVendingMaterials: refineBuyMaterials.checked,
+    vendingCaps,
+  };
+}
+
+function saveRefineSupplyOptions() {
+  try {
+    const caps = Object.fromEntries(refineMaxInputs.map(([id, input]) => [id, input.value.trim()]));
+    localStorage.setItem(refineSupplyKey, JSON.stringify({
+      shopMetals: refineShopMetals.checked,
+      buyVending: refineBuyMaterials.checked,
+      caps,
+    }));
+  } catch {}
+}
+
+function loadRefineSupplyOptions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(refineSupplyKey));
+    refineShopMetals.checked = saved?.shopMetals !== false;
+    refineBuyMaterials.checked = saved?.buyVending === true;
+    for (const [id, input] of refineMaxInputs) {
+      if (typeof saved?.caps?.[id] === "string") input.value = saved.caps[id];
+    }
+  } catch {
+    refineShopMetals.checked = true;
+    refineBuyMaterials.checked = false;
+  }
+}
+
+function updateRefineSupplyVisibility() {
+  refineBuyOptions.hidden = !refineBuyMaterials.checked;
+  const armor = mode.value === "armor";
+  for (const [id, input] of refineMaxInputs) {
+    const relevant = armor ? id === 985 : id !== 985;
+    input.closest("label").hidden = !relevant;
+  }
+}
+
+function setRefineSupplyDisabled(disabled) {
+  storageMaterials.disabled = storageWeapons.disabled = autoEquip.disabled =
+    refineShopMetals.disabled = refineBuyMaterials.disabled = disabled;
+  for (const [, input] of refineMaxInputs) input.disabled = disabled;
+}
+
 function planSummary(chosen, batch) {
-  const materials = batch.materials.map(({name, qty, missing}) =>
-    `${name} ×${qty}${missing ? `（倉庫補 ${missing}）` : ""}`);
+  const materials = batch.materials.map(({name, qty, missing, shopBuy, vendingBuy, vendingCap}) => {
+    const sources = [];
+    if (missing) sources.push(`倉庫補 ${missing}`);
+    if (shopBuy) sources.push(`商店買 ${shopBuy}`);
+    if (vendingBuy) sources.push(`攤位買 ${vendingBuy}（上限 ${vendingCap.toLocaleString()}）`);
+    return `${name} ×${qty}${sources.length ? `（${sources.join("、")}）` : ""}`;
+  });
   const stored = chosen.filter(plan => plan.source === "storage").length;
   const withdrawals = [];
   if (stored) withdrawals.push(`${stored} 件裝備`);
-  if (batch.materials.some(material => material.missing)) withdrawals.push("上列缺少的材料");
+  if (batch.materials.some(material => material.missing)) withdrawals.push("上列倉庫材料");
   const storageNote = !withdrawals.length ? []
     : batch.waves > 1
       ? [`依目前負重與背包格數自動分批從倉庫領取 ${withdrawals.join("及")}（預計至少 ${batch.waves} 批，單次倉庫費 ${batch.fee} Zeny${stored ? "；完成的倉庫裝備在負重超過 50% 或空間不足時自動存回倉庫" : ""}）。`]
       : [`從倉庫取出 ${withdrawals.join("及")}，倉庫費 ${batch.fee} Zeny。`];
+  const buyNotes = [];
+  if (batch.shopCost > 0) {
+    buyNotes.push(`商店購買一／二級金屬預計 ${batch.shopCost.toLocaleString()} Zeny（含折扣）。`);
+  }
+  if (batch.vendingBuy.length > 0) {
+    buyNotes.push(`攤位購買材料預算上限 ${batch.vendingMaxCost.toLocaleString()} Zeny（實際依目前城鎮最低價購買）。`);
+  }
   return [
-    `${chosen.length} 件裝備，最多 ${batch.steps} 次精練，${mode.value === "weapon" ? `${batch.steps * 5} SP` : `精練費 ${batch.zeny} Zeny`}`,
+    `${chosen.length} 件裝備，最多 ${batch.steps} 次精練，${mode.value === "weapon" ? `${batch.steps * 5} SP` : `精練費 ${batch.zeny.toLocaleString()} Zeny`}`,
     materials.join("、"),
     ...storageNote,
+    ...buyNotes,
     ...(chosen.some(plan => plan.rates.some(rate => rate < 100))
       ? ["有精練步驟低於 100% 成功率。失敗時裝備和已插入的卡片會消失。"] : []),
   ].join("\n");
@@ -142,7 +214,7 @@ function updatePlan() {
   summary.textContent = "";
   if (busy || needsRefresh || !chosen.length) return;
   try {
-    summary.textContent = planSummary(chosen, batchPlan(view, storage, chosen, storageMaterials.checked, catalog));
+    summary.textContent = planSummary(chosen, batchPlan(view, storage, chosen, refineSupplyOptions(), catalog));
     start.disabled = false;
   } catch (error) {
     summary.textContent = error.message;
@@ -244,6 +316,7 @@ async function loadGear(preserve = false) {
 function updateMode(preserve) {
   const usesSkill = mode.value === "weapon";
   $("auto-equip-option").hidden = mode.value !== "armor";
+  updateRefineSupplyVisibility();
   const previousLevel = preserve ? Number(target.value) : 0;
   const cap = usesSkill ? skillLevel(view) : 10;
   const hasNpc = catalog.refineTowns.includes(view.snapshot.mapId);
@@ -275,11 +348,16 @@ async function runBatch() {
   busy = $("market-fields").disabled = true;
   clearMarketPreview();
   cancelled = false;
-  mode.disabled = refresh.disabled = gear.disabled = start.disabled = target.disabled = storageMaterials.disabled = storageWeapons.disabled = autoEquip.disabled = true;
+  mode.disabled = refresh.disabled = gear.disabled = start.disabled = target.disabled = true;
+  setRefineSupplyDisabled(true);
   let success = 0;
   let failure = 0;
   let uncertain = 0;
   let returnedToStorage = 0;
+  let shopBought = 0;
+  let shopSpent = 0;
+  let vendingBought = 0;
+  let vendingSpent = 0;
   let awaitingRefine = false;
   let started = false;
   try {
@@ -290,11 +368,37 @@ async function runBatch() {
         if (JSON.stringify(item) !== JSON.stringify(plan.item)) throw new Error("選取的倉庫裝備已變更。");
       }
     }
-    const batch = batchPlan(view, storage, chosen, storageMaterials.checked, catalog);
+    const supply = refineSupplyOptions();
+    const batch = batchPlan(view, storage, chosen, supply, catalog);
+    let vendingPreviewNote = "";
+    if (batch.vendingBuy.length) {
+      status("正在查詢目前城鎮攤位材料價格…");
+      let estimatedVendingTotal = 0;
+      const lines = [];
+      let remainingZeny = view.snapshot.character.zeny - batch.fee - batch.zeny - batch.shopCost;
+      for (const need of batch.vendingBuy) {
+        const response = await gameRequest(`/api/vending?q=${encodeURIComponent(need.name)}`);
+        if (!Array.isArray(response.shops)) throw new Error("無法讀取攤位。");
+        const market = marketPlan(
+          response,
+          marketSlots,
+          {id, mapId: view.snapshot.mapId, zeny: Math.max(0, remainingZeny)},
+          {keyword: need.name, itemId: need.itemId, holes: "any", ceiling: need.maxPrice, quantity: need.qty},
+          marketWeights,
+        );
+        if (market.count < need.qty) {
+          throw new Error(`目前城鎮攤位單價 ${need.maxPrice.toLocaleString()} Zeny 以下的 ${need.name} 不足（需要 ${need.qty}，可買 ${market.count}）。`);
+        }
+        estimatedVendingTotal += market.total;
+        remainingZeny -= market.total;
+        lines.push(`${need.name} ×${need.qty} 約 ${market.total.toLocaleString()} Zeny`);
+      }
+      vendingPreviewNote = `\n目前攤位現貨估計：${lines.join("、")}（共約 ${estimatedVendingTotal.toLocaleString()} Zeny）。`;
+    }
     const items = chosen.map(plan =>
       `${plan.source === "storage" ? "倉庫" : "背包"} · ${plan.name} +${plan.from} → +${plan.target}`);
     const equipNote = chosen.some(plan => plan.needsEquip) ? "\n將暫時更換防具，請保持擴充視窗開啟，直到原裝備還原。" : "";
-    if (!window.confirm(`確定由 ${roleName} 執行批次精練？\n${planSummary(chosen, batch)}${equipNote}\n\n${items.join("\n")}`)) return;
+    if (!window.confirm(`確定由 ${roleName} 執行批次精練？\n${planSummary(chosen, batch)}${vendingPreviewNote}${equipNote}\n\n${items.join("\n")}`)) return;
     started = true;
     results.hidden = true;
     stop.disabled = false;
@@ -308,7 +412,7 @@ async function runBatch() {
     const depositFinishedStorage = async reason => {
       while (finishedStorageUids.size) {
         const entries = [...finishedStorageUids].map(uid => [uid, 1]);
-        const deposit = planAutoDeposit(view.snapshot, storage, entries);
+        const deposit = planAutoDeposit(view.snapshot, storage, entries, marketSlots);
         if (!deposit.items.length) break;
         status(`${reason}，正在將已完成的 ${deposit.totalQty} 件倉庫裝備存回倉庫…`);
         const beforeInventory = view.snapshot.inventory;
@@ -329,18 +433,19 @@ async function runBatch() {
     let waveIndex = 0;
 
     while (!cancelled && remaining.length) {
-      const needsStorageNow = remaining.some(plan => plan.source === "storage") || storageMaterials.checked;
-      if (needsStorageNow && finishedStorageUids.size && isOverHalfWeight(view.snapshot)) {
+      const needsExternalNow = remaining.some(plan => plan.source === "storage") ||
+        supply.useStorageMaterials || supply.buyShopMetals || supply.buyVendingMaterials;
+      if (needsExternalNow && finishedStorageUids.size && isOverHalfWeight(view.snapshot)) {
         await depositFinishedStorage("負重超過 50%");
       }
 
-      let wave = planNextRefineWave(view, storage, remaining, storageMaterials.checked, catalog);
+      let wave = planNextRefineWave(view, storage, remaining, supply, catalog);
       if (!wave.wavePlans.length && finishedStorageUids.size) {
         await depositFinishedStorage("騰出負重與背包空間");
-        wave = planNextRefineWave(view, storage, remaining, storageMaterials.checked, catalog);
+        wave = planNextRefineWave(view, storage, remaining, supply, catalog);
       }
       if (!wave.wavePlans.length) {
-        throw new Error(wave.blockedReason ?? "目前負重或背包空間不足以領取下一批倉庫物品。");
+        throw new Error(wave.blockedReason ?? "目前負重或背包空間不足以領取或購買下一批材料。");
       }
 
       let wavePlans = wave.wavePlans;
@@ -366,6 +471,60 @@ async function runBatch() {
         storage = Array.isArray(reply.storage?.items) ? reply.storage : await getStorage();
       } else {
         wavePlans = wavePlans.map(plan => ({...plan, uid: plan.uid ?? plan.item.uid}));
+      }
+
+      for (const {itemId, name, qty, unitPrice, cost} of wave.shopBuy) {
+        if (cancelled) break;
+        if (view.snapshot.character.zeny < cost) {
+          throw new Error(`Zeny 不足，向商店購買 ${name} ×${qty} 需要 ${cost.toLocaleString()} Zeny。`);
+        }
+        status(`正在向金屬商人購買 ${name} ×${qty}…`);
+        const beforeInventory = view.snapshot.inventory;
+        const reply = await gameRequest(
+          `/api/characters/${id}/commands`,
+          guardedCommand(view, {type: "buy", itemId, qty, shop: catalog.metalShop.shop}),
+        );
+        const next = checkView(reply.view, id);
+        diffPurchasedBatch(beforeInventory, next.snapshot.inventory, [{itemId, qty}]);
+        view = next;
+        shopBought += qty;
+        shopSpent += unitPrice * qty;
+      }
+
+      for (const {itemId, name, qty, maxPrice} of wave.vendingBuy) {
+        if (cancelled) break;
+        status(`正在搜尋並向攤位購買 ${name} ×${qty}（上限 ${maxPrice.toLocaleString()} Zeny）…`);
+        const response = await gameRequest(`/api/vending?q=${encodeURIComponent(name)}`);
+        if (!Array.isArray(response.shops)) throw new Error("無法讀取攤位。");
+        const market = marketPlan(
+          response,
+          marketSlots,
+          {id, mapId: view.snapshot.mapId, zeny: view.snapshot.character.zeny},
+          {keyword: name, itemId, holes: "any", ceiling: maxPrice, quantity: qty},
+          marketWeights,
+        );
+        if (market.count < qty) {
+          throw new Error(`目前城鎮攤位單價 ${maxPrice.toLocaleString()} Zeny 以下的 ${name} 不足（需要 ${qty}，可買 ${market.count}）。`);
+        }
+        for (const group of groupVendorOrders(market.orders)) {
+          if (cancelled) break;
+          const expectedPaid = group.orders.reduce((sum, entry) => sum + entry.item.price * entry.qty, 0);
+          const groupQty = group.orders.reduce((sum, entry) => sum + entry.qty, 0);
+          status(`正在向 ${group.seller} 購買 ${name} ×${groupQty}…`);
+          const beforeInventory = view.snapshot.inventory;
+          const reply = await gameRequest(`/api/characters/${id}/vending/buy`, {
+            vendorId: group.vendorId,
+            orders: group.orders.map(({item, qty: orderQty}) => ({cartUid: item.cartUid, qty: orderQty, price: item.price})),
+          });
+          if (reply.result?.paid !== expectedPaid) throw new Error(`未能確認向 ${group.seller} 購買 ${name} 的金額。`);
+          const next = reply.view?.characterId === id && Array.isArray(reply.view?.snapshot?.inventory)
+            ? checkView(reply.view, id)
+            : checkView(await gameRequest(`/api/characters/${id}?deferCatchup=1`), id);
+          diffPurchasedBatch(beforeInventory, next.snapshot.inventory, group.orders);
+          view = next;
+          vendingBought += groupQty;
+          vendingSpent += reply.result.paid;
+        }
       }
 
       const carryOver = [];
@@ -452,13 +611,20 @@ async function runBatch() {
     status(`批次停止。${error.message} 請更新物品並確認裝備欄。`);
   } finally {
     busy = $("market-fields").disabled = false;
-    refresh.disabled = storageMaterials.disabled = storageWeapons.disabled = autoEquip.disabled = false;
+    refresh.disabled = false;
+    setRefineSupplyDisabled(false);
     stop.disabled = true;
     mode.disabled = needsRefresh;
     target.disabled = needsRefresh;
     if (started) {
       results.hidden = false;
-      results.textContent = `成功 ${success} 件 · 失敗 ${failure} 件 · 未完成 ${chosen.length - success - failure - uncertain} 件${uncertain ? ` · 結果待確認 ${uncertain} 件` : ""}${returnedToStorage ? ` · 已自動存回倉庫 ${returnedToStorage} 件` : ""}`;
+      const extras = [
+        uncertain ? `結果待確認 ${uncertain} 件` : "",
+        returnedToStorage ? `已自動存回倉庫 ${returnedToStorage} 件` : "",
+        shopBought ? `商店補材料 ${shopBought} 個（${shopSpent.toLocaleString()} Zeny）` : "",
+        vendingBought ? `攤位買材料 ${vendingBought} 個（${vendingSpent.toLocaleString()} Zeny）` : "",
+      ].filter(Boolean);
+      results.textContent = `成功 ${success} 件 · 失敗 ${failure} 件 · 未完成 ${chosen.length - success - failure - uncertain} 件${extras.length ? ` · ${extras.join(" · ")}` : ""}`;
       if (storage) {
         needsRefresh = true;
         target.disabled = true;
@@ -487,24 +653,25 @@ async function searchMarket(role, criteria) {
   if (!Number.isSafeInteger(zeny) || zeny < 0) throw new Error("無法確認可用 Zeny。");
   const response = await gameRequest(`/api/vending?q=${encodeURIComponent(criteria.keyword)}`);
   if (!Array.isArray(response.shops)) throw new Error("無法讀取攤位。");
-  return {...marketPlan(response, marketSlots, {id: role.id, mapId, zeny}, criteria), current};
+  return {...marketPlan(response, marketSlots, {id: role.id, mapId, zeny}, criteria, marketWeights), current};
 }
 
 function lockMarket(locked) {
   busy = locked;
   $("market-fields").disabled = locked;
-  mode.disabled = target.disabled = gear.disabled = refresh.disabled =
-    storageMaterials.disabled = storageWeapons.disabled = autoEquip.disabled = locked;
+  mode.disabled = target.disabled = gear.disabled = refresh.disabled = locked;
+  setRefineSupplyDisabled(locked);
   if (locked) start.disabled = true;
   else if (view) updateMode(true);
 }
 
-function marketRow({seller, item}, holes, qty, town) {
+function marketRow({seller, item, isEquipment, cardSlots}, qty, town) {
   const row = document.createElement("li");
   const refine = item.refine ? `+${item.refine} ` : "";
+  const slotsText = isEquipment && Number.isInteger(cardSlots) ? `［${cardSlots} 洞］` : "";
   const flags = [item.unidentified && "未鑑定", item.broken && "損壞", item.cards?.some(Boolean) && "已插卡"].filter(Boolean);
   const state = flags.length ? `（${flags.join("、")}）` : "";
-  row.textContent = `${refine}${item.name}［${holes} 洞］${state} · ${item.price.toLocaleString()} Zeny ×${qty} · ${seller}` +
+  row.textContent = `${refine}${item.name}${slotsText}${state} · ${item.price.toLocaleString()} Zeny ×${qty} · ${seller}` +
     (town ? ` · ${town}` : "");
   return row;
 }
@@ -512,17 +679,23 @@ function marketRow({seller, item}, holes, qty, town) {
 async function previewMarket() {
   if (busy || !activeRole) return;
   const autoStore = marketAutoStore.checked;
+  const rawHoles = $("market-holes").value;
+  const holes = rawHoles === "any" || rawHoles === "non-equip"
+    ? rawHoles
+    : rawHoles === "" ? NaN : Number(rawHoles);
   const criteria = {
     keyword: $("market-name").value.trim(),
-    holes: $("market-holes").value === "" ? NaN : Number($("market-holes").value),
+    holes,
     ceiling: Number($("market-price").value),
     quantity: Number($("market-qty").value),
   };
   clearMarketPreview();
-  if (!criteria.keyword || !Number.isInteger(criteria.holes) ||
+  const validHoles = criteria.holes === "any" || criteria.holes === "non-equip" ||
+    (Number.isInteger(criteria.holes) && criteria.holes >= 0);
+  if (!criteria.keyword || !validHoles ||
       !Number.isSafeInteger(criteria.ceiling) || criteria.ceiling < 1 ||
-      !Number.isInteger(criteria.quantity) || criteria.quantity < 1 || criteria.quantity > 100) {
-    $("market-status").textContent = "請填寫裝備名稱、指定洞數、單價上限與購買件數（1～100）。";
+      !Number.isInteger(criteria.quantity) || criteria.quantity < 1 || criteria.quantity > 10000) {
+    $("market-status").textContent = "請填寫道具名稱、篩選條件、單價上限與購買數量（1～10000）。";
     return;
   }
   lockMarket(true);
@@ -542,20 +715,21 @@ async function previewMarket() {
         throw new Error("目前城鎮沒有卡普拉倉庫服務，請取消勾選自動存倉或改到有倉庫的城鎮。");
       }
       const alreadyHeavy = isOverHalfWeight(plan.current.snapshot);
-      storeNote = ` 負重超過 50% 自動存倉（每次倉庫費 ${fee} Zeny${alreadyHeavy ? "；目前負重已超過 50%，將逐筆存倉" : ""}）。`;
+      storeNote = ` 負重超過 50% 自動存倉（每次倉庫費 ${fee} Zeny${alreadyHeavy ? "；目前負重已超過 50%，將按攤位批次存倉" : ""}）。`;
     }
+    const vendorCount = groupVendorOrders(plan.orders).length;
     const localStatus = plan.count
-      ? `目前城鎮預計購買 ${plan.count} 件，合計 ${plan.total.toLocaleString()} Zeny。${storeNote}`
-      : plan.localMatches ? "目前 Zeny 不足。" : "目前城鎮沒有符合條件的裝備。";
+      ? `目前城鎮預計向 ${vendorCount} 個攤位購買 ${plan.count} 個，合計 ${plan.total.toLocaleString()} Zeny。${storeNote}`
+      : plan.localMatches ? "目前 Zeny 不足。" : "目前城鎮沒有符合條件的道具。";
     $("market-status").textContent = localStatus +
       (plan.remote.length ? `其他城鎮有 ${plan.remote.length} 筆符合商品。` : "");
     $("market-remote-list").replaceChildren(...plan.remote.map(line =>
-      marketRow(line, criteria.holes, line.item.qty, marketTowns[line.mapId] ?? line.mapId)));
+      marketRow(line, line.item.qty, marketTowns[line.mapId] ?? line.mapId)));
     $("market-other").hidden = !plan.remote.length;
     if (!plan.count) return;
     marketPreview = {criteria, plan, autoStore};
     $("market-preview").replaceChildren(...plan.orders.map(line =>
-      marketRow(line, criteria.holes, line.qty)));
+      marketRow(line, line.qty)));
     $("market-preview").hidden = false;
     $("market-buy").disabled = false;
   } catch (error) {
@@ -599,9 +773,9 @@ async function buyMarket() {
 
     const flushAutoDeposit = async reason => {
       while (pendingDeposit.size) {
-        const deposit = planAutoDeposit(currentView.snapshot, storageBox, pendingDeposit.entries());
+        const deposit = planAutoDeposit(currentView.snapshot, storageBox, pendingDeposit.entries(), marketSlots);
         if (!deposit.items.length) break;
-        $("market-status").textContent = `已購買 ${bought}／${fresh.count} 件，${reason}，正在自動存倉（${deposit.totalQty} 件）…`;
+        $("market-status").textContent = `已購買 ${bought}／${fresh.count} 個，${reason}，正在自動存倉（${deposit.totalQty} 個）…`;
         const beforeInventory = currentView.snapshot.inventory;
         const reply = await gameRequest(
           `/api/characters/${role.id}/commands`,
@@ -622,49 +796,59 @@ async function buyMarket() {
       }
     };
 
-    for (const {vendorId, item, qty, unitWeight} of fresh.orders) {
-      if (autoStore && pendingDeposit.size) {
-        if (isOverHalfWeight(currentView.snapshot)) {
+    for (const group of groupVendorOrders(fresh.orders)) {
+      const queue = group.orders.map(order => ({...order}));
+      while (queue.length) {
+        if (autoStore && pendingDeposit.size && isOverHalfWeight(currentView.snapshot)) {
           await flushAutoDeposit("負重超過 50%");
-        } else if (wouldExceedMaxWeight(currentView.snapshot, unitWeight, qty)) {
-          await flushAutoDeposit("即將超過負重上限");
         }
-      }
-      if (autoStore && currentView.snapshot.character.zeny < item.price * qty) {
-        throw new Error("扣除倉庫費後 Zeny 不足，無法繼續購買。");
-      }
-      $("market-status").textContent = `正在購買（${bought}／${fresh.count} 件）…`;
-      submitted = true;
-      const reply = await gameRequest(`/api/characters/${role.id}/vending/buy`, {
-        vendorId, orders: [{cartUid: item.cartUid, qty, price: item.price}],
-      });
-      const {result} = reply;
-      if (result?.paid !== item.price * qty) throw new Error("未能確認這筆購買金額。");
-      bought += qty;
-      paid += result.paid;
-      if (autoStore) {
-        const nextView = reply.view?.characterId === role.id && Array.isArray(reply.view?.snapshot?.inventory)
-          ? checkView(reply.view, role.id)
-          : checkView(await gameRequest(`/api/characters/${role.id}?deferCatchup=1`), role.id);
-        const added = diffPurchasedItems(currentView.snapshot.inventory, nextView.snapshot.inventory, item.itemId, qty);
-        for (const entry of added) {
-          pendingDeposit.set(entry.uid, (pendingDeposit.get(entry.uid) ?? 0) + entry.qty);
+        let batch = takeVendorBatch(queue, currentView.snapshot, autoStore);
+        if (!batch.length && autoStore && pendingDeposit.size) {
+          await flushAutoDeposit("騰出負重與背包空間");
+          batch = takeVendorBatch(queue, currentView.snapshot, autoStore);
         }
-        currentView = nextView;
-        if (isOverHalfWeight(currentView.snapshot) && pendingDeposit.size) {
-          await flushAutoDeposit("負重超過 50%");
+        if (!batch.length) {
+          throw new Error("目前剩餘負重或背包空間不足，無法繼續購買。");
+        }
+        const expectedPaid = batch.reduce((sum, entry) => sum + entry.item.price * entry.qty, 0);
+        const batchQty = batch.reduce((sum, entry) => sum + entry.qty, 0);
+        if (autoStore && currentView.snapshot.character.zeny < expectedPaid) {
+          throw new Error("扣除倉庫費後 Zeny 不足，無法繼續購買。");
+        }
+        $("market-status").textContent = `正在向 ${group.seller} 購買 ${batchQty} 個（累計 ${bought}／${fresh.count}）…`;
+        submitted = true;
+        const reply = await gameRequest(`/api/characters/${role.id}/vending/buy`, {
+          vendorId: group.vendorId,
+          orders: batch.map(({item, qty}) => ({cartUid: item.cartUid, qty, price: item.price})),
+        });
+        const {result} = reply;
+        if (result?.paid !== expectedPaid) throw new Error("未能確認這筆購買金額。");
+        bought += batchQty;
+        paid += result.paid;
+        if (autoStore) {
+          const nextView = reply.view?.characterId === role.id && Array.isArray(reply.view?.snapshot?.inventory)
+            ? checkView(reply.view, role.id)
+            : checkView(await gameRequest(`/api/characters/${role.id}?deferCatchup=1`), role.id);
+          const added = diffPurchasedBatch(currentView.snapshot.inventory, nextView.snapshot.inventory, batch);
+          for (const entry of added) {
+            pendingDeposit.set(entry.uid, (pendingDeposit.get(entry.uid) ?? 0) + entry.qty);
+          }
+          currentView = nextView;
+          if (isOverHalfWeight(currentView.snapshot) && pendingDeposit.size) {
+            await flushAutoDeposit("負重超過 50%");
+          }
         }
       }
     }
     const storedSummary = stored
-      ? `；已自動存倉 ${stored} 件（${depositRuns} 次，倉庫費 ${storageFees.toLocaleString()} Zeny）`
+      ? `；已自動存倉 ${stored} 個（${depositRuns} 次，倉庫費 ${storageFees.toLocaleString()} Zeny）`
       : "";
-    $("market-status").textContent = `已購買 ${bought} 件，共花費 ${paid.toLocaleString()} Zeny${storedSummary}。`;
+    $("market-status").textContent = `已購買 ${bought} 個，共花費 ${paid.toLocaleString()} Zeny${storedSummary}。`;
   } catch (error) {
     const storedNote = stored
-      ? `（已自動存倉 ${stored} 件，倉庫費 ${storageFees.toLocaleString()} Zeny）`
+      ? `（已自動存倉 ${stored} 個，倉庫費 ${storageFees.toLocaleString()} Zeny）`
       : "";
-    $("market-status").textContent = `購買停止。已確認 ${bought} 件、${paid.toLocaleString()} Zeny${storedNote}。${error.message}${submitted ? " 請先確認背包與倉庫再重試。" : ""}`;
+    $("market-status").textContent = `購買停止。已確認 ${bought} 個、${paid.toLocaleString()} Zeny${storedNote}。${error.message}${submitted ? " 請先確認背包與倉庫再重試。" : ""}`;
   } finally {
     clearMarketPreview();
     lockMarket(false);
@@ -1119,6 +1303,13 @@ query.oninput = locationFilter.onchange = applyEquipmentFilters;
 mode.onchange = () => updateMode(false);
 refresh.onclick = () => catalog ? loadGear(true) : initialize();
 storageMaterials.onchange = storageWeapons.onchange = () => loadGear(true);
+refineShopMetals.onchange = () => { saveRefineSupplyOptions(); updatePlan(); };
+refineBuyMaterials.onchange = () => { saveRefineSupplyOptions(); updateRefineSupplyVisibility(); updatePlan(); };
+for (const [, input] of refineMaxInputs) {
+  input.oninput = () => { saveRefineSupplyOptions(); updatePlan(); };
+}
+loadRefineSupplyOptions();
+updateRefineSupplyVisibility();
 target.onchange = autoEquip.onchange = () => renderEquipment(true);
 start.onclick = runBatch;
 stop.onclick = () => { cancelled = true; stop.disabled = true; };
@@ -1139,14 +1330,14 @@ async function initialize() {
       throw new Error("請先在 ro-idle.app 進入角色，再從 Chrome 工具列開啟擴充。");
     }
     tabId = tab.id;
-    [catalog, marketSlots, marketTowns, rebindItems] = await Promise.all(
-      ["catalog.json", "market-slots.json", "market-towns.json", "rebind-items.json"].map(async path => {
+    [catalog, marketSlots, marketTowns, marketWeights, rebindItems] = await Promise.all(
+      ["catalog.json", "market-slots.json", "market-towns.json", "market-weights.json", "rebind-items.json"].map(async path => {
         const response = await fetch(path, {signal: AbortSignal.timeout(10000)});
         if (!response.ok) throw new Error(`無法載入擴充資料（${path}），請重新載入擴充。`);
         return response.json();
       }),
     );
-    storageMaterials.disabled = storageWeapons.disabled = false;
+    setRefineSupplyDisabled(false);
     await loadGear();
   } catch (error) {
     character.textContent = "無法讀取目前角色";

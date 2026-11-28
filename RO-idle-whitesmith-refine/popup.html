@@ -31,6 +31,14 @@
     <select id="target" disabled><option value="0">安全值（100% 成功）</option></select>
     <label class="storage"><input id="storage-materials" type="checkbox" disabled> 從倉庫補足材料</label>
     <label class="storage"><input id="storage-weapons" type="checkbox" disabled> 從倉庫挑選裝備</label>
+    <label class="storage"><input id="refine-shop-metals" type="checkbox" disabled> 倉庫缺一／二級金屬時自動從商店買（普隆德拉）</label>
+    <label class="storage"><input id="refine-buy-materials" type="checkbox" disabled> 缺材料時自動從目前城鎮攤位購買</label>
+    <div id="refine-buy-options" class="refine-buy-options" hidden>
+      <label data-refine-mat="984">神之金屬上限（Zeny）<input id="refine-max-984" type="number" min="1" step="1" placeholder="留空不買"></label>
+      <label data-refine-mat="985">鋁上限（Zeny）<input id="refine-max-985" type="number" min="1" step="1" placeholder="留空不買"></label>
+      <label data-refine-mat="1010">一級金屬上限（Zeny）<input id="refine-max-1010" type="number" min="1" step="1" placeholder="留空不買"></label>
+      <label data-refine-mat="1011">二級金屬上限（Zeny）<input id="refine-max-1011" type="number" min="1" step="1" placeholder="留空不買"></label>
+    </div>
     <label id="auto-equip-option" class="storage" hidden><input id="auto-equip" type="checkbox"> 自動穿戴防具後精練，完成後換回原裝</label>
     <fieldset id="gear" disabled>
       <legend>選擇裝備</legend>
@@ -62,24 +70,27 @@
     <div id="market">
       <h2>攤位搜尋與限價購買</h2>
       <fieldset id="market-fields" disabled>
-        <label>裝備名稱 <input id="market-name" maxlength="40" type="search" placeholder="輸入名稱關鍵字"></label>
+        <label>道具名稱 <input id="market-name" maxlength="40" type="search" placeholder="輸入裝備或道具名稱關鍵字"></label>
         <div class="market-limits">
-          <label>指定洞數
+          <label>道具／洞數
             <select id="market-holes">
-              <option value="">請選擇</option>
-              <option value="0">0 洞</option><option value="1">1 洞</option>
-              <option value="2">2 洞</option><option value="3">3 洞</option>
-              <option value="4">4 洞</option>
+              <option value="any">不限（含非裝備）</option>
+              <option value="non-equip">僅非裝備</option>
+              <option value="0">0 洞裝備</option>
+              <option value="1">1 洞裝備</option>
+              <option value="2">2 洞裝備</option>
+              <option value="3">3 洞裝備</option>
+              <option value="4">4 洞裝備</option>
             </select>
           </label>
           <label>單價上限（Zeny） <input id="market-price" type="number" min="1" step="1"></label>
-          <label>最多買幾件 <input id="market-qty" type="number" min="1" max="100" value="1"></label>
+          <label>最多買幾個 <input id="market-qty" type="number" min="1" max="10000" value="1"></label>
         </div>
-        <label class="storage"><input id="market-auto-store" type="checkbox"> 負重超過 50% 自動存倉（僅存本次買到的裝備）</label>
+        <label class="storage"><input id="market-auto-store" type="checkbox"> 負重超過 50% 自動存倉（僅存本次買到的物品）</label>
         <button id="market-search" type="button">搜尋並預覽</button>
         <button id="market-buy" type="button" disabled>確認批次購買</button>
       </fieldset>
-      <p id="market-status" role="status">搜尋各城鎮的攤位，確認後從目前城鎮的最低價開始買。</p>
+      <p id="market-status" role="status">搜尋各城鎮攤位（含裝備與非裝備），同攤位會合併一次購買。</p>
       <ul id="market-preview" hidden></ul>
       <div id="market-other" hidden>
         <p>其他城鎮 · 到當地後重新搜尋即可購買</p>

@@ -56,6 +56,37 @@ function toWeight10(weight) {
   return Math.round(weight * 10);
 }
 
+function normalizeSupply(supply) {
+  if (typeof supply === "boolean") {
+    return {useStorageMaterials: supply, buyShopMetals: false, buyVendingMaterials: false, vendingCaps: {}};
+  }
+  return {
+    useStorageMaterials: Boolean(supply?.useStorageMaterials),
+    buyShopMetals: Boolean(supply?.buyShopMetals),
+    buyVendingMaterials: Boolean(supply?.buyVendingMaterials),
+    vendingCaps: supply?.vendingCaps ?? {},
+  };
+}
+
+function vendingCapFor(supply, itemId) {
+  if (!supply.buyVendingMaterials) return null;
+  const raw = supply.vendingCaps?.[itemId] ?? supply.vendingCaps?.[String(itemId)];
+  return Number.isSafeInteger(raw) && raw > 0 ? raw : null;
+}
+
+export function npcMetalPrice(view, catalog, itemId) {
+  const basePrice = catalog?.metalShop?.prices?.[itemId] ?? catalog?.metalShop?.prices?.[String(itemId)];
+  if (!Number.isSafeInteger(basePrice) || basePrice < 1) return null;
+  const skills = view?.snapshot?.character?.skills ?? {};
+  const granted = view?.snapshot?.derived?.grantedSkills ?? {};
+  const discountLv = Math.max(skills.MC_DISCOUNT ?? 0, granted.MC_DISCOUNT ?? 0);
+  const discountRate = discountLv > 0 ? 5 + discountLv * 2 - (discountLv === 10 ? 1 : 0) : 0;
+  const compulsionLv = skills.RG_COMPULSION ?? 0;
+  const compulsionRate = compulsionLv > 0 ? 5 + 4 * compulsionLv : 0;
+  const rate = Math.max(discountRate, compulsionRate);
+  return Math.max(1, Math.floor(basePrice * (100 - rate) / 100));
+}
+
 export function itemWeight(catalog, storage, itemId) {
   const fromCatalog = catalog?.weights?.[itemId];
   if (Number.isFinite(fromCatalog) && fromCatalog >= 0) return fromCatalog;
@@ -79,10 +110,11 @@ function bagMaterialState(inventory, materialIds) {
   return {usable, hasLocked, hasUnlockedStack};
 }
 
-export function planNextRefineWave(view, storage, remainingPlans, useStorageMaterials, catalog) {
+export function planNextRefineWave(view, storage, remainingPlans, supplyOption, catalog) {
   if (!remainingPlans.length) {
-    return {wavePlans: [], withdraw: [], partialMaterials: false, stepCap: null, blockedReason: null};
+    return {wavePlans: [], withdraw: [], shopBuy: [], vendingBuy: [], partialMaterials: false, stepCap: null, blockedReason: null};
   }
+  const supply = normalizeSupply(supplyOption);
   const snapshot = view?.snapshot;
   const weight = snapshot?.weight;
   const weightMax = snapshot?.derived?.weightMax;
@@ -107,7 +139,13 @@ export function planNextRefineWave(view, storage, remainingPlans, useStorageMate
   const wavePlans = [];
   const withdrawEq = [];
   const withdrawMatBySid = new Map();
+  const shopBuyByMat = new Map();
+  const vendingBuyByMat = new Map();
   const allocatedMatSlots = new Set();
+
+  const canBuyShop = id => supply.buyShopMetals &&
+    catalog?.metalShop?.town === snapshot.mapId &&
+    npcMetalPrice(view, catalog, id) != null;
 
   const tryFitPlan = (plan, stepLimit) => {
     const needEq = plan.source === "storage";
@@ -122,38 +160,56 @@ export function planNextRefineWave(view, storage, remainingPlans, useStorageMate
 
     const bagDeductions = new Map();
     const matPulls = new Map();
+    const shopAdds = new Map();
+    const vendingAdds = new Map();
     const newMatSlots = new Set();
     let matWeight10 = 0;
 
     for (const [id, qty] of neededByMat) {
+      const name = materialNames.get(id);
       const availableInBag = bagUsable.get(id) ?? 0;
       if (hasLocked.get(id) && availableInBag < qty) {
-        throw new Error(`${materialNames.get(id)} 的上鎖堆疊會被精練優先消耗，請先整理背包。`);
+        throw new Error(`${name} 的上鎖堆疊會被精練優先消耗，請先整理背包。`);
       }
       const fromBag = Math.min(availableInBag, qty);
       bagDeductions.set(id, fromBag);
-      let needFromStorage = qty - fromBag;
-      if (needFromStorage <= 0) continue;
-      if (!useStorageMaterials) {
-        throw new Error(`材料不足，缺少 ${materialNames.get(id)} ×${needFromStorage}。`);
-      }
+      let stillNeeded = qty - fromBag;
+      if (stillNeeded <= 0) continue;
+
       if (hasWeight) {
-        matWeight10 += toWeight10(itemWeight(catalog, storage, id)) * needFromStorage;
+        matWeight10 += toWeight10(itemWeight(catalog, storage, id)) * stillNeeded;
       }
       if (!hasUnlockedStack.has(id) && !allocatedMatSlots.has(id)) {
         newMatSlots.add(id);
       }
-      for (const stack of storagePools.get(id) ?? []) {
-        if (needFromStorage === 0) break;
-        const alreadyTaken = (withdrawMatBySid.get(stack.sid) ?? 0) + (matPulls.get(stack.sid) ?? 0);
-        const available = stack.qty - alreadyTaken;
-        if (available <= 0) continue;
-        const take = Math.min(needFromStorage, available);
-        matPulls.set(stack.sid, (matPulls.get(stack.sid) ?? 0) + take);
-        needFromStorage -= take;
+
+      if (supply.useStorageMaterials) {
+        for (const stack of storagePools.get(id) ?? []) {
+          if (stillNeeded === 0) break;
+          const alreadyTaken = (withdrawMatBySid.get(stack.sid) ?? 0) + (matPulls.get(stack.sid) ?? 0);
+          const available = stack.qty - alreadyTaken;
+          if (available <= 0) continue;
+          const take = Math.min(stillNeeded, available);
+          matPulls.set(stack.sid, (matPulls.get(stack.sid) ?? 0) + take);
+          stillNeeded -= take;
+        }
       }
-      if (needFromStorage > 0) {
-        throw new Error(`材料不足，缺少 ${materialNames.get(id)} ×${needFromStorage}。`);
+      if (stillNeeded > 0 && canBuyShop(id)) {
+        shopAdds.set(id, (shopAdds.get(id) ?? 0) + stillNeeded);
+        stillNeeded = 0;
+      }
+      if (stillNeeded > 0 && vendingCapFor(supply, id) != null) {
+        vendingAdds.set(id, (vendingAdds.get(id) ?? 0) + stillNeeded);
+        stillNeeded = 0;
+      }
+      if (stillNeeded > 0) {
+        if (supply.buyShopMetals && npcMetalPrice(view, catalog, id) != null && catalog?.metalShop?.town !== snapshot.mapId) {
+          throw new Error(`材料不足，缺少 ${name} ×${stillNeeded}。請到普隆德拉自動向金屬商人購買。`);
+        }
+        if (supply.buyVendingMaterials) {
+          throw new Error(`材料不足，缺少 ${name} ×${stillNeeded}。請設定「${name}」的攤位可接受單價上限。`);
+        }
+        throw new Error(`材料不足，缺少 ${name} ×${stillNeeded}。`);
       }
     }
 
@@ -168,13 +224,13 @@ export function planNextRefineWave(view, storage, remainingPlans, useStorageMate
     if (addedWeight10 > freeWeight10) {
       return {
         ok: false,
-        reason: `目前剩餘負重（${freeWeight10 / 10}）不足以領取下一件裝備與材料（需要 ${addedWeight10 / 10}），請先清理背包。`,
+        reason: `目前剩餘負重（${freeWeight10 / 10}）不足以領取或購買下一件裝備與材料（需要 ${addedWeight10 / 10}），請先清理背包。`,
       };
     }
     if (addedSlots > freeSlots) {
       return {
         ok: false,
-        reason: `目前背包剩餘格數（${freeSlots} 格）不足以領取下一件裝備與材料（需要 ${addedSlots} 格），請先清理背包。`,
+        reason: `目前背包剩餘格數（${freeSlots} 格）不足以領取或購買下一件裝備與材料（需要 ${addedSlots} 格），請先清理背包。`,
       };
     }
     if (nextEntryCount > maxWithdrawEntries) {
@@ -190,6 +246,8 @@ export function planNextRefineWave(view, storage, remainingPlans, useStorageMate
         if (needEq) withdrawEq.push({sid: plan.item.sid, qty: 1});
         for (const [id, used] of bagDeductions) bagUsable.set(id, (bagUsable.get(id) ?? 0) - used);
         for (const [sid, qty] of matPulls) withdrawMatBySid.set(sid, (withdrawMatBySid.get(sid) ?? 0) + qty);
+        for (const [id, qty] of shopAdds) shopBuyByMat.set(id, (shopBuyByMat.get(id) ?? 0) + qty);
+        for (const [id, qty] of vendingAdds) vendingBuyByMat.set(id, (vendingBuyByMat.get(id) ?? 0) + qty);
         for (const id of newMatSlots) allocatedMatSlots.add(id);
         freeWeight10 -= addedWeight10;
         freeSlots -= addedSlots;
@@ -234,10 +292,19 @@ export function planNextRefineWave(view, storage, remainingPlans, useStorageMate
     ...withdrawEq,
     ...[...withdrawMatBySid.entries()].map(([sid, qty]) => ({sid, qty})),
   ];
-  return {wavePlans, withdraw, partialMaterials, stepCap, blockedReason};
+  const shopBuy = [...shopBuyByMat.entries()].map(([itemId, qty]) => {
+    const unitPrice = npcMetalPrice(view, catalog, itemId);
+    return {itemId, name: materialNames.get(itemId), qty, unitPrice, cost: unitPrice * qty};
+  });
+  const vendingBuy = [...vendingBuyByMat.entries()].map(([itemId, qty]) => {
+    const maxPrice = vendingCapFor(supply, itemId);
+    return {itemId, name: materialNames.get(itemId), qty, maxPrice};
+  });
+  return {wavePlans, withdraw, shopBuy, vendingBuy, partialMaterials, stepCap, blockedReason};
 }
 
-export function batchPlan(view, storage, equipment, useStorageMaterials, catalog) {
+export function batchPlan(view, storage, equipment, supplyOption, catalog) {
+  const supply = normalizeSupply(supplyOption);
   const withdraw = equipment.filter(plan => plan.source === "storage")
     .map(({item}) => ({sid: item.sid, qty: 1}));
   const materials = new Map();
@@ -253,6 +320,11 @@ export function batchPlan(view, storage, equipment, useStorageMaterials, catalog
     }
   }
 
+  let shopCost = 0;
+  let vendingMaxCost = 0;
+  const shopBuy = [];
+  const vendingBuy = [];
+
   for (const material of materials.values()) {
     const stacks = view.snapshot.inventory.filter(item => item.itemId === material.id);
     const locked = stacks.findIndex(item => item.locked);
@@ -261,32 +333,72 @@ export function batchPlan(view, storage, equipment, useStorageMaterials, catalog
     if (locked >= 0 && usable < material.qty) {
       throw new Error(`${material.name} 的上鎖堆疊會被精練優先消耗，請先整理背包。`);
     }
-    material.missing = Math.max(0, material.qty - usable);
-    let remaining = material.missing;
-    for (const item of useStorageMaterials ? storage?.items ?? [] : []) {
+    let remaining = Math.max(0, material.qty - usable);
+    let fromStorage = 0;
+    for (const item of supply.useStorageMaterials ? storage?.items ?? [] : []) {
       if (remaining === 0) break;
       if (item.itemId !== material.id || item.locked) continue;
       const qty = Math.min(remaining, item.qty);
-      if (qty > 0) withdraw.push({sid: item.sid, qty});
+      if (qty > 0) {
+        withdraw.push({sid: item.sid, qty});
+        fromStorage += qty;
+      }
       remaining -= qty;
     }
-    if (remaining) throw new Error(`材料不足，缺少 ${material.name} ×${remaining}。`);
+    material.missing = fromStorage;
+    material.shopBuy = 0;
+    material.vendingBuy = 0;
+
+    if (remaining > 0 && supply.buyShopMetals && catalog?.metalShop?.town === view.snapshot.mapId) {
+      const unitPrice = npcMetalPrice(view, catalog, material.id);
+      if (unitPrice != null) {
+        material.shopBuy = remaining;
+        material.shopUnitPrice = unitPrice;
+        shopCost += unitPrice * remaining;
+        shopBuy.push({itemId: material.id, name: material.name, qty: remaining, unitPrice, cost: unitPrice * remaining});
+        remaining = 0;
+      }
+    }
+    if (remaining > 0) {
+      const cap = vendingCapFor(supply, material.id);
+      if (cap != null) {
+        material.vendingBuy = remaining;
+        material.vendingCap = cap;
+        vendingMaxCost += cap * remaining;
+        vendingBuy.push({itemId: material.id, name: material.name, qty: remaining, maxPrice: cap});
+        remaining = 0;
+      }
+    }
+    if (remaining > 0) {
+      if (supply.buyShopMetals && npcMetalPrice(view, catalog, material.id) != null &&
+          catalog?.metalShop?.town !== view.snapshot.mapId) {
+        throw new Error(`材料不足，缺少 ${material.name} ×${remaining}。請到普隆德拉自動向金屬商人購買。`);
+      }
+      if (supply.buyVendingMaterials) {
+        throw new Error(`材料不足，缺少 ${material.name} ×${remaining}。請設定「${material.name}」的攤位可接受單價上限。`);
+      }
+      throw new Error(`材料不足，缺少 ${material.name} ×${remaining}。`);
+    }
   }
 
   const needsWithdraw = withdraw.length > 0;
+  const needsExternal = needsWithdraw || shopBuy.length > 0 || vendingBuy.length > 0;
   if (needsWithdraw && view.snapshot.activity === "dead") {
     throw new Error("角色目前處於死亡狀態，無法使用倉庫。");
   }
   const fee = needsWithdraw ? storage?.fees?.[view.snapshot.mapId] : 0;
   if (!Number.isFinite(fee)) throw new Error("請先讓角色回到有卡普拉倉庫服務的城鎮。");
-  if (fee + zeny > view.snapshot.character.zeny) throw new Error(`Zeny 不足，精練與倉庫費合計 ${fee + zeny} Zeny。`);
+  const fixedZeny = fee + zeny + shopCost;
+  if (fixedZeny > view.snapshot.character.zeny) {
+    throw new Error(`Zeny 不足，精練、倉庫費與商店材料合計 ${fixedZeny.toLocaleString()} Zeny。`);
+  }
 
-  let waves = needsWithdraw ? 1 : 0;
+  let waves = needsExternal ? 1 : 0;
   let firstWave = null;
-  if (needsWithdraw && catalog) {
-    firstWave = planNextRefineWave(view, storage, equipment, useStorageMaterials, catalog);
+  if (needsExternal && catalog) {
+    firstWave = planNextRefineWave(view, storage, equipment, supply, catalog);
     if (!firstWave.wavePlans.length) {
-      throw new Error(firstWave.blockedReason ?? "目前負重或背包空間不足以領取倉庫物品。");
+      throw new Error(firstWave.blockedReason ?? "目前負重或背包空間不足以領取或購買材料。");
     }
     if (firstWave.wavePlans.length < equipment.length || firstWave.partialMaterials) {
       const done = Math.max(1, firstWave.wavePlans.length - (firstWave.partialMaterials ? 0.5 : 0));
@@ -295,7 +407,19 @@ export function batchPlan(view, storage, equipment, useStorageMaterials, catalog
   } else if (withdraw.length > maxWithdrawEntries) {
     waves = Math.ceil(withdraw.length / maxWithdrawEntries);
   }
-  return {withdraw, needsWithdraw, fee, waves, steps, zeny, materials: [...materials.values()]};
+  return {
+    withdraw,
+    needsWithdraw,
+    fee,
+    waves,
+    steps,
+    zeny,
+    shopCost,
+    vendingMaxCost,
+    shopBuy,
+    vendingBuy,
+    materials: [...materials.values()],
+  };
 }
 
 export function guardedCommand(view, command) {

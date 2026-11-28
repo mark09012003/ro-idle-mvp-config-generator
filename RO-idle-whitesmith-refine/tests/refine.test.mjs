@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import {fileURLToPath} from "node:url";
-import {batchPlan, equipmentPlan, itemWeight, planNextRefineWave} from "../refine.mjs";
+import {batchPlan, equipmentPlan, itemWeight, npcMetalPrice, planNextRefineWave} from "../refine.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const catalog = JSON.parse(fs.readFileSync(path.join(dir, "..", "catalog.json"), "utf8"));
@@ -154,4 +154,71 @@ test("batchPlan blocks immediately when remaining weight cannot fit even one sto
   };
   const chosen = [equipmentPlan(view, catalog, storage.items[0], 0, "storage", "armor")];
   assert.throws(() => batchPlan(view, storage, chosen, true, catalog), /目前剩餘負重（100）不足/);
+});
+
+test("npcMetalPrice applies Merchant Discount and Rogue Compulsion rates", () => {
+  const noDiscount = makeView();
+  assert.equal(npcMetalPrice(noDiscount, catalog, 1010), 200);
+  assert.equal(npcMetalPrice(noDiscount, catalog, 1011), 1000);
+  assert.equal(npcMetalPrice(noDiscount, catalog, 984), null);
+
+  const dc10 = makeView();
+  dc10.snapshot.character.skills.MC_DISCOUNT = 10;
+  assert.equal(npcMetalPrice(dc10, catalog, 1010), 152);
+  assert.equal(npcMetalPrice(dc10, catalog, 1011), 760);
+});
+
+test("batchPlan and planNextRefineWave auto-buy missing Lv1/Lv2 metals from Prontera shop after bag and storage", () => {
+  const view = makeView({
+    weight: 0,
+    weightMax: 2000,
+    inventory: [
+      {uid: 1, itemId: 1101, qty: 1, refine: 0}, // Lv1 weapon, safe +7 -> 7 × 1010
+      {uid: 2, itemId: 1010, qty: 2}, // 2 in bag
+    ],
+  });
+  view.snapshot.character.skills.MC_DISCOUNT = 10;
+  const storage = {fees: {prontera: 40}, capacity: 600, items: [{sid: 9, itemId: 1010, qty: 1}]}; // 1 in storage
+  const chosen = [equipmentPlan(view, catalog, view.snapshot.inventory[0], 0, "bag", "weapon")];
+  const supply = {useStorageMaterials: true, buyShopMetals: true, buyVendingMaterials: false, vendingCaps: {}};
+
+  const batch = batchPlan(view, storage, chosen, supply, catalog);
+  assert.equal(batch.materials[0].missing, 1);
+  assert.equal(batch.materials[0].shopBuy, 4);
+  assert.equal(batch.shopCost, 4 * 152);
+
+  const wave = planNextRefineWave(view, storage, chosen, supply, catalog);
+  assert.deepEqual(wave.withdraw, [{sid: 9, qty: 1}]);
+  assert.deepEqual(wave.shopBuy, [{itemId: 1010, name: "強化武器金屬-級數一", qty: 4, unitPrice: 152, cost: 608}]);
+  assert.deepEqual(wave.vendingBuy, []);
+});
+
+test("batchPlan and planNextRefineWave plan vending material buys with user caps and respect weight", () => {
+  const view = makeView({
+    weight: 900,
+    weightMax: 1000, // free weight = 100 -> fits 5 × 985 (20 each)
+    inventory: [
+      {uid: 1, itemId: 2317, qty: 1, refine: 0},
+      {uid: 2, itemId: 2317, qty: 1, refine: 0},
+    ],
+  });
+  const storage = {fees: {prontera: 40}, capacity: 600, items: []};
+  const chosen = view.snapshot.inventory.map(item => equipmentPlan(view, catalog, item, 0, "bag", "armor")); // 4 鋁 each = 8 鋁 total
+  const supply = {useStorageMaterials: true, buyShopMetals: true, buyVendingMaterials: true, vendingCaps: {985: 25000}};
+
+  const batch = batchPlan(view, storage, chosen, supply, catalog);
+  assert.equal(batch.materials[0].vendingBuy, 8);
+  assert.equal(batch.vendingMaxCost, 200000);
+  assert.ok(batch.waves >= 2);
+
+  // Wave 1 fits only 1 armor's 4 鋁 (80 weight <= 100 free weight), leaving armor #2 for wave 2
+  const wave1 = planNextRefineWave(view, storage, chosen, supply, catalog);
+  assert.equal(wave1.wavePlans.length, 1);
+  assert.deepEqual(wave1.vendingBuy, [{itemId: 985, name: "鋁", qty: 4, maxPrice: 25000}]);
+
+  // Missing cap throws helpful prompt
+  assert.throws(
+    () => batchPlan(view, storage, chosen, {useStorageMaterials: true, buyShopMetals: true, buyVendingMaterials: true, vendingCaps: {}}, catalog),
+    /請設定「鋁」的攤位可接受單價上限/,
+  );
 });

@@ -1,10 +1,18 @@
-export function marketPlan(response, slots, buyer, criteria) {
-  const {keyword, holes, ceiling, quantity} = criteria;
-  const term = keyword.trim().toLowerCase();
-  if (!term || !Number.isInteger(holes) || holes < 0 ||
+const maxInventorySlots = 100;
+
+function toWeight10(weight) {
+  return Math.round(weight * 10);
+}
+
+export function marketPlan(response, slots, buyer, criteria, weights = null) {
+  const {keyword = "", holes = "any", ceiling, quantity, itemId = null} = criteria;
+  const term = String(keyword).trim().toLowerCase();
+  const validHoles = holes === "any" || holes === "non-equip" || (Number.isInteger(holes) && holes >= 0);
+  const exactItemId = itemId != null ? Number(itemId) : null;
+  if ((!term && !(Number.isInteger(exactItemId) && exactItemId > 0)) || !validHoles ||
       !Number.isSafeInteger(ceiling) || ceiling < 1 ||
-      !Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
-    throw new Error("請填寫裝備名稱、指定洞數、單價上限及購買件數。");
+      !Number.isInteger(quantity) || quantity < 1 || quantity > 10000) {
+    throw new Error("請填寫道具名稱、篩選條件、單價上限及購買數量（1～10000）。");
   }
 
   const definitions = new Map((response.heldItems ?? []).map(def => [def.id, def]));
@@ -13,14 +21,36 @@ export function marketPlan(response, slots, buyer, criteria) {
         !Number.isSafeInteger(shop.vendorId)) return [];
     return shop.items.filter(item => {
       const def = definitions.get(item.itemId);
-      const cardSlots = def ? (def.category === "equipment" ? def.cardSlots ?? 0 : undefined) : slots[item.itemId];
-      return cardSlots === holes && item.name.toLowerCase().includes(term) &&
+      const isEquipment = def ? def.category === "equipment" : Object.hasOwn(slots ?? {}, item.itemId);
+      const cardSlots = isEquipment ? (def ? def.cardSlots ?? 0 : slots[item.itemId]) : null;
+      const matchesTarget = exactItemId != null
+        ? item.itemId === exactItemId
+        : item.name.toLowerCase().includes(term) && (
+          holes === "any"
+            ? true
+            : holes === "non-equip"
+              ? !isEquipment
+              : isEquipment && cardSlots === holes
+        );
+      return matchesTarget &&
         Number.isSafeInteger(item.price) && item.price > 0 && item.price <= ceiling &&
         Number.isSafeInteger(item.qty) && item.qty > 0 && Number.isSafeInteger(item.cartUid);
     }).map(item => {
       const def = definitions.get(item.itemId);
-      const unitWeight = Number.isFinite(def?.weight) && def.weight > 0 ? def.weight : null;
-      return {vendorId: shop.vendorId, seller: shop.vendorName, openedAt: shop.openedAt, mapId: shop.mapId, item, unitWeight};
+      const isEquipment = def ? def.category === "equipment" : Object.hasOwn(slots ?? {}, item.itemId);
+      const cardSlots = isEquipment ? (def ? def.cardSlots ?? 0 : slots[item.itemId]) : null;
+      const rawWeight = Number.isFinite(def?.weight) ? def.weight : weights?.[item.itemId];
+      const unitWeight = Number.isFinite(rawWeight) && rawWeight > 0 ? rawWeight : null;
+      return {
+        vendorId: shop.vendorId,
+        seller: shop.vendorName,
+        openedAt: shop.openedAt,
+        mapId: shop.mapId,
+        item,
+        isEquipment,
+        cardSlots,
+        unitWeight,
+      };
     });
   }).sort((a, b) => a.item.price - b.item.price);
 
@@ -40,6 +70,97 @@ export function marketPlan(response, slots, buyer, criteria) {
     total += line.item.price * qty;
   }
   return {orders, count, total, localMatches: local.length, remote: lines.filter(line => line.mapId !== buyer.mapId)};
+}
+
+export function groupVendorOrders(orders) {
+  const groups = [];
+  const byVendor = new Map();
+  for (const order of orders) {
+    let group = byVendor.get(order.vendorId);
+    if (!group) {
+      group = {vendorId: order.vendorId, seller: order.seller, orders: []};
+      byVendor.set(order.vendorId, group);
+      groups.push(group);
+    }
+    group.orders.push(order);
+  }
+  return groups;
+}
+
+export function takeVendorBatch(queue, snapshot, autoStore) {
+  if (!queue.length) return [];
+  if (!autoStore) {
+    return queue.splice(0, queue.length);
+  }
+  const weight = snapshot?.weight;
+  const weightMax = snapshot?.derived?.weightMax;
+  const hasWeight = Number.isFinite(weight) && Number.isFinite(weightMax) && weightMax > 0;
+  const weight10 = hasWeight ? toWeight10(weight) : 0;
+  const weightMax10 = hasWeight ? toWeight10(weightMax) : Infinity;
+  const freeWeight10 = hasWeight ? Math.max(0, weightMax10 - weight10) : Infinity;
+  const halfWeight10 = hasWeight ? Math.floor(weightMax10 / 2) : Infinity;
+  const freeSlots = Math.max(0, maxInventorySlots - (snapshot?.inventory?.length ?? 0));
+
+  const hasUnlockedStack = new Set();
+  for (const inv of snapshot?.inventory ?? []) {
+    if (!inv.locked && inv.refine == null && !(inv.cards?.length) && !inv.forged) {
+      hasUnlockedStack.add(inv.itemId);
+    }
+  }
+
+  const batch = [];
+  const newStackIds = new Set();
+  let usedWeight10 = 0;
+  let usedSlots = 0;
+  let crossedHalf = hasWeight ? weight10 * 2 > weightMax10 : false;
+
+  while (queue.length) {
+    const head = queue[0];
+    const isEquip = head.isEquipment !== false && (head.isEquipment === true || head.cardSlots != null);
+    const needsNewStackSlot = !isEquip && !hasUnlockedStack.has(head.item.itemId) && !newStackIds.has(head.item.itemId);
+    const minSlotNeeded = isEquip ? 1 : (needsNewStackSlot ? 1 : 0);
+    if (usedSlots + minSlotNeeded > freeSlots) break;
+
+    const u10 = Number.isFinite(head.unitWeight) && head.unitWeight > 0 ? toWeight10(head.unitWeight) : 0;
+    if (!hasWeight || u10 === 0) {
+      if (head.unitWeight == null && batch.length > 0) break;
+      const takeQty = isEquip ? Math.min(head.qty, freeSlots - usedSlots) : head.qty;
+      if (takeQty < 1) break;
+      batch.push({...head, qty: takeQty});
+      usedSlots += isEquip ? takeQty : (needsNewStackSlot ? 1 : 0);
+      if (needsNewStackSlot) newStackIds.add(head.item.itemId);
+      if (takeQty === head.qty) queue.shift();
+      else queue[0] = {...head, qty: head.qty - takeQty};
+      if (head.unitWeight == null) break;
+      continue;
+    }
+
+    const remFree10 = freeWeight10 - usedWeight10;
+    const maxByWeight = Math.floor(remFree10 / u10);
+    const maxBySlots = isEquip ? (freeSlots - usedSlots) : head.qty;
+    const maxFit = Math.min(head.qty, maxByWeight, maxBySlots);
+    if (maxFit < 1) break;
+
+    let takeQty = maxFit;
+    if (!crossedHalf) {
+      const curTotal10 = weight10 + usedWeight10;
+      const toCrossHalf = curTotal10 > halfWeight10 ? 1 : Math.floor((halfWeight10 - curTotal10) / u10) + 1;
+      takeQty = Math.min(maxFit, toCrossHalf);
+    }
+
+    batch.push({...head, qty: takeQty});
+    usedWeight10 += u10 * takeQty;
+    usedSlots += isEquip ? takeQty : (needsNewStackSlot ? 1 : 0);
+    if (needsNewStackSlot) newStackIds.add(head.item.itemId);
+    if (takeQty === head.qty) queue.shift();
+    else queue[0] = {...head, qty: head.qty - takeQty};
+
+    if (!crossedHalf && (weight10 + usedWeight10) * 2 > weightMax10) {
+      crossedHalf = true;
+      break;
+    }
+  }
+  return batch;
 }
 
 export function isOverHalfWeight(snapshot) {
@@ -63,32 +184,54 @@ export function wouldExceedMaxWeight(snapshot, unitWeight, qty) {
   return weight + unitWeight * qty > maxWeight;
 }
 
-export function diffPurchasedItems(beforeInventory, afterInventory, expectedItemId, expectedQty) {
-  if (!Array.isArray(beforeInventory) || !Array.isArray(afterInventory) ||
-      !Number.isInteger(expectedItemId) || !Number.isInteger(expectedQty) || expectedQty < 1) {
-    throw new Error("無法核對剛買到的裝備。");
+export function diffPurchasedBatch(beforeInventory, afterInventory, batchOrders) {
+  if (!Array.isArray(beforeInventory) || !Array.isArray(afterInventory) || !Array.isArray(batchOrders) || !batchOrders.length) {
+    throw new Error("無法核對剛買到的物品。");
+  }
+  const expectedByItemId = new Map();
+  for (const order of batchOrders) {
+    const itemId = order.item?.itemId ?? order.itemId;
+    const qty = order.qty;
+    if (!Number.isInteger(itemId) || !Number.isInteger(qty) || qty < 1) {
+      throw new Error("無法核對剛買到的物品。");
+    }
+    expectedByItemId.set(itemId, (expectedByItemId.get(itemId) ?? 0) + qty);
   }
   const beforeByUid = new Map(beforeInventory.map(item => [item.uid, item]));
+  const addedByItemId = new Map();
   const added = [];
-  let total = 0;
   for (const item of afterInventory) {
-    if (item.itemId !== expectedItemId || !Number.isSafeInteger(item.uid) || !Number.isInteger(item.qty) || item.qty < 1) {
+    if (!expectedByItemId.has(item.itemId) || !Number.isSafeInteger(item.uid) || !Number.isInteger(item.qty) || item.qty < 1) {
       continue;
     }
     const previous = beforeByUid.get(item.uid);
     const delta = previous ? item.qty - previous.qty : item.qty;
     if (delta > 0) {
       added.push({uid: item.uid, qty: delta});
-      total += delta;
+      addedByItemId.set(item.itemId, (addedByItemId.get(item.itemId) ?? 0) + delta);
     }
   }
-  if (total !== expectedQty) {
-    throw new Error("無法確認剛買到的裝備位置，已停止自動存倉。");
+  for (const [itemId, expectedQty] of expectedByItemId) {
+    if ((addedByItemId.get(itemId) ?? 0) !== expectedQty) {
+      throw new Error("無法確認剛買到的物品位置，已停止自動存倉。");
+    }
   }
   return added.sort((a, b) => a.uid - b.uid);
 }
 
-export function planAutoDeposit(snapshot, storage, pendingEntries) {
+export function diffPurchasedItems(beforeInventory, afterInventory, expectedItemId, expectedQty) {
+  return diffPurchasedBatch(beforeInventory, afterInventory, [{itemId: expectedItemId, qty: expectedQty}]);
+}
+
+function isStackableItem(item, slots) {
+  if (!item || item.refine != null || item.cards?.length || item.forged || item.broken || item.unidentified) {
+    return false;
+  }
+  if (slots) return !Object.hasOwn(slots, item.itemId);
+  return item.qty > 1;
+}
+
+export function planAutoDeposit(snapshot, storage, pendingEntries, slots = null) {
   if (snapshot?.activity === "dead") {
     throw new Error("角色目前處於死亡狀態，無法自動存倉。");
   }
@@ -105,22 +248,34 @@ export function planAutoDeposit(snapshot, storage, pendingEntries) {
   }
   const equipped = new Set(Object.values(snapshot?.equipment ?? {}).filter(uid => uid != null));
   const inventory = new Map((snapshot?.inventory ?? []).map(item => [item.uid, item]));
+  const existingStorageStacks = new Set(
+    storage.items.filter(item => !item.locked && isStackableItem(item, slots)).map(item => item.itemId),
+  );
+  const newStorageStacks = new Set();
   const items = [];
   let totalQty = 0;
+  let addedStorageSlots = 0;
   for (const [uid, qty] of pendingEntries) {
     if (!Number.isSafeInteger(uid) || !Number.isInteger(qty) || qty < 1) continue;
     const item = inventory.get(uid);
     if (!item || item.qty < qty || item.locked || equipped.has(uid)) {
-      throw new Error("待存倉的剛購裝備狀態已變更，請檢查背包。");
+      throw new Error("待存倉的剛購物品狀態已變更，請檢查背包。");
     }
     items.push({uid, qty});
     totalQty += qty;
+    const stackable = isStackableItem(item, slots);
+    if (stackable && (existingStorageStacks.has(item.itemId) || newStorageStacks.has(item.itemId))) {
+      // Merges into an existing unlocked stack in storage.
+    } else {
+      addedStorageSlots++;
+      if (stackable) newStorageStacks.add(item.itemId);
+    }
     if (items.length >= 100) break;
   }
   if (!items.length) {
     return {items: [], fee: 0, totalQty: 0};
   }
-  if (storage.items.length + items.length > storage.capacity) {
+  if (storage.items.length + addedStorageSlots > storage.capacity) {
     throw new Error("倉庫空間不足，無法自動存倉。");
   }
   return {items, fee, totalQty};
@@ -133,7 +288,7 @@ export function verifyDeposited(beforeInventory, afterInventory, depositedItems)
     const expected = (before.get(uid) ?? 0) - qty;
     const actual = after.get(uid) ?? 0;
     if (expected < 0 || actual !== expected) {
-      throw new Error("伺服器未確認剛買到的裝備已存入倉庫，請檢查背包與倉庫。");
+      throw new Error("伺服器未確認剛買到的物品已存入倉庫，請檢查背包與倉庫。");
     }
   }
 }
