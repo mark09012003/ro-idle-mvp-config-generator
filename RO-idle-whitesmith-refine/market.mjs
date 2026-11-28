@@ -40,7 +40,7 @@ export function marketPlan(response, slots, buyer, criteria, weights = null) {
       const isEquipment = def ? def.category === "equipment" : Object.hasOwn(slots ?? {}, item.itemId);
       const cardSlots = isEquipment ? (def ? def.cardSlots ?? 0 : slots[item.itemId]) : null;
       const rawWeight = Number.isFinite(def?.weight) ? def.weight : weights?.[item.itemId];
-      const unitWeight = Number.isFinite(rawWeight) && rawWeight > 0 ? rawWeight : null;
+      const unitWeight = Number.isFinite(rawWeight) && rawWeight >= 0 ? rawWeight : null;
       return {
         vendorId: shop.vendorId,
         seller: shop.vendorName,

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import {fileURLToPath} from "node:url";
-import {batchPlan, equipmentPlan, itemWeight, npcMetalPrice, planNextRefineWave} from "../refine.mjs";
+import {associateWithdrawnEquipment, batchPlan, equipmentPlan, itemWeight, nextRefineCommand, npcMetalPrice, planNextRefineWave, refineOutcome, restoreEquipment} from "../refine.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const catalog = JSON.parse(fs.readFileSync(path.join(dir, "..", "catalog.json"), "utf8"));
@@ -221,4 +221,52 @@ test("batchPlan and planNextRefineWave plan vending material buys with user caps
     () => batchPlan(view, storage, chosen, {useStorageMaterials: true, buyShopMetals: true, buyVendingMaterials: true, vendingCaps: {}}, catalog),
     /請設定「鋁」的攤位可接受單價上限/,
   );
+});
+
+test("associateWithdrawnEquipment, nextRefineCommand, refineOutcome, and restoreEquipment handle full refine lifecycle", async () => {
+  const before = makeView({
+    inventory: [
+      {uid: 1, itemId: 2315, qty: 1, refine: 4}, // originally worn armor (Whitesmith-equippable)
+      {uid: 2, itemId: 985, qty: 10},
+    ],
+  });
+  before.snapshot.equipment = {armor: 1};
+
+  const storageArmor = {sid: 55, itemId: 2315, qty: 1, refine: 4};
+  const plan = equipmentPlan(before, catalog, storageArmor, 5, "storage", "armor", true);
+  assert.equal(plan.needsEquip, true);
+
+  const afterWithdraw = structuredClone(before);
+  afterWithdraw.commandRevision = 11;
+  afterWithdraw.snapshot.inventory.push({uid: 77, itemId: 2315, qty: 1, refine: 4});
+  const [linked] = associateWithdrawnEquipment(before, afterWithdraw, [plan]);
+  assert.equal(linked.uid, 77);
+
+  // Equip temporary armor, generate refine command, verify success and restore original armor
+  const equippedView = structuredClone(afterWithdraw);
+  equippedView.commandRevision = 12;
+  equippedView.snapshot.equipment = {armor: 77};
+  const cmd = nextRefineCommand(equippedView, catalog, linked, 77, 4);
+  assert.deepEqual(cmd.command, {type: "refine", uid: 77});
+
+  const refinedView = structuredClone(equippedView);
+  refinedView.commandRevision = 13;
+  refinedView.snapshot.inventory.find(i => i.uid === 77).refine = 5;
+  assert.equal(refineOutcome(refinedView, linked, 4), "success");
+
+  const brokenView = structuredClone(equippedView);
+  brokenView.snapshot.inventory = brokenView.snapshot.inventory.filter(i => i.uid !== 77);
+  assert.equal(refineOutcome(brokenView, linked, 4), "failure");
+
+  const sent = [];
+  const restored = await restoreEquipment(refinedView, {armor: 1}, 77, catalog, async (cur, command) => {
+    sent.push(command);
+    const next = structuredClone(cur);
+    next.commandRevision++;
+    if (command.type === "unequip") delete next.snapshot.equipment[command.slot];
+    if (command.type === "equip") next.snapshot.equipment.armor = command.uid;
+    return next;
+  });
+  assert.deepEqual(sent, [{type: "unequip", slot: "armor"}, {type: "equip", uid: 1}]);
+  assert.equal(restored.snapshot.equipment.armor, 1);
 });

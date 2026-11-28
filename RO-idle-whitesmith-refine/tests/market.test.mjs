@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import {fileURLToPath} from "node:url";
 import {
   diffPurchasedBatch,
   diffPurchasedItems,
@@ -11,6 +14,8 @@ import {
   verifyDeposited,
   wouldExceedMaxWeight,
 } from "../market.mjs";
+
+const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("marketPlan attaches unitWeight when definition has weight", () => {
   const response = {
@@ -217,4 +222,24 @@ test("diffPurchasedBatch verifies multi-order batch and planAutoDeposit merges s
   };
   const plan = planAutoDeposit(snapshot, fullStorage, [[5, 20]]);
   assert.deepEqual(plan, {items: [{uid: 5, qty: 20}], fee: 40, totalQty: 20});
+});
+
+test("market-weights.json covers all market-slots and rebind-items including fractional arrows and 0-weight batching", () => {
+  const weights = JSON.parse(fs.readFileSync(path.join(dir, "market-weights.json"), "utf8"));
+  const slots = JSON.parse(fs.readFileSync(path.join(dir, "market-slots.json"), "utf8"));
+  const rebind = JSON.parse(fs.readFileSync(path.join(dir, "rebind-items.json"), "utf8"));
+  for (const id of Object.keys(slots)) {
+    assert.ok(Number.isFinite(weights[id]), `missing weight for slot item ${id}`);
+  }
+  for (const id of Object.keys(rebind)) {
+    assert.ok(Number.isFinite(weights[id]), `missing weight for rebind item ${id}`);
+  }
+  assert.equal(weights["1750"], 0.1);
+
+  const zeroWeightQueue = [
+    {vendorId: 1, seller: "A", item: {cartUid: 1, itemId: 9007, price: 100}, qty: 1, isEquipment: false, unitWeight: 0},
+    {vendorId: 1, seller: "A", item: {cartUid: 2, itemId: 9008, price: 100}, qty: 1, isEquipment: false, unitWeight: 0},
+  ];
+  const batch = takeVendorBatch(zeroWeightQueue, {weight: 100, derived: {weightMax: 2000}, inventory: []}, true);
+  assert.equal(batch.length, 2);
 });

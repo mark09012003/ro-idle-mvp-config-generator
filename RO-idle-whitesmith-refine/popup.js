@@ -668,7 +668,8 @@ async function searchMarket(role, criteria) {
 function lockMarket(locked) {
   busy = locked;
   $("market-fields").disabled = locked;
-  mode.disabled = target.disabled = gear.disabled = refresh.disabled = locked;
+  mode.disabled = locked || needsRefresh;
+  target.disabled = gear.disabled = refresh.disabled = locked;
   setRefineSupplyDisabled(locked);
   if (locked) start.disabled = true;
   else if (view) updateMode(true);
@@ -1000,6 +1001,9 @@ async function applyRebind() {
     if (profile) {
       const existing = fresh.snapshot.profiles?.find(entry => entry.name === profileName);
       if (Boolean(existing) === create) throw new Error("同名配置狀態已變更，請重新預覽確認。");
+      if (create && (fresh.snapshot.profiles?.length ?? 0) >= 10) {
+        throw new Error(`目前角色已存滿 10 個配置檔，請先刪除一個配置再建立「${profileName}」。`);
+      }
       await saveAndApplyHandoff(fresh, {...profile, equipRules});
     } else {
       const reply = await handoffCommand(fresh, {type:"updateConfig", config:{...fresh.snapshot.config, equipRules}});
