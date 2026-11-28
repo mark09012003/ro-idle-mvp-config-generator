@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const ASSET_VER = "20261128-6";
+const ASSET_VER = "20261128-7";
 const MAX_REBIRTHS = 11;
 const EXTRA_STAT_PER_REBIRTH = 20;
 const host = "https://ro-idle.app";
@@ -895,18 +895,21 @@ function setSkillLevel(skillId, targetLv) {
   c.skills = nextMap;
   // Sync auto-cast skills levels if configured
   if (snapshot.config?.skills) {
+    const copied = c.plagiarized;
+    const availableLevel = id => c.skills[id] ||
+      (copied?.skill === id ? Math.min(copied.lv, c.skills.RG_PLAGIARISM ?? 0) : 0);
     snapshot.config.skills = snapshot.config.skills
-      .filter(s => (c.skills[s.skill] ?? 0) > 0)
-      .map(s => ({...s, lv: Math.min(s.lv, c.skills[s.skill])}));
+      .filter(s => availableLevel(s.skill) > 0)
+      .map(s => ({...s, lv: Math.min(s.lv, availableLevel(s.skill))}));
   }
   $("status").textContent = "";
   renderSkillTree();
   void refreshAttackSkillsAndStats();
 }
 
-function toggleAutoCastSkill(skillId, enabled) {
+function toggleAutoCastSkill(skillId, enabled, copiedLevel = 0) {
   if (!snapshot) return;
-  const lv = snapshot.character.skills?.[skillId] ?? 0;
+  const lv = snapshot.character.skills?.[skillId] || copiedLevel;
   snapshot.config.skills = (snapshot.config.skills ?? []).filter(s => !(s.skill === skillId && s.use === "attack"));
   if (enabled && lv > 0) {
     snapshot.config.skills.push({skill: skillId, lv, use: "attack", percent: 0, enabled: true});
@@ -1346,11 +1349,52 @@ function renderSkillTreeGraph(jobDef, matchSet, autoCastSet, skillNameById) {
   ));
 }
 
+function renderPlagiarismSettings(character) {
+  const copyLevel = character.skills?.RG_PLAGIARISM ?? 0;
+  const box = $("plagiarism-settings");
+  box.hidden = copyLevel < 1;
+  if (box.hidden) return;
+  const available = (builderInfo.copyableSkills ?? []).filter(skill => !character.skills?.[skill.id]);
+  const selection = $("plagiarism-skill");
+  selection.replaceChildren(new Option("不指定抄襲技能", ""), ...available.map(skill => new Option(skill.name, skill.id)));
+  const copied = available.find(skill => skill.id === character.plagiarized?.skill);
+  selection.value = copied?.id ?? "";
+  const max = copied ? Math.min(copyLevel, copied.maxLv) : 0;
+  const level = $("plagiarism-level");
+  level.replaceChildren(...Array.from({length:max}, (_, index) => new Option(`Lv.${index + 1}`, index + 1)));
+  level.disabled = !max;
+  const effective = Math.min(character.plagiarized?.lv ?? 0, max);
+  level.value = effective ? String(effective) : "";
+  $("plagiarism-desc").textContent = copied ? skillDescriptionAt(copied, effective) : "";
+  $("plagiarism-auto-wrap").hidden = !copied?.attack;
+  const auto = $("plagiarism-auto");
+  auto.checked = Boolean(copied && snapshot.config.skills?.some(rule => rule.skill === copied.id && rule.use === "attack" && rule.enabled !== false));
+  auto.onchange = () => toggleAutoCastSkill(copied.id, auto.checked, effective);
+  function save(skill, lv) {
+    const previous = character.plagiarized;
+    if (previous && previous.skill !== skill?.id && !character.skills?.[previous.skill]) {
+      snapshot.config.skills = (snapshot.config.skills ?? []).filter(rule => rule.skill !== previous.skill);
+    }
+    if (skill) {
+      character.plagiarized = {skill: skill.id, lv};
+      for (const rule of snapshot.config.skills ?? []) if (rule.skill === skill.id) rule.lv = Math.min(rule.lv, lv);
+    } else delete character.plagiarized;
+    renderPlagiarismSettings(character);
+    void refreshAttackSkillsAndStats();
+  }
+  selection.onchange = () => {
+    const skill = available.find(entry => entry.id === selection.value);
+    save(skill, skill ? Math.min(copyLevel, skill.maxLv) : 0);
+  };
+  level.onchange = () => { if (copied) save(copied, Number(level.value)); };
+}
+
 function renderSkillTree() {
   if (!snapshot || !builderInfo) return;
   const c = snapshot.character;
   const jobDef = jobMap.get(c.job);
   if (!jobDef) return;
+  renderPlagiarismSettings(c);
   const used = spentSkillPoints(jobDef, c.skills ?? {});
   const maxPts = totalSkillPointsFor(jobDef, c.jobLv, currentFirstJobLv);
   const remain = maxPts - used;

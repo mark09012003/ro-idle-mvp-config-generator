@@ -12,8 +12,8 @@
       }
     } catch {}
   </script>
-  <link rel="stylesheet" href="popup.css?v=20261128-6">
-  <script type="module" src="popup.js?v=20261128-6"></script>
+  <link rel="stylesheet" href="popup.css?v=20261128-7">
+  <script type="module" src="popup.js?v=20261128-7"></script>
 </head>
 <body>
   <div class="shell">
@@ -276,6 +276,17 @@
               </div>
             </div>
             <p id="skill-view-hint" class="hint">點擊技能或「＋」會自動補足前置等級（綠色實線箭頭＝已達成，虛線箭頭＝未達成）；右鍵或「−」降級。</p>
+            <section id="plagiarism-settings" class="skill-inspector" hidden>
+              <div class="skill-inspector-main">
+                <strong>抄襲技能</strong>
+                <div class="form-grid-2">
+                  <label class="field"><span>技能</span><select id="plagiarism-skill"></select></label>
+                  <label class="field"><span>等級</span><select id="plagiarism-level"></select></label>
+                </div>
+                <p id="plagiarism-desc" class="skill-inspector-desc"></p>
+                <label class="check" id="plagiarism-auto-wrap" hidden><input type="checkbox" id="plagiarism-auto"> 掛機施放</label>
+              </div>
+            </section>
 
             <!-- Visual RO Skill Tree Graph View -->
             <div id="skill-tree-graph-wrap" class="skill-graph-wrap">

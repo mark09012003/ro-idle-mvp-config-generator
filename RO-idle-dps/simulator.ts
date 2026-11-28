@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import { createGameState, type GameState, type ActiveMonster, type ActiveBuff } from "./src/game/sim/state";
-import { autoEquipFor, derived, equipBagAmmo, monsterAttack, moveTime, nextEventTime, observeDamage, performMobSkill, processAt, receiveHealing, setDamageImmunity } from "./src/game/sim/engine";
+import { autoEquipFor, derived, equipBagAmmo, monsterAttack, moveTime, nextEventTime, observeDamage, performMobSkill, plagiarizable, processAt, receiveHealing, setDamageImmunity } from "./src/game/sim/engine";
 import { SONGS, type PerformerCtx } from "./src/game/combat/songs";
 import { defaultAutoConfig } from "./src/game/ai/config";
 import { MONSTERS, type MonsterDef } from "./src/game/data/monsters";
@@ -124,12 +124,20 @@ export function builderCatalog() {
   return {
     jobs,
     pets,
+    copyableSkills: [...SKILLS.values()].filter(skill => plagiarizable(skill.id)).map(skill => ({
+      id: skill.id, name: skill.name, maxLv: skill.maxLv, attack: canAttackWithSkill(skill.id), descs: skill.descs ?? [],
+    })),
     defaultConfig: defaultAutoConfig(),
   };
 }
 
 export function attackSkills(snapshot: GameSnapshot) {
-  return Object.entries(snapshot.character.skills ?? {}).flatMap(([id, lv]) => {
+  const learned = {...snapshot.character.skills};
+  const copy = snapshot.character.plagiarized;
+  if (copy && plagiarizable(copy.skill)) {
+    learned[copy.skill] = Math.max(learned[copy.skill] ?? 0, Math.min(copy.lv, learned.RG_PLAGIARISM ?? 0));
+  }
+  return Object.entries(learned).flatMap(([id, lv]) => {
     const skill = SKILLS.get(id);
     return skill && lv > 0 && canAttackWithSkill(id) ? [{id, name: skill.name, lv, descs: skill.descs ?? []}] : [];
   });
