@@ -1011,6 +1011,21 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 .preview-checklist { margin: 0 0 10px; padding: 8px 10px; border-left: 3px solid var(--gold); border-radius: 4px; background: var(--using); font-size: 12px; line-height: 1.55; color: var(--ink); }
 .preview-checklist[data-warn="true"] { border-left-color: var(--danger); color: var(--danger); }
 .preview-checklist ol { margin: 4px 0 0; padding-inline-start: 1.4em; }
+.health-check { margin: 0 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); overflow: hidden; }
+.health-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 7px 10px; background: var(--paper); border-bottom: 1px solid var(--line); }
+.health-head strong { font-size: 13px; color: var(--title); }
+.health-counts { display: flex; flex-wrap: wrap; gap: 5px; font-size: 11.5px; font-weight: 600; }
+.health-pill { padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); background: var(--head); color: var(--dim); }
+.health-pill.is-error { border-color: var(--danger); color: var(--danger); }
+.health-pill.is-warn { border-color: var(--gold); color: var(--title); background: var(--using); }
+.health-pill.is-ok { border-color: var(--accent); color: var(--accent); background: var(--using); }
+.health-list { margin: 0; padding: 6px 10px 8px; list-style: none; display: grid; gap: 5px; font-size: 12px; line-height: 1.5; }
+.health-item { padding: 5px 8px; border-radius: 4px; border-left: 3px solid var(--line); background: var(--paper); color: var(--ink); }
+.health-item.is-error { border-left-color: var(--danger); color: var(--danger); }
+.health-item.is-warn { border-left-color: var(--gold); }
+.health-item.is-info { border-left-color: var(--accent); color: var(--dim); }
+.health-item.is-ok { border-left-color: var(--accent); background: var(--using); color: var(--title); font-weight: 600; }
+.health-tag { display: inline-block; margin-inline-end: 6px; font-weight: 700; }
 .route-next.route-next-warn { color: var(--danger); font-weight: 600; }
 .map-in-route-badge { display: inline-block; margin-inline-start: 6px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 600; background: var(--using); border: 1px solid var(--line); color: var(--accent); }
 #route > li { margin-bottom: 6px; }
@@ -1471,6 +1486,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 </select></label>
 </div>
 <p id="preview-note" class="section-help">展開每份配置，核對等待、離圖和配置切換順序。下載後按配置名稱在遊戲中儲存，從 01 開始。</p>
+<div id="health-check" class="health-check" aria-live="polite"></div>
 <div class="actions"><button class="btn primary" type="submit">產生預覽</button><button class="btn" id="download" type="button" disabled>下載 ZIP</button><button class="btn" id="download-all-modes" type="submit">匯出三種模式 ZIP</button><button class="btn" id="preview-share-config" type="button">分享整套配置</button></div>
 <p class="section-help">三種角色共用路線與隊伍人數，並各自套用自己的進階設定。</p>
 <p id="status" role="status"></p>
@@ -1655,6 +1671,9 @@ SOFTWARE.
     const baseMacros = [...firstMacros, ...lastMacros];
     const partySize = Number(options.partySize);
     if (!Number.isInteger(partySize) || partySize < 1 || partySize > 12) throw new Error("隊伍總人數請填 1～12 人。");
+    if (options.mode === "follower" && partySize < 2) {
+      throw new Error("輔助與協助模式須搭配 2 人以上隊伍才能跟隨換圖；單人掛機請使用「帶隊角色」模式。");
+    }
     const teammateThreshold = partySize - 1;
     const partyBelow = options.mode === "follower" && partySize > 1 ? teammateThreshold : null;
     const buff = options.buff.trim().toUpperCase();
@@ -1948,17 +1967,182 @@ SOFTWARE.
     return bytesToBase64Url(bytes);
   }
 
+  const maxShareTokenChars = 120_000;
+  const maxShareInflatedBytes = 512 * 1024;
+
   function decodeShareToken(token, codec = globalThis.fflate) {
     try {
+      if (String(token ?? "").length > maxShareTokenChars) {
+        throw new Error("分享連結資料過大，已拒絕載入。");
+      }
       const bytes = base64UrlToBytes(token);
-      const text = codec.strFromU8(codec.inflateSync(bytes));
+      let total = 0;
+      const chunks = [];
+      const inflater = new codec.Inflate((chunk, final) => {
+        total += chunk.length;
+        if (total > maxShareInflatedBytes) throw new Error("解壓後資料超過安全上限。");
+        chunks.push(chunk);
+      });
+      inflater.push(bytes, true);
+      const merged = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        merged.set(chunk, offset);
+        offset += chunk.length;
+      }
+      const text = codec.strFromU8(merged);
       return JSON.parse(text);
-    } catch {
+    } catch (error) {
+      if (/過大|安全上限/.test(error?.message)) throw error;
       throw new Error("分享連結資料損壞或格式不正確，請確認已完整複製。");
     }
   }
 
-  globalThis.RoConfigBuilder = {validateBase, generate, planSegments, parseRoutePlan, encodeShareToken, decodeShareToken};
+  const jobFamilyBuffGroups = {
+    monk: ["acolyte", "monk"],
+    priest: ["acolyte", "priest"],
+    knight: ["swordman", "knight"],
+    crusader: ["swordman", "crusader"],
+    wizard: ["mage", "wizard"],
+    sage: ["mage", "sage"],
+    hunter: ["archer", "hunter"],
+    bard: ["archer", "bard"],
+    dancer: ["archer", "dancer"],
+    assassin: ["thief", "assassin"],
+    rogue: ["thief", "rogue"],
+    blacksmith: ["merchant", "blacksmith"],
+    alchemist: ["merchant", "alchemist"],
+  };
+
+  function runHealthCheck(state) {
+    const items = [];
+    const add = (level, text) => items.push({level, text});
+    const {
+      route = [], partySize, targetJob, buff, buffBeforeMove, waitPosition,
+      combatMode, groupSize, macros = [], roleActions = {}, customCombat = false,
+      onlyMvp = true, itemSettings = null, hasUnsavedLootEdits = false, buffJobs = [],
+    } = state;
+
+    const pSize = Number(partySize);
+    if (!Number.isInteger(pSize) || pSize < 1 || pSize > 12) {
+      add("error", "尚未選擇「隊伍總人數」（1～12 人）。");
+    }
+    if (!targetJob) {
+      add("error", "尚未選擇「帶隊角色職業」。");
+    }
+    if (!buff) {
+      add("error", "尚未選擇帶隊換圖判斷用的「Buff」（必填）。");
+    }
+    if (!["top", "bottom"].includes(waitPosition)) {
+      add("error", "尚未選擇「死亡後的行為」。");
+    }
+    if (!route.length) {
+      add("error", "尚未加入任何巡迴地圖。");
+    }
+    if (Number.isInteger(pSize) && pSize === 1 && combatMode !== "output") {
+      add("error", "隊伍總人數為 1 人時，不可使用「輔助／協助角色」模式（單人請改選「帶隊角色」）。");
+    }
+
+    // Adjacent duplicate check
+    if (route.length > 1) {
+      for (let i = 0; i < route.length; i++) {
+        const cur = route[i];
+        const nextRow = route[(i + 1) % route.length];
+        if (cur.map.id === nextRow.map.id) {
+          const where = i === route.length - 1
+            ? `末站（${String(i + 1).padStart(2, "0")}）回到起點（01）`
+            : `第 ${String(i + 1).padStart(2, "0")} 與第 ${String(i + 2).padStart(2, "0")} 站`;
+          add("error", `${where}為同一張地圖「${cur.map.name}」，相鄰不可重複，請穿插其他地圖或調整順序。`);
+          break;
+        }
+      }
+    }
+
+    // Segmentation & macro cap check
+    let groups = [];
+    if (route.length) {
+      try {
+        const planned = planSegments(route, {
+          macros,
+          partySize: Number.isInteger(pSize) ? pSize : 1,
+          groupSize: Number(groupSize) || 8,
+          customCombat,
+          onlyMvp,
+          mode: combatMode === "output" ? "leader" : "follower",
+          supportOnly: combatMode === "support",
+        });
+        groups = planned.groups;
+        if (groups.length > 10) {
+          add("error", `目前將切分為 ${groups.length} 份配置檔，超過遊戲單角色 10 份上限，請減少重複切段或縮短路線。`);
+        } else if (groups.length > 1) {
+          const names = groups.map(g => g.name).join("、");
+          add("info", `路線將自動切分為 ${groups.length} 份配置（${names}），遊戲內請嚴格依編號儲存，全員從 01 啟動。`);
+        }
+      } catch (error) {
+        add("error", error.message);
+      }
+    }
+
+    // Buff vs leader job mismatch when buffBeforeMove is enabled
+    if (buffBeforeMove && buff && targetJob && buffJobs.length) {
+      const allowedGroups = new Set(jobFamilyBuffGroups[targetJob] ?? []);
+      const allowedBuffs = new Set(
+        buffJobs.filter(j => allowedGroups.has(j.id)).flatMap(j => j.buffs.map(([id]) => id)),
+      );
+      if (allowedGroups.size && !allowedBuffs.has(buff)) {
+        const buffLabel = buffJobs.flatMap(j => j.buffs).find(([id]) => id === buff)?.[1] ?? buff;
+        add("warn", `已勾選「換圖前自己補 Buff」，但「${buffLabel}」不屬於所選帶隊職業的技能；若角色無法施放會卡在原圖，請取消自補或改選本職 Buff。`);
+      }
+    }
+
+    // Fly / Butterfly wing departure without configured restock/townBuy
+    const suppliedIds = new Set([
+      ...(itemSettings?.config?.restock ?? []).map(r => r.itemId),
+      ...(itemSettings?.config?.townBuy ?? []).map(r => r.itemId),
+    ]);
+    const wingRoles = [];
+    for (const [label, action] of Object.entries(roleActions)) {
+      if (action === "fly" && !suppliedIds.has(601)) wingRoles.push(`${label}（蒼蠅翅膀）`);
+      if (action === "butterfly" && !suppliedIds.has(602)) wingRoles.push(`${label}（蝴蝶翅膀）`);
+    }
+    if (wingRoles.length) {
+      add("warn", `${wingRoles.join("、")} 換圖前會消耗翅膀，且未在「掉落物篩選」設定補貨；若背包用完翅膀會導致換圖巨集中斷卡圖，請確認遊戲內已開啟自動補貨或改為「直接換圖」。`);
+    }
+
+    // Maps with 0 targets selected while onlyMvp is enabled
+    if (onlyMvp && route.length) {
+      const emptyTargetMaps = [...new Set(route.filter(r => !r.targets?.length).map(r => r.map.name))];
+      if (emptyTargetMaps.length) {
+        const sample = emptyTargetMaps.slice(0, 3).join("、") + (emptyTargetMaps.length > 3 ? ` 等 ${emptyTargetMaps.length} 張` : "");
+        add("warn", `已開啟「只找勾選的怪物」，但 ${sample} 目前未勾選任何怪物（走到該圖不會主動打怪，只會待到換圖）。`);
+      }
+    }
+
+    // Per-monster smallRules present while customCombat is off
+    const hasPerMapRules = route.some(r => Object.values(r.smallRules ?? {}).some(rule => rule?.action || rule?.escape !== undefined));
+    if (hasPerMapRules && !customCombat) {
+      add("warn", "部分地圖已填寫個別怪物規則，但尚未勾選「啟用自訂攻擊、逃生與選怪規則」，匯出時這些個別規則不會生效。");
+    }
+
+    // Unapplied loot edits
+    if (hasUnsavedLootEdits) {
+      add("warn", "「掉落物篩選」中有尚未按「套用到巡迴」的修改，目前匯出不會包含這些道具設定。");
+    }
+
+    // Single map note
+    if (route.length === 1) {
+      add("info", "目前只加入 1 張地圖，匯出後角色會停留在此地圖定點掛機，不會換圖。");
+    }
+
+    // Party uniqueness reminder
+    if (Number.isInteger(pSize) && pSize >= 2) {
+      add("info", "多人群組巡迴時，請確保隊伍中「帶隊職業」只有 1 人，避免輔助／協助誤判同職業隊友。");
+    }
+
+    return items;
+  }
+
+  globalThis.RoConfigBuilder = {validateBase, generate, planSegments, parseRoutePlan, encodeShareToken, decodeShareToken, runHealthCheck};
 })();
 
 </script>
@@ -1991,6 +2175,7 @@ function clearPreview() {
   byId("preview").replaceChildren();
   byId("download").disabled = true;
   status("");
+  renderHealthCheck();
 }
 
 const itemSectionKeys = {
@@ -3637,6 +3822,91 @@ function renderOperations() {
   return fragment;
 }
 
+function renderHealthCheck() {
+  const host = byId("health-check");
+  if (!host || !byId("role-output-action")) return;
+  const roleId = byId("combatMode")?.value || "output";
+  const customCombatChecked = checked(roleId === "output" ? "customCombat" : `role-${roleId}-customCombat`);
+  const onlyMvpChecked = customCombatChecked
+    ? checked(roleId === "output" ? "onlyMvp" : `role-${roleId}-onlyMvp`)
+    : roleId !== "support";
+  let macros = customMacros;
+  try {
+    const parsed = JSON.parse(value("macros"));
+    if (Array.isArray(parsed)) macros = parsed;
+  } catch {}
+  const roleActions = Object.fromEntries(combatRoles.map(({id, label}) => [label, byId(`role-${id}-action`)?.value ?? ""]));
+  let hasUnsavedLootEdits = false;
+  if (lootEdit) {
+    const editedCount = lootEdit.sell.size + lootEdit.store.size + lootEdit.warehouse.size + lootEdit.shop.size;
+    if (editedCount > 0) {
+      const currentSnap = JSON.stringify(buildItemSettings().config);
+      const appliedSnap = itemSettings ? JSON.stringify(itemSettings.config) : "";
+      hasUnsavedLootEdits = currentSnap !== appliedSnap;
+    }
+  }
+  const findings = RoConfigBuilder.runHealthCheck({
+    route,
+    partySize: value("partySize"),
+    targetJob: value("targetJob"),
+    buff: value("buff"),
+    buffBeforeMove: !byId("buffBeforeMove").disabled && checked("buffBeforeMove"),
+    waitPosition: value("waitPosition"),
+    combatMode: roleId,
+    groupSize: value("groupSize"),
+    macros,
+    roleActions,
+    customCombat: customCombatChecked,
+    onlyMvp: onlyMvpChecked,
+    itemSettings,
+    hasUnsavedLootEdits,
+    buffJobs,
+  });
+
+  const errors = findings.filter(f => f.level === "error").length;
+  const warns = findings.filter(f => f.level === "warn").length;
+  const head = element("div", "");
+  head.className = "health-head";
+  head.append(element("strong", "設定健檢（即時）"));
+  const counts = element("div", "");
+  counts.className = "health-counts";
+  if (errors) {
+    const p = element("span", `須修正 ${errors}`);
+    p.className = "health-pill is-error";
+    counts.append(p);
+  }
+  if (warns) {
+    const p = element("span", `風險提醒 ${warns}`);
+    p.className = "health-pill is-warn";
+    counts.append(p);
+  }
+  if (!errors && !warns) {
+    const p = element("span", "無阻礙與高風險項");
+    p.className = "health-pill is-ok";
+    counts.append(p);
+  }
+  head.append(counts);
+
+  const list = element("ul", "");
+  list.className = "health-list";
+  const labels = {error: "須修正", warn: "提醒", info: "說明"};
+  if (!errors && !warns) {
+    const okRow = element("li", "");
+    okRow.className = "health-item is-ok";
+    okRow.textContent = "基本檢查通過，可直接按「產生預覽」確認並下載。";
+    list.append(okRow);
+  }
+  for (const item of findings) {
+    const li = element("li", "");
+    li.className = `health-item is-${item.level}`;
+    const tag = element("span", `[${labels[item.level]}]`);
+    tag.className = "health-tag";
+    li.append(tag, item.text);
+    list.append(li);
+  }
+  host.replaceChildren(head, list);
+}
+
 function renderPreview() {
   const nodes = [];
   if (results.length > 1) {
@@ -3984,6 +4254,9 @@ byId("generator").onsubmit = event => {
       options[id] = value(id);
     }
     if (exportAll) {
+      if (Number(options.partySize) < 2) {
+        throw new Error("單人（1 人）模式不需要輔助與協助配置，請直接點「產生預覽」並「下載 ZIP」。");
+      }
       const leaderSkill = leaderBuffs().find(([id]) => id === options.buff);
       const leaderPrecast = leaderSkill && leaderSkill[2].scope !== "others" && checked("buffBeforeMove");
       const perRole = combatRoles.map(({id, label, mode, supportOnly}) => {
@@ -4201,11 +4474,28 @@ function applyFullConfigObject(draft, {resetFirst = false} = {}) {
   const mapsById = new Map(maps.map(map => [map.id, map]));
   for (const row of draft.route ?? []) {
     const map = mapsById.get(row.mapId);
-    if (map) route.push({map, targets: [...(row.targets ?? [])], smallRules: structuredClone(row.smallRules ?? {})});
+    if (!map) continue;
+    const validMonIds = new Set(map.monsters.map(m => m.id));
+    const safeTargets = (Array.isArray(row.targets) ? row.targets : [])
+      .filter(id => Number.isInteger(id) && validMonIds.has(id));
+    const safeRules = {};
+    if (row.smallRules && typeof row.smallRules === "object" && !Array.isArray(row.smallRules)) {
+      for (const [k, rule] of Object.entries(row.smallRules)) {
+        if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
+        const monId = Number(k);
+        if (!validMonIds.has(monId) || !rule || typeof rule !== "object") continue;
+        const clean = {};
+        if (["attack", "priority", "defend", "lure"].includes(rule.action)) clean.action = rule.action;
+        if (["", "sight", "attacked", "afterTarget"].includes(rule.escape)) clean.escape = rule.escape;
+        if (Object.keys(clean).length) safeRules[monId] = clean;
+      }
+    }
+    route.push({map, targets: safeTargets, smallRules: safeRules});
   }
   for (const id of draft.selectedMaps ?? []) if (mapsById.has(id)) selectedMaps.add(id);
   if (fields) {
     for (const field of draftFields()) {
+      if (!Object.hasOwn(fields, field.id)) continue;
       const saved = fields[field.id];
       if (field.type === "checkbox" && typeof saved === "boolean") field.checked = saved;
       else if (field.type !== "checkbox" && typeof saved === "string" && field.id !== "buff") {
@@ -4218,7 +4508,10 @@ function applyFullConfigObject(draft, {resetFirst = false} = {}) {
   populateLeaderBuffs(fields?.buff);
   if (typeof savedBuffLevel === "string") byId("routeBuffLevel").value = savedBuffLevel;
   if (Array.isArray(draft.customMacros)) {
-    customMacros = structuredClone(draft.customMacros).map(normalizeMacroActions);
+    customMacros = structuredClone(draft.customMacros)
+      .filter(m => m && typeof m === "object" && !Array.isArray(m) && Array.isArray(m.steps))
+      .slice(0, 10)
+      .map(normalizeMacroActions);
     byId("macros").value = JSON.stringify(customMacros, null, 2);
   }
   if (draft.itemSettings) setItemSettings(readItemSettings(draft.itemSettings));
@@ -4454,9 +4747,10 @@ Promise.all([loadCatalog(), loadBuffJobs()]).then(() => {
   for (const {id} of combatRoles) renderRouteOr(id);
   renderRoute();
   renderMapChoices();
+  renderHealthCheck();
   routeDraftReady = maps.length > 0;
   applySharedHashOnLoad();
-  byId("generator").addEventListener("change", saveRouteDraft);
+  byId("generator").addEventListener("change", () => { renderHealthCheck(); saveRouteDraft(); });
   window.addEventListener("pagehide", saveRouteDraft);
 });
 
