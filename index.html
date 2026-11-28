@@ -1003,6 +1003,12 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 .route-multi-notice summary { cursor: pointer; font-weight: 700; color: var(--title); }
 .route-multi-notice ul { margin: 6px 0 0; padding-inline-start: 1.4em; color: var(--dim); }
 .route-multi-notice li { margin-bottom: 2px; }
+.route-io-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 7px 0; }
+.route-io-actions .check { margin: 0 0 0 4px; font-size: 12px; color: var(--dim); }
+#route-io-text { width: 100%; min-height: 118px; margin: 4px 0 6px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; }
+#route-io-status { margin: 4px 0 0; font-size: 12px; color: var(--dim); }
+#route-io-status[data-error="true"] { color: #b91c1c; font-weight: 600; }
+:root[data-theme="dark"] #route-io-status[data-error="true"] { color: #fca5a5; }
 .preview-checklist { margin: 0 0 10px; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--line); border-left: 3px solid var(--gold); background: var(--using); font-size: 12.5px; line-height: 1.55; }
 .preview-checklist[data-warn="true"] { border-left-color: #b91c1c; background: #fef2f2; color: #991b1b; }
 :root[data-theme="dark"] .preview-checklist[data-warn="true"] { border-left-color: #f87171; background: #3b1c1c; color: #fecaca; }
@@ -1352,6 +1358,25 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
     <li>帶隊／輔助／協助須各自匯入對應資料夾的 <code>01</code>～末份配置，全員統一先套用 <strong><code>01</code></strong> 再開始掛機。</li>
     <li>中途死亡或回城補給後，角色會回到<strong>當下所在配置的第一張圖</strong>繼續往下巡迴。</li>
   </ul>
+</details>
+<details id="route-io-details" class="route-multi-notice">
+  <summary>匯出／匯入巡迴路線（可交給 AI 編排再貼回）</summary>
+  <p class="section-help">按「複製 AI 填寫模板」可直接貼給 ChatGPT／Gemini／Claude 幫你排順序（含重複巡迴與目標怪物），再把 AI 回覆的 JSON 貼到下方按「套用匯入」即可。</p>
+  <div class="route-io-actions">
+    <button class="btn tiny primary" id="route-io-copy-ai" type="button">複製 AI 填寫模板（含地圖對照）</button>
+    <button class="btn tiny" id="route-io-copy-json" type="button">複製目前路線 JSON</button>
+    <button class="btn tiny" id="route-io-download" type="button">下載 JSON</button>
+    <button class="btn tiny" id="route-io-upload-btn" type="button">從檔案載入</button>
+    <input id="route-io-file" type="file" accept=".json,.txt,application/json,text/plain" hidden>
+    <label class="check"><input id="route-io-include-all" type="checkbox"> AI 模板附全部 254 張地圖</label>
+  </div>
+  <textarea id="route-io-text" rows="6" spellcheck="false" placeholder="貼上巡迴路線 JSON，或直接貼上 AI 回覆的 ```json ... ``` 區塊，再按「套用匯入」。"></textarea>
+  <div class="route-io-actions">
+    <button class="btn tiny primary" id="route-io-import" type="button">套用匯入路線</button>
+    <button class="btn tiny" id="route-io-fill-current" type="button">將目前路線填入文字框</button>
+    <button class="btn tiny" id="route-io-clear" type="button">清空文字框</button>
+  </div>
+  <p id="route-io-status" role="status"></p>
 </details>
 <p id="empty-route">勾選地圖後，按「加入巡迴」。</p>
 <ol id="route" role="list" aria-labelledby="route-title"></ol>
@@ -1753,7 +1778,128 @@ SOFTWARE.
     });
   }
 
-  globalThis.RoConfigBuilder = {validateBase, generate, planSegments};
+  const validEscapes = new Set(["", "sight", "attacked", "afterTarget"]);
+
+  function extractJsonPayload(rawText) {
+    const text = String(rawText ?? "").trim();
+    if (!text) throw new Error("請先貼上巡迴路線 JSON。");
+    const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map(m => m[1].trim()).filter(Boolean);
+    const candidates = [...fenced, text];
+    for (const candidate of candidates) {
+      try { return JSON.parse(candidate); } catch {}
+    }
+    // Fallback: locate outermost JSON object or array within prose
+    const firstObj = text.indexOf("{");
+    const firstArr = text.indexOf("[");
+    const starts = [firstObj, firstArr].filter(i => i >= 0).sort((a, b) => a - b);
+    for (const start of starts) {
+      const close = text[start] === "{" ? text.lastIndexOf("}") : text.lastIndexOf("]");
+      if (close > start) {
+        try { return JSON.parse(text.slice(start, close + 1)); } catch {}
+      }
+    }
+    throw new Error("無法解析 JSON 格式，請確認已完整複製 JSON 或 ```json``` 區塊。");
+  }
+
+  function cleanMonsterLabel(name) {
+    return String(name ?? "").replace(/[（(][^）)]*[）)]/g, "").trim().toLowerCase();
+  }
+
+  function parseRoutePlan(rawText, catalogMaps, isMvpFn) {
+    const parsed = extractJsonPayload(rawText);
+    const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.route) ? parsed.route : null;
+    if (!items || !items.length) {
+      throw new Error("JSON 內找不到非空的路線陣列（應為陣列或含 route 欄位的物件）。");
+    }
+    const byId = new Map(catalogMaps.map(m => [m.id.toLowerCase(), m]));
+    const byName = new Map(catalogMaps.map(m => [m.name.trim().toLowerCase(), m]));
+    const resolveMap = ref => {
+      const key = String(ref ?? "").trim().toLowerCase();
+      if (!key) return null;
+      if (byId.has(key)) return byId.get(key);
+      if (byName.has(key)) return byName.get(key);
+      const partial = catalogMaps.filter(m => m.name.toLowerCase().includes(key));
+      return partial.length === 1 ? partial[0] : null;
+    };
+    const warnings = [];
+    let hasCustomRules = false;
+    const rows = items.map((entry, idx) => {
+      const stopNo = idx + 1;
+      const obj = typeof entry === "string" ? {mapId: entry} : entry;
+      if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+        throw new Error(`第 ${stopNo} 站格式不正確，應為地圖物件或地圖代碼字串。`);
+      }
+      const map = resolveMap(obj.mapId ?? obj.id ?? obj.map ?? obj.mapName ?? obj.name);
+      if (!map) {
+        const shown = obj.mapId ?? obj.mapName ?? obj.map ?? obj.name ?? "(空)";
+        throw new Error(`第 ${stopNo} 站找不到地圖「${shown}」，請確認 mapId 或完整地圖名稱。`);
+      }
+      const monById = new Map(map.monsters.map(m => [m.id, m]));
+      const monByName = new Map(map.monsters.map(m => [cleanMonsterLabel(m.name), m]));
+      const resolveMonster = ref => {
+        if (ref && typeof ref === "object") ref = ref.id ?? ref.monsterId ?? ref.name;
+        if (typeof ref === "number" && monById.has(ref)) return monById.get(ref);
+        const s = String(ref ?? "").trim();
+        if (/^\d+$/.test(s) && monById.has(Number(s))) return monById.get(Number(s));
+        const cleaned = cleanMonsterLabel(s);
+        if (monByName.has(cleaned)) return monByName.get(cleaned);
+        return map.monsters.find(m => cleanMonsterLabel(m.name).includes(cleaned) && cleaned.length >= 2) ?? null;
+      };
+
+      const rawTargets = obj.targets !== undefined ? obj.targets : obj.targetNames;
+      let targets;
+      if (rawTargets === undefined || rawTargets === null || rawTargets === "mvp") {
+        targets = map.monsters.filter(isMvpFn).map(m => m.id);
+      } else if (rawTargets === "boss") {
+        targets = map.monsters.filter(m => isMvpFn(m) || m.kind === "boss").map(m => m.id);
+      } else if (rawTargets === "all") {
+        targets = map.monsters.map(m => m.id);
+      } else if (rawTargets === "none") {
+        targets = [];
+      } else if (Array.isArray(rawTargets)) {
+        const picked = [];
+        for (const t of rawTargets) {
+          const mon = resolveMonster(t);
+          if (mon) {
+            if (!picked.includes(mon.id)) picked.push(mon.id);
+          } else {
+            warnings.push(`第 ${stopNo} 站「${map.name}」略過不符的怪物「${typeof t === "object" ? JSON.stringify(t) : t}」`);
+          }
+        }
+        targets = picked;
+      } else {
+        throw new Error(`第 ${stopNo} 站的 targets 欄位格式不正確（應為陣列或 "mvp"／"boss"／"all"／"none"）。`);
+      }
+
+      const smallRules = {};
+      if (obj.smallRules && typeof obj.smallRules === "object" && !Array.isArray(obj.smallRules)) {
+        for (const [k, rule] of Object.entries(obj.smallRules)) {
+          const mon = resolveMonster(k);
+          if (!mon || !rule || typeof rule !== "object") continue;
+          const clean = {};
+          if (monsterActions.has(rule.action)) clean.action = rule.action;
+          if (rule.escape !== undefined && validEscapes.has(rule.escape)) clean.escape = rule.escape;
+          if (Object.keys(clean).length) {
+            smallRules[mon.id] = clean;
+            hasCustomRules = true;
+          }
+        }
+      }
+      return {map, targets, smallRules};
+    });
+
+    if (rows.length > 1) {
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].map.id === rows[(i + 1) % rows.length].map.id) {
+          const where = i === rows.length - 1 ? "末站回到起點" : `第 ${i + 1} 站與第 ${i + 2} 站`;
+          warnings.push(`注意：${where}為同一張地圖「${rows[i].map.name}」，匯出前請在中間穿插其他地圖。`);
+        }
+      }
+    }
+    return {rows, warnings, hasCustomRules};
+  }
+
+  globalThis.RoConfigBuilder = {validateBase, generate, planSegments, parseRoutePlan};
 })();
 
 </script>
@@ -2610,6 +2756,155 @@ byId("route-sequence-input").addEventListener("keydown", event => {
   applyRouteSequence();
 });
 
+function buildRoutePlanObject() {
+  return {
+    format: "ro-idle-route-plan",
+    version: 1,
+    route: route.map(({map, targets, smallRules}) => {
+      const targetNames = map.monsters.filter(m => targets.includes(m.id)).map(m => m.name);
+      const cleanRules = Object.fromEntries(
+        Object.entries(smallRules ?? {}).filter(([, r]) => r && (r.action || r.escape !== undefined)),
+      );
+      return {
+        mapId: map.id,
+        mapName: map.name,
+        targets: [...targets],
+        targetNames,
+        ...(Object.keys(cleanRules).length ? {smallRules: cleanRules} : {}),
+      };
+    }),
+  };
+}
+
+function buildAiRoutePrompt(includeAllMaps) {
+  const bossMaps = maps.filter(m => m.monsters.some(mon => isMvpTarget(mon) || mon.kind === "boss"));
+  const routeMapIds = new Set(route.map(r => r.map.id));
+  const bossLines = bossMaps.map(m => {
+    const mons = m.monsters
+      .filter(mon => isMvpTarget(mon) || mon.kind === "boss")
+      .map(mon => `${mon.id}:${mon.name}${mon.respawn ? `(${formatDuration(mon.respawn[0])})` : ""}`)
+      .join(",");
+    return `${m.id}|${m.name}|${mons}`;
+  });
+  const extraRouteMaps = route
+    .map(r => r.map)
+    .filter((m, idx, arr) => arr.findIndex(x => x.id === m.id) === idx && !bossMaps.some(b => b.id === m.id))
+    .map(m => `${m.id}|${m.name}|${m.monsters.map(mon => `${mon.id}:${mon.name}`).join(",")}`);
+  const allMapLines = includeAllMaps
+    ? maps.map(m => `${m.id}|${m.name}`)
+    : [];
+  const currentJson = JSON.stringify(buildRoutePlanObject(), null, 2);
+  return [
+    "你是 RO 放置仙境（ro-idle.app）的巡迴路線規劃助手。",
+    "請依照我的需求編排巡迴順序，並只回傳一個合法的 ```json``` 區塊（格式見下方）。",
+    "",
+    "【格式與規則】",
+    "1. 回傳格式為 `{ \"format\": \"ro-idle-route-plan\", \"version\": 1, \"route\": [ ... ] }`。",
+    "2. 每一站物件：`{ \"mapId\": \"地圖代碼\", \"mapName\": \"地圖中文名\", \"targets\": [怪物ID或中文名] }`。",
+    "   - `targets` 可填怪物 ID／中文名陣列，或簡寫 `\"mvp\"`（預設全 MVP）、`\"boss\"`（全 MVP+Boss）、`\"all\"`、`\"none\"`。",
+    "   - 若要個別覆蓋怪物規則，可選填 `smallRules`: `{ \"怪物ID或中文名\": { \"action\": \"priority|attack|defend|lure\", \"escape\": \"sight|attacked|afterTarget|\" } }`。",
+    "3. 同一張地圖可以重複出現（例如 1→2→3→4→3→2→1→5，工具會自動切分為不同配置檔），但**相鄰兩站（含末站回到第 1 站）不可為同一張地圖**。",
+    "4. 只能使用下方清單內存在的 `mapId` 與怪物。",
+    "",
+    route.length ? `【目前巡迴路線（共 ${route.length} 站）】\n\`\`\`json\n${currentJson}\n\`\`\`` : "【目前巡迴路線】尚未加入地圖，請直接幫我規劃。",
+    "",
+    `【MVP／Boss 地圖對照（共 ${bossLines.length} 張，格式：mapId|地圖名|怪物ID:名稱(重生時間)）】`,
+    bossLines.join("\n"),
+    ...(extraRouteMaps.length ? ["", "【目前路線中的其他地圖與怪物】", extraRouteMaps.join("\n")] : []),
+    ...(allMapLines.length ? ["", `【全部地圖代碼對照（共 ${allMapLines.length} 張）】`, allMapLines.join("\n")] : []),
+    "",
+    "【我的需求】（請在此寫下你要的巡迴規則，例如：依重生時間穿插短重生王、改為 1 2 3 4 3 2 1 5、加打特定 Boss 等）",
+  ].join("\n");
+}
+
+function setRouteIoStatus(text, error = false) {
+  const el = byId("route-io-status");
+  el.textContent = text;
+  el.dataset.error = String(error);
+}
+
+async function copyTextWithFallback(text, successMsg, textareaEl) {
+  try {
+    await navigator.clipboard.writeText(text);
+    setRouteIoStatus(successMsg, false);
+  } catch {
+    if (textareaEl) {
+      textareaEl.value = text;
+      textareaEl.select();
+    }
+    setRouteIoStatus(`${successMsg}（剪貼簿權限受限，已填入下方文字框供手動複製）`, false);
+  }
+}
+
+byId("route-io-copy-ai").onclick = () => {
+  if (!maps.length) return setRouteIoStatus("地圖資料尚未載入完成。", true);
+  const includeAll = checked("route-io-include-all");
+  const prompt = buildAiRoutePrompt(includeAll);
+  void copyTextWithFallback(
+    prompt,
+    `已複製 AI 填寫模板（含 ${includeAll ? `全部 ${maps.length}` : "MVP／Boss"} 張地圖對照），直接貼給 AI 即可。`,
+    byId("route-io-text"),
+  );
+};
+
+byId("route-io-copy-json").onclick = () => {
+  const json = JSON.stringify(buildRoutePlanObject(), null, 2);
+  void copyTextWithFallback(json, `已複製目前巡迴路線 JSON（共 ${route.length} 站）。`, byId("route-io-text"));
+};
+
+byId("route-io-fill-current").onclick = () => {
+  byId("route-io-text").value = JSON.stringify(buildRoutePlanObject(), null, 2);
+  setRouteIoStatus(`已將目前巡迴路線（共 ${route.length} 站）填入文字框。`, false);
+};
+
+byId("route-io-clear").onclick = () => {
+  byId("route-io-text").value = "";
+  setRouteIoStatus("", false);
+};
+
+byId("route-io-download").onclick = () => {
+  const json = JSON.stringify(buildRoutePlanObject(), null, 2) + "\n";
+  download(json, "ro-idle-route-plan.json", "application/json");
+  setRouteIoStatus(`已下載 ro-idle-route-plan.json（共 ${route.length} 站）。`, false);
+};
+
+byId("route-io-upload-btn").onclick = () => byId("route-io-file").click();
+byId("route-io-file").onchange = async event => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  try {
+    byId("route-io-text").value = await file.text();
+    byId("route-io-import").click();
+  } catch {
+    setRouteIoStatus("無法讀取選擇的檔案。", true);
+  }
+};
+
+byId("route-io-import").onclick = () => {
+  if (!maps.length) return setRouteIoStatus("地圖資料尚未載入完成。", true);
+  try {
+    const {rows, warnings, hasCustomRules} = RoConfigBuilder.parseRoutePlan(
+      value("route-io-text"), maps, isMvpTarget,
+    );
+    route.splice(0, route.length, ...rows);
+    renderRoute();
+    renderMapChoices();
+    clearPreview();
+    const extra = [
+      hasCustomRules && !checked("customCombat") ? "含個別怪物規則（若要生效請勾選「啟用自訂攻擊、逃生與選怪規則」）" : "",
+      ...warnings.slice(0, 3),
+      warnings.length > 3 ? `…另有 ${warnings.length - 3} 項提醒` : "",
+    ].filter(Boolean);
+    setRouteIoStatus(
+      `已匯入 ${rows.length} 站巡迴路線！${extra.length ? ` ${extra.join("；")}` : ""}`,
+      warnings.some(w => w.includes("相鄰")),
+    );
+  } catch (error) {
+    setRouteIoStatus(error.message, true);
+  }
+};
+
 byId("map-search").oninput = renderMapChoices;
 byId("mvp-filter").onchange = renderMapChoices;
 byId("clear-maps").onclick = () => {
@@ -3272,7 +3567,7 @@ function renderPreview() {
 }
 
 byId("generator").addEventListener("input", event => {
-  if (["source", "map-search", "mvp-filter", "route-sequence-input"].includes(event.target.id) || event.target.closest("#map-choices, #loot-section")) return;
+  if (["source", "map-search", "mvp-filter", "route-sequence-input", "route-io-text", "route-io-include-all"].includes(event.target.id) || event.target.closest("#map-choices, #loot-section, #route-io-details")) return;
   updateOptions();
   if (["groupSize", "partySize", "combatMode", "macros"].includes(event.target.id) || event.target.closest("#custom-combat-fields, [id$='-custom-combat-fields']")) {
     renderRoute();
@@ -3727,7 +4022,7 @@ let routeDraftReady = false;
 
 function draftFields() {
   return [...byId("generator").querySelectorAll("input[id], select[id], textarea[id]")]
-    .filter(field => field.type !== "file" && field.id !== "route-sequence-input" && !field.id.startsWith("guide-") && !field.closest("#loot-section"));
+    .filter(field => field.type !== "file" && field.id !== "route-sequence-input" && !field.id.startsWith("guide-") && !field.closest("#loot-section, #route-io-details"));
 }
 
 function saveRouteDraft() {
