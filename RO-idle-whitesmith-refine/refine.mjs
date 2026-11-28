@@ -49,7 +49,195 @@ export function matchesEquipment(plan, query, location) {
     (!term || name.includes(term) || String(plan.item.itemId) === term);
 }
 
-export function batchPlan(view, storage, equipment, useStorageMaterials) {
+const maxInventorySlots = 100;
+const maxWithdrawEntries = 100;
+
+function toWeight10(weight) {
+  return Math.round(weight * 10);
+}
+
+export function itemWeight(catalog, storage, itemId) {
+  const fromCatalog = catalog?.weights?.[itemId];
+  if (Number.isFinite(fromCatalog) && fromCatalog >= 0) return fromCatalog;
+  const fromHeld = storage?.heldItems?.find(def => def.id === itemId)?.weight;
+  if (Number.isFinite(fromHeld) && fromHeld >= 0) return fromHeld;
+  throw new Error(`無法確認道具 #${itemId} 的重量。`);
+}
+
+function bagMaterialState(inventory, materialIds) {
+  const usable = new Map();
+  const hasLocked = new Map();
+  const hasUnlockedStack = new Set();
+  for (const id of materialIds) {
+    const stacks = inventory.filter(item => item.itemId === id);
+    const locked = stacks.findIndex(item => item.locked);
+    const qty = stacks.slice(0, locked < 0 ? stacks.length : locked).reduce((sum, item) => sum + item.qty, 0);
+    usable.set(id, qty);
+    hasLocked.set(id, locked >= 0);
+    if (stacks.length > 0 && locked < 0) hasUnlockedStack.add(id);
+  }
+  return {usable, hasLocked, hasUnlockedStack};
+}
+
+export function planNextRefineWave(view, storage, remainingPlans, useStorageMaterials, catalog) {
+  if (!remainingPlans.length) {
+    return {wavePlans: [], withdraw: [], partialMaterials: false, stepCap: null, blockedReason: null};
+  }
+  const snapshot = view?.snapshot;
+  const weight = snapshot?.weight;
+  const weightMax = snapshot?.derived?.weightMax;
+  const hasWeight = Number.isFinite(weight) && Number.isFinite(weightMax) && weightMax > 0;
+  let freeWeight10 = hasWeight ? Math.max(0, toWeight10(weightMax) - toWeight10(weight)) : Infinity;
+  let freeSlots = Math.max(0, maxInventorySlots - (snapshot?.inventory?.length ?? 0));
+
+  const materialNames = new Map();
+  for (const plan of remainingPlans) {
+    for (const [id, name] of plan.steps) materialNames.set(id, name);
+  }
+  const {usable: bagUsable, hasLocked, hasUnlockedStack} = bagMaterialState(snapshot.inventory, materialNames.keys());
+
+  const storagePools = new Map();
+  for (const item of storage?.items ?? []) {
+    if (item.locked || !(item.qty > 0)) continue;
+    const list = storagePools.get(item.itemId) ?? [];
+    list.push({sid: item.sid, qty: item.qty});
+    storagePools.set(item.itemId, list);
+  }
+
+  const wavePlans = [];
+  const withdrawEq = [];
+  const withdrawMatBySid = new Map();
+  const allocatedMatSlots = new Set();
+
+  const tryFitPlan = (plan, stepLimit) => {
+    const needEq = plan.source === "storage";
+    const eqWeight10 = needEq && hasWeight ? toWeight10(itemWeight(catalog, storage, plan.item.itemId)) : 0;
+    const eqSlots = needEq ? 1 : 0;
+    const eqEntries = needEq ? 1 : 0;
+
+    const neededByMat = new Map();
+    for (const [id] of plan.steps.slice(0, stepLimit)) {
+      neededByMat.set(id, (neededByMat.get(id) ?? 0) + 1);
+    }
+
+    const bagDeductions = new Map();
+    const matPulls = new Map();
+    const newMatSlots = new Set();
+    let matWeight10 = 0;
+
+    for (const [id, qty] of neededByMat) {
+      const availableInBag = bagUsable.get(id) ?? 0;
+      if (hasLocked.get(id) && availableInBag < qty) {
+        throw new Error(`${materialNames.get(id)} 的上鎖堆疊會被精練優先消耗，請先整理背包。`);
+      }
+      const fromBag = Math.min(availableInBag, qty);
+      bagDeductions.set(id, fromBag);
+      let needFromStorage = qty - fromBag;
+      if (needFromStorage <= 0) continue;
+      if (!useStorageMaterials) {
+        throw new Error(`材料不足，缺少 ${materialNames.get(id)} ×${needFromStorage}。`);
+      }
+      if (hasWeight) {
+        matWeight10 += toWeight10(itemWeight(catalog, storage, id)) * needFromStorage;
+      }
+      if (!hasUnlockedStack.has(id) && !allocatedMatSlots.has(id)) {
+        newMatSlots.add(id);
+      }
+      for (const stack of storagePools.get(id) ?? []) {
+        if (needFromStorage === 0) break;
+        const alreadyTaken = (withdrawMatBySid.get(stack.sid) ?? 0) + (matPulls.get(stack.sid) ?? 0);
+        const available = stack.qty - alreadyTaken;
+        if (available <= 0) continue;
+        const take = Math.min(needFromStorage, available);
+        matPulls.set(stack.sid, (matPulls.get(stack.sid) ?? 0) + take);
+        needFromStorage -= take;
+      }
+      if (needFromStorage > 0) {
+        throw new Error(`材料不足，缺少 ${materialNames.get(id)} ×${needFromStorage}。`);
+      }
+    }
+
+    let newMatEntries = 0;
+    for (const sid of matPulls.keys()) {
+      if (!withdrawMatBySid.has(sid)) newMatEntries++;
+    }
+    const addedWeight10 = eqWeight10 + matWeight10;
+    const addedSlots = eqSlots + newMatSlots.size;
+    const nextEntryCount = withdrawEq.length + eqEntries + withdrawMatBySid.size + newMatEntries;
+
+    if (addedWeight10 > freeWeight10) {
+      return {
+        ok: false,
+        reason: `目前剩餘負重（${freeWeight10 / 10}）不足以領取下一件裝備與材料（需要 ${addedWeight10 / 10}），請先清理背包。`,
+      };
+    }
+    if (addedSlots > freeSlots) {
+      return {
+        ok: false,
+        reason: `目前背包剩餘格數（${freeSlots} 格）不足以領取下一件裝備與材料（需要 ${addedSlots} 格），請先清理背包。`,
+      };
+    }
+    if (nextEntryCount > maxWithdrawEntries) {
+      return {
+        ok: false,
+        reason: "單次倉庫領取超過 100 項上限，請減少背包佔用後重試。",
+      };
+    }
+
+    return {
+      ok: true,
+      commit() {
+        if (needEq) withdrawEq.push({sid: plan.item.sid, qty: 1});
+        for (const [id, used] of bagDeductions) bagUsable.set(id, (bagUsable.get(id) ?? 0) - used);
+        for (const [sid, qty] of matPulls) withdrawMatBySid.set(sid, (withdrawMatBySid.get(sid) ?? 0) + qty);
+        for (const id of newMatSlots) allocatedMatSlots.add(id);
+        freeWeight10 -= addedWeight10;
+        freeSlots -= addedSlots;
+      },
+    };
+  };
+
+  let partialMaterials = false;
+  let stepCap = null;
+  let blockedReason = null;
+
+  for (const plan of remainingPlans) {
+    const attempt = tryFitPlan(plan, plan.steps.length);
+    if (attempt.ok) {
+      attempt.commit();
+      wavePlans.push(plan);
+      continue;
+    }
+    if (wavePlans.length > 0) break;
+    if (plan.method !== "safe" && plan.steps.length > 1) {
+      let fitted = null;
+      for (let k = plan.steps.length - 1; k >= 1; k--) {
+        const partial = tryFitPlan(plan, k);
+        if (partial.ok) {
+          fitted = {partial, k};
+          break;
+        }
+      }
+      if (fitted) {
+        fitted.partial.commit();
+        wavePlans.push(plan);
+        partialMaterials = true;
+        stepCap = fitted.k;
+        break;
+      }
+    }
+    blockedReason = attempt.reason;
+    break;
+  }
+
+  const withdraw = [
+    ...withdrawEq,
+    ...[...withdrawMatBySid.entries()].map(([sid, qty]) => ({sid, qty})),
+  ];
+  return {wavePlans, withdraw, partialMaterials, stepCap, blockedReason};
+}
+
+export function batchPlan(view, storage, equipment, useStorageMaterials, catalog) {
   const withdraw = equipment.filter(plan => plan.source === "storage")
     .map(({item}) => ({sid: item.sid, qty: 1}));
   const materials = new Map();
@@ -85,11 +273,29 @@ export function batchPlan(view, storage, equipment, useStorageMaterials) {
     if (remaining) throw new Error(`材料不足，缺少 ${material.name} ×${remaining}。`);
   }
 
-  const fee = withdraw.length ? storage?.fees?.[view.snapshot.mapId] : 0;
+  const needsWithdraw = withdraw.length > 0;
+  if (needsWithdraw && view.snapshot.activity === "dead") {
+    throw new Error("角色目前處於死亡狀態，無法使用倉庫。");
+  }
+  const fee = needsWithdraw ? storage?.fees?.[view.snapshot.mapId] : 0;
   if (!Number.isFinite(fee)) throw new Error("請先讓角色回到有卡普拉倉庫服務的城鎮。");
   if (fee + zeny > view.snapshot.character.zeny) throw new Error(`Zeny 不足，精練與倉庫費合計 ${fee + zeny} Zeny。`);
-  if (withdraw.length > 100) throw new Error("一次最多取出 100 項，請減少這批的武器數量。");
-  return {withdraw, fee, steps, zeny, materials: [...materials.values()]};
+
+  let waves = needsWithdraw ? 1 : 0;
+  let firstWave = null;
+  if (needsWithdraw && catalog) {
+    firstWave = planNextRefineWave(view, storage, equipment, useStorageMaterials, catalog);
+    if (!firstWave.wavePlans.length) {
+      throw new Error(firstWave.blockedReason ?? "目前負重或背包空間不足以領取倉庫物品。");
+    }
+    if (firstWave.wavePlans.length < equipment.length || firstWave.partialMaterials) {
+      const done = Math.max(1, firstWave.wavePlans.length - (firstWave.partialMaterials ? 0.5 : 0));
+      waves = Math.max(2, Math.ceil(equipment.length / done));
+    }
+  } else if (withdraw.length > maxWithdrawEntries) {
+    waves = Math.ceil(withdraw.length / maxWithdrawEntries);
+  }
+  return {withdraw, needsWithdraw, fee, waves, steps, zeny, materials: [...materials.values()]};
 }
 
 export function guardedCommand(view, command) {

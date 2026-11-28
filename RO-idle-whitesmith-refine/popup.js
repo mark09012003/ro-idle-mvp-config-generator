@@ -1,7 +1,7 @@
 import {destinationConfig, handoffItems, matchMoved, profileName, rebindPlan, sameBindings, sourceHandoffConfig} from "./handoff.mjs";
 import {itemFingerprint, remapRules, ruleReferences, suitableItem} from "./rebind.mjs";
 import {diffPurchasedItems, isOverHalfWeight, marketPlan, planAutoDeposit, verifyDeposited, wouldExceedMaxWeight} from "./market.mjs";
-import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, refineOutcome, restoreEquipment, skillLevel, equipmentPlan} from "./refine.mjs";
+import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, planNextRefineWave, refineOutcome, restoreEquipment, skillLevel, equipmentPlan} from "./refine.mjs";
 
 const $ = id => document.getElementById(id);
 const host = "https://ro-idle.app";
@@ -114,10 +114,14 @@ function planSummary(chosen, batch) {
   const withdrawals = [];
   if (stored) withdrawals.push(`${stored} 件裝備`);
   if (batch.materials.some(material => material.missing)) withdrawals.push("上列缺少的材料");
+  const storageNote = !withdrawals.length ? []
+    : batch.waves > 1
+      ? [`依目前負重與背包格數自動分批從倉庫領取 ${withdrawals.join("及")}（預計至少 ${batch.waves} 批，單次倉庫費 ${batch.fee} Zeny${stored ? "；完成的倉庫裝備在負重超過 50% 或空間不足時自動存回倉庫" : ""}）。`]
+      : [`從倉庫取出 ${withdrawals.join("及")}，倉庫費 ${batch.fee} Zeny。`];
   return [
     `${chosen.length} 件裝備，最多 ${batch.steps} 次精練，${mode.value === "weapon" ? `${batch.steps * 5} SP` : `精練費 ${batch.zeny} Zeny`}`,
     materials.join("、"),
-    ...(withdrawals.length ? [`從倉庫取出 ${withdrawals.join("及")}，倉庫費 ${batch.fee} Zeny。`] : []),
+    ...storageNote,
     ...(chosen.some(plan => plan.rates.some(rate => rate < 100))
       ? ["有精練步驟低於 100% 成功率。失敗時裝備和已插入的卡片會消失。"] : []),
   ].join("\n");
@@ -138,7 +142,7 @@ function updatePlan() {
   summary.textContent = "";
   if (busy || needsRefresh || !chosen.length) return;
   try {
-    summary.textContent = planSummary(chosen, batchPlan(view, storage, chosen, storageMaterials.checked));
+    summary.textContent = planSummary(chosen, batchPlan(view, storage, chosen, storageMaterials.checked, catalog));
     start.disabled = false;
   } catch (error) {
     summary.textContent = error.message;
@@ -275,6 +279,7 @@ async function runBatch() {
   let success = 0;
   let failure = 0;
   let uncertain = 0;
+  let returnedToStorage = 0;
   let awaitingRefine = false;
   let started = false;
   try {
@@ -285,7 +290,7 @@ async function runBatch() {
         if (JSON.stringify(item) !== JSON.stringify(plan.item)) throw new Error("選取的倉庫裝備已變更。");
       }
     }
-    const batch = batchPlan(view, storage, chosen, storageMaterials.checked);
+    const batch = batchPlan(view, storage, chosen, storageMaterials.checked, catalog);
     const items = chosen.map(plan =>
       `${plan.source === "storage" ? "倉庫" : "背包"} · ${plan.name} +${plan.from} → +${plan.target}`);
     const equipNote = chosen.some(plan => plan.needsEquip) ? "\n將暫時更換防具，請保持擴充視窗開啟，直到原裝備還原。" : "";
@@ -293,65 +298,152 @@ async function runBatch() {
     started = true;
     results.hidden = true;
     stop.disabled = false;
-    if (batch.withdraw.length) {
-      status("正在取出倉庫物品…");
-      const payload = guardedCommand(view, {type: "storageWithdraw", items: batch.withdraw});
-      const reply = await gameRequest(`/api/characters/${id}/commands`, payload);
-      const next = checkView(reply.view, id);
-      chosen = associateWithdrawnEquipment(view, next, chosen);
-      view = next;
-    } else {
-      chosen = chosen.map(plan => ({...plan, uid: plan.item.uid}));
-    }
 
     const send = async (current, command) => {
       const reply = await gameRequest(`/api/characters/${id}/commands`, guardedCommand(current, command));
       return checkView(reply.view, id);
     };
-    for (const plan of chosen) {
-      if (cancelled) break;
-      const original = plan.needsEquip ? {...view.snapshot.equipment} : null;
-      let equipConfirmed = false;
-      try {
-        if (original) {
-          status(`正在穿戴 ${plan.name}…`);
-          view = await send(view, {type: "equip", uid: plan.uid});
-          equipConfirmed = Object.values(view.snapshot.equipment).includes(plan.uid);
-          if (!equipConfirmed) throw new Error("未確認穿戴成功，請檢查裝備欄。");
+
+    const finishedStorageUids = new Set();
+    const depositFinishedStorage = async reason => {
+      while (finishedStorageUids.size) {
+        const entries = [...finishedStorageUids].map(uid => [uid, 1]);
+        const deposit = planAutoDeposit(view.snapshot, storage, entries);
+        if (!deposit.items.length) break;
+        status(`${reason}，正在將已完成的 ${deposit.totalQty} 件倉庫裝備存回倉庫…`);
+        const beforeInventory = view.snapshot.inventory;
+        const reply = await gameRequest(
+          `/api/characters/${id}/commands`,
+          guardedCommand(view, {type: "storageDeposit", items: deposit.items}),
+        );
+        const next = checkView(reply.view, id);
+        verifyDeposited(beforeInventory, next.snapshot.inventory, deposit.items);
+        view = next;
+        storage = Array.isArray(reply.storage?.items) ? reply.storage : await getStorage();
+        for (const {uid} of deposit.items) finishedStorageUids.delete(uid);
+        returnedToStorage += deposit.totalQty;
+      }
+    };
+
+    let remaining = chosen.map(plan => ({...plan, originSource: plan.source}));
+    let waveIndex = 0;
+
+    while (!cancelled && remaining.length) {
+      const needsStorageNow = remaining.some(plan => plan.source === "storage") || storageMaterials.checked;
+      if (needsStorageNow && finishedStorageUids.size && isOverHalfWeight(view.snapshot)) {
+        await depositFinishedStorage("負重超過 50%");
+      }
+
+      let wave = planNextRefineWave(view, storage, remaining, storageMaterials.checked, catalog);
+      if (!wave.wavePlans.length && finishedStorageUids.size) {
+        await depositFinishedStorage("騰出負重與背包空間");
+        wave = planNextRefineWave(view, storage, remaining, storageMaterials.checked, catalog);
+      }
+      if (!wave.wavePlans.length) {
+        throw new Error(wave.blockedReason ?? "目前負重或背包空間不足以領取下一批倉庫物品。");
+      }
+
+      let wavePlans = wave.wavePlans;
+      const tail = remaining.slice(wavePlans.length);
+
+      if (wave.withdraw.length) {
+        waveIndex++;
+        for (const plan of wavePlans.filter(plan => plan.source === "storage")) {
+          const item = storage?.items?.find(({sid}) => sid === plan.item.sid);
+          if (JSON.stringify(item) !== JSON.stringify(plan.item)) throw new Error("選取的倉庫裝備已變更。");
         }
+        const fee = storage?.fees?.[view.snapshot.mapId];
+        if (!Number.isFinite(fee)) throw new Error("請先讓角色回到有卡普拉倉庫服務的城鎮。");
+        if (view.snapshot.character.zeny < fee) throw new Error(`Zeny 不足，無法支付倉庫費 ${fee} Zeny。`);
+        status(batch.waves > 1
+          ? `正在依負重自動領取第 ${waveIndex} 批倉庫物品…`
+          : "正在取出倉庫物品…");
+        const payload = guardedCommand(view, {type: "storageWithdraw", items: wave.withdraw});
+        const reply = await gameRequest(`/api/characters/${id}/commands`, payload);
+        const next = checkView(reply.view, id);
+        wavePlans = associateWithdrawnEquipment(view, next, wavePlans);
+        view = next;
+        storage = Array.isArray(reply.storage?.items) ? reply.storage : await getStorage();
+      } else {
+        wavePlans = wavePlans.map(plan => ({...plan, uid: plan.uid ?? plan.item.uid}));
+      }
+
+      const carryOver = [];
+      for (const plan of wavePlans) {
+        if (cancelled) break;
+        const original = plan.needsEquip ? {...view.snapshot.equipment} : null;
+        let equipConfirmed = false;
         let level = plan.from;
-        while (!cancelled && level < plan.target) {
-          const nextLevel = plan.method === "safe" ? plan.target : level + 1;
-          status(`精練 ${plan.name} +${level} → +${nextLevel}…`);
-          const payload = nextRefineCommand(view, catalog, plan, plan.uid, level);
-          awaitingRefine = true;
-          const reply = await gameRequest(`/api/characters/${id}/commands`, payload);
-          const next = checkView(reply.view, id);
-          view = next;
-          const outcome = refineOutcome(next, plan, level);
-          awaitingRefine = false;
-          if (outcome === "failure") {
-            failure++;
-            break;
+        let broken = false;
+        const maxStepsThisWave = wave.partialMaterials && wave.stepCap ? wave.stepCap : Infinity;
+        let stepsThisWave = 0;
+        try {
+          if (original) {
+            status(`正在穿戴 ${plan.name}…`);
+            view = await send(view, {type: "equip", uid: plan.uid});
+            equipConfirmed = Object.values(view.snapshot.equipment).includes(plan.uid);
+            if (!equipConfirmed) throw new Error("未確認穿戴成功，請檢查裝備欄。");
           }
-          if (nextLevel === plan.target) success++;
-          level = nextLevel;
-          await new Promise(resolve => setTimeout(resolve, 450));
-        }
-      } finally {
-        if (original) {
-          status("正在換回原裝備…");
-          try {
-            if (!equipConfirmed || awaitingRefine) {
-              view = checkView(await gameRequest(`/api/characters/${id}?deferCatchup=1`), id);
+          while (!cancelled && level < plan.target && stepsThisWave < maxStepsThisWave) {
+            const nextLevel = plan.method === "safe" ? plan.target : level + 1;
+            status(`精練 ${plan.name} +${level} → +${nextLevel}…`);
+            const payload = nextRefineCommand(view, catalog, plan, plan.uid, level);
+            awaitingRefine = true;
+            const reply = await gameRequest(`/api/characters/${id}/commands`, payload);
+            const next = checkView(reply.view, id);
+            view = next;
+            const outcome = refineOutcome(next, plan, level);
+            awaitingRefine = false;
+            if (outcome === "failure") {
+              failure++;
+              broken = true;
+              break;
             }
-            if (view.running) throw new Error("角色已開始掛機。");
-            view = await restoreEquipment(view, original, plan.uid, catalog, send);
-          } catch (error) {
-            throw new Error(`未能確認原裝備已還原，請檢查裝備欄。${error.message}`);
+            stepsThisWave += plan.method === "safe" ? plan.target - level : 1;
+            if (nextLevel === plan.target) {
+              success++;
+              if (plan.originSource === "storage") finishedStorageUids.add(plan.uid);
+            }
+            level = nextLevel;
+            await new Promise(resolve => setTimeout(resolve, 450));
           }
+        } finally {
+          if (original) {
+            status("正在換回原裝備…");
+            try {
+              if (!equipConfirmed || awaitingRefine) {
+                view = checkView(await gameRequest(`/api/characters/${id}?deferCatchup=1`), id);
+              }
+              if (view.running) throw new Error("角色已開始掛機。");
+              view = await restoreEquipment(view, original, plan.uid, catalog, send);
+            } catch (error) {
+              throw new Error(`未能確認原裝備已還原，請檢查裝備欄。${error.message}`);
+            }
+          }
+        }
+        if (!cancelled && !broken && level < plan.target) {
+          const updatedItem = view.snapshot.inventory.find(item => item.uid === plan.uid);
+          if (!updatedItem) throw new Error("無法確認未完成精練裝備的背包位置。");
+          const advance = level - plan.from;
+          carryOver.push({
+            ...plan,
+            source: "bag",
+            item: updatedItem,
+            from: level,
+            steps: plan.steps.slice(advance),
+            rates: plan.rates.slice(advance),
+          });
         }
       }
+      remaining = [...carryOver, ...tail];
+    }
+
+    if (!cancelled && finishedStorageUids.size && isOverHalfWeight(view.snapshot)) {
+      const fee = storage?.fees?.[view.snapshot.mapId];
+      const canReturn = Number.isFinite(fee) && view.snapshot.character.zeny >= fee &&
+        Array.isArray(storage?.items) && Number.isInteger(storage?.capacity) &&
+        storage.items.length + finishedStorageUids.size <= storage.capacity;
+      if (canReturn) await depositFinishedStorage("精練完成且負重超過 50%");
     }
     status(cancelled ? "批次已停止。" : "批次已結束。");
   } catch (error) {
@@ -366,7 +458,7 @@ async function runBatch() {
     target.disabled = needsRefresh;
     if (started) {
       results.hidden = false;
-      results.textContent = `成功 ${success} 件 · 失敗 ${failure} 件 · 未完成 ${chosen.length - success - failure - uncertain} 件${uncertain ? ` · 結果待確認 ${uncertain} 件` : ""}`;
+      results.textContent = `成功 ${success} 件 · 失敗 ${failure} 件 · 未完成 ${chosen.length - success - failure - uncertain} 件${uncertain ? ` · 結果待確認 ${uncertain} 件` : ""}${returnedToStorage ? ` · 已自動存回倉庫 ${returnedToStorage} 件` : ""}`;
       if (storage) {
         needsRefresh = true;
         target.disabled = true;
