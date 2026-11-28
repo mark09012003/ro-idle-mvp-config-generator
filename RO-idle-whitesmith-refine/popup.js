@@ -482,6 +482,7 @@ async function runBatch() {
   let success = 0;
   let failure = 0;
   let uncertain = 0;
+  let refinedSteps = 0;
   let returnedToStorage = 0;
   let shopBought = 0;
   let shopSpent = 0;
@@ -489,6 +490,26 @@ async function runBatch() {
   let vendingSpent = 0;
   let awaitingRefine = false;
   let started = false;
+  const renderRefineProgress = (running, currentAction = "") => {
+    results.hidden = false;
+    results.classList.toggle("callout-running", running);
+    const done = success + failure;
+    const pending = Math.max(0, chosen.length - done - uncertain);
+    const extras = [
+      uncertain ? `結果待確認 ${uncertain} 件` : "",
+      returnedToStorage ? `已存回倉庫 ${returnedToStorage} 件` : "",
+      shopBought ? `商店補材料 ${shopBought} 個（${shopSpent.toLocaleString()} Zeny）` : "",
+      vendingBought ? `攤位買材料 ${vendingBought} 個（${vendingSpent.toLocaleString()} Zeny）` : "",
+    ].filter(Boolean);
+    const summaryLine = running
+      ? `精練中（${done}／${chosen.length} 件）· 成功 ${success} 件 · 失敗 ${failure} 件 · 已精練 ${refinedSteps} 次`
+      : `成功 ${success} 件 · 失敗 ${failure} 件 · 未完成 ${pending} 件 · 共精練 ${refinedSteps} 次`;
+    results.textContent = [
+      summaryLine,
+      ...(currentAction ? [currentAction] : []),
+      ...(extras.length ? [extras.join(" · ")] : []),
+    ].join("\n");
+  };
   try {
     if (storage) {
       storage = await getStorage();
@@ -529,7 +550,7 @@ async function runBatch() {
     const equipNote = chosen.some(plan => plan.needsEquip) ? "\n將暫時更換防具，請保持擴充視窗開啟，直到原裝備還原。" : "";
     if (!window.confirm(`確定由 ${roleName} 執行批次精練？\n${planSummary(chosen, batch)}${vendingPreviewNote}${equipNote}\n\n${items.join("\n")}`)) return;
     started = true;
-    results.hidden = true;
+    renderRefineProgress(true, "準備執行批次精練…");
     stop.disabled = false;
 
     const send = async (current, command) => {
@@ -556,6 +577,7 @@ async function runBatch() {
         storage = Array.isArray(reply.storage?.items) ? reply.storage : await getStorage();
         for (const {uid} of deposit.items) finishedStorageUids.delete(uid);
         returnedToStorage += deposit.totalQty;
+        renderRefineProgress(true);
       }
     };
 
@@ -621,6 +643,7 @@ async function runBatch() {
         renderRoleMeta(view);
         shopBought += qty;
         shopSpent += unitPrice * qty;
+        renderRefineProgress(true);
       }
 
       for (const {itemId, name, qty, maxPrice} of wave.vendingBuy) {
@@ -657,6 +680,7 @@ async function runBatch() {
           renderRoleMeta(view);
           vendingBought += groupQty;
           vendingSpent += reply.result.paid;
+          renderRefineProgress(true);
         }
       }
 
@@ -678,7 +702,9 @@ async function runBatch() {
           }
           while (!cancelled && level < plan.target && stepsThisWave < maxStepsThisWave) {
             const nextLevel = plan.method === "safe" ? plan.target : level + 1;
+            const stepText = `目前：${plan.name} +${level} → +${nextLevel}`;
             status(`精練 ${plan.name} +${level} → +${nextLevel}…`);
+            renderRefineProgress(true, stepText);
             const payload = nextRefineCommand(view, catalog, plan, plan.uid, level);
             awaitingRefine = true;
             const reply = await gameRequest(`/api/characters/${id}/commands`, payload);
@@ -687,17 +713,23 @@ async function runBatch() {
             renderRoleMeta(view);
             const outcome = refineOutcome(next, plan, level);
             awaitingRefine = false;
+            const stepDelta = plan.method === "safe" ? plan.target - level : 1;
+            refinedSteps += stepDelta;
             if (outcome === "failure") {
               failure++;
               broken = true;
+              renderRefineProgress(true, `失敗：${plan.name}（+${level} → +${nextLevel}）`);
               break;
             }
-            stepsThisWave += plan.method === "safe" ? plan.target - level : 1;
+            stepsThisWave += stepDelta;
             if (nextLevel === plan.target) {
               success++;
               if (plan.originSource === "storage") finishedStorageUids.add(plan.uid);
             }
             level = nextLevel;
+            renderRefineProgress(true, nextLevel === plan.target
+              ? `達成目標：${plan.name} +${nextLevel}`
+              : `成功：${plan.name} +${nextLevel}`);
             await new Promise(resolve => setTimeout(resolve, 450));
           }
         } finally {
@@ -751,14 +783,7 @@ async function runBatch() {
     mode.disabled = needsRefresh;
     target.disabled = needsRefresh;
     if (started) {
-      results.hidden = false;
-      const extras = [
-        uncertain ? `結果待確認 ${uncertain} 件` : "",
-        returnedToStorage ? `已自動存回倉庫 ${returnedToStorage} 件` : "",
-        shopBought ? `商店補材料 ${shopBought} 個（${shopSpent.toLocaleString()} Zeny）` : "",
-        vendingBought ? `攤位買材料 ${vendingBought} 個（${vendingSpent.toLocaleString()} Zeny）` : "",
-      ].filter(Boolean);
-      results.textContent = `成功 ${success} 件 · 失敗 ${failure} 件 · 未完成 ${chosen.length - success - failure - uncertain} 件${extras.length ? ` · ${extras.join(" · ")}` : ""}`;
+      renderRefineProgress(false);
       if (storage) {
         needsRefresh = true;
         target.disabled = true;

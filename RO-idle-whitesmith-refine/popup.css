@@ -659,6 +659,12 @@ button:disabled {
   font-weight: 650;
 }
 
+.callout-result.callout-running {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
 .status-banner {
   margin: 8px 0 0;
   padding: 7px 9px;
