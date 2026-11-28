@@ -14,7 +14,7 @@
     return Number.isInteger(count) && count > 0 ? Math.max(1, 75 - count) : 75;
   }
 
-  function planArcher(character) {
+  function planArcher(character, snapshot = null) {
     const {job, baseLv, jobLv, rebirth} = character;
     if (!Object.hasOwn(jobs, job) || (rebirth && rebirth.from !== "hunter")) {
       return {stop: true, message: "目前角色不在弓箭手／獵人轉生路線。"};
@@ -64,7 +64,7 @@
       ready = (levels.NV_BASIC ?? 0) >= 9 && (levels.NV_FIRSTAID ?? 0) >= 1;
     } else if (job === "archer" || job === "archer_high") {
       ready = applyOrder(firstJob);
-      if (ready && jobLv > jobs[destinations[job]].jobChange.minJobLv && points > 0) {
+      if (ready && points > 0) {
         applyOrder(firstJobOverflow);
       }
       if (ready && points > 0 && skills.length === 0) {
@@ -95,9 +95,11 @@
     } else if (ready && baseLv >= 99 && jobLv >= (job === "hunter" ? 50 : 70)) {
       const cycle = rebirth ? (rebirth.count ?? 0) + 1 : 0;
       if (job === "sniper" && cycle >= 10 && points === 0) {
-        return {stop: true, message: "已達第 10 次轉生的 Base 99／Job 70，自動加點與轉職流程結束，掛機照常。"};
+        return {stop: true, message: "已達第 10 次轉生的 Base 99／Job 70（保留第 11 轉自行選系），自動加點與轉職流程結束，掛機照常。"};
       }
       if (points > 0) return {stop: true, message: "仍有技能點，但目前沒有可自動分配的技能。"};
+      if (snapshot?.vend) return {stop: true, message: "擺攤中無法轉生，收攤後可重新啟用。"};
+      if (snapshot?.cart?.items?.length) return {stop: true, message: "手推車內仍有物品，清空後可重新啟用。"};
       if (!(character.zeny >= fee)) return {stop: true, message: "轉生需要 1,285,000 Zeny，補足後可重新啟用。"};
       return {command: {type:"rebirth"}};
     }

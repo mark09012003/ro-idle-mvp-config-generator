@@ -41,22 +41,60 @@ export function rebindPlan(snapshot, characterId, backup) {
   return {rules: activeRules, useBackup: !!reference && JSON.stringify(reference.rules) === JSON.stringify(activeRules)};
 }
 
-export function handoffItems(snapshot, config, definitions) {
+export function handoffItems(snapshot, config, definitions, heldItems = null) {
   const ammo = new Set((config.equipRules ?? []).map(rule => rule.ammo).filter(Boolean));
-  const ids = new Set([...Object.entries(snapshot.equipment)
-    .filter(([slot]) => slot !== "ammo").map(([, uid]) => uid),
+  const wornNonAmmo = new Set(Object.entries(snapshot.equipment)
+    .filter(([slot, uid]) => slot !== "ammo" && uid != null).map(([, uid]) => uid));
+  const ids = new Set([...wornNonAmmo,
     ...[...ruleReferences(config.equipRules ?? []).keys()].filter(uid => !ammo.has(uid))]);
   ids.delete(undefined);
   ids.delete(null);
+  const heldById = new Map((heldItems ?? snapshot.heldItems ?? []).map(def => [def.id, def]));
   const inventory = new Map(snapshot.inventory.map(item => [item.uid, item]));
   return [...ids].map(uid => {
     const item = inventory.get(uid);
-    if (!item || item.qty !== 1 || !definitions[item.itemId] ||
-        definitions[item.itemId][1].includes("ammo") || item.unidentified) {
+    const def = item ? definitions?.[item.itemId] : null;
+    const held = item ? heldById.get(item.itemId) : null;
+    const isAmmo = Boolean(def?.[1]?.includes("ammo") || held?.category === "ammo" || held?.slots?.includes("ammo"));
+    const knownEquipment = Boolean(def || held?.category === "equipment" || wornNonAmmo.has(uid));
+    if (!item || item.qty !== 1 || !knownEquipment || isAmmo || item.unidentified) {
       throw new Error(`找不到可交接的裝備 UID ${uid}，請檢查原配置及背包。`);
     }
     return item;
   });
+}
+
+export function validateReceiveHandoff(snapshot, box, record, weights = null) {
+  if (snapshot?.activity === "dead") {
+    throw new Error("角色目前處於死亡狀態，無法使用倉庫。");
+  }
+  const sameName = Boolean(snapshot?.profiles?.some(profile => profile.name === profileName));
+  if (!sameName && (snapshot?.profiles?.length ?? 0) >= 10) {
+    throw new Error(`目前角色已存滿 10 個配置檔，請先刪除一個配置再建立「${profileName}」。`);
+  }
+  if (box) {
+    const freeSlots = Math.max(0, 100 - (snapshot?.inventory?.length ?? 0));
+    if (record.items.length > freeSlots) {
+      throw new Error(`目前角色背包空間不足（剩餘 ${freeSlots} 格，需要 ${record.items.length} 格），請先清理背包。`);
+    }
+    const weight = snapshot?.weight;
+    const weightMax = snapshot?.derived?.weightMax;
+    if (Number.isFinite(weight) && Number.isFinite(weightMax) && weightMax > 0) {
+      const heldWeights = new Map((box.heldItems ?? []).map(def => [def.id, def.weight]));
+      let added10 = 0;
+      for (const item of record.items) {
+        const w = weights?.[item.itemId] ?? heldWeights.get(item.itemId);
+        if (Number.isFinite(w) && w > 0) added10 += Math.round(w * 10);
+      }
+      const free10 = Math.max(0, Math.round(weightMax * 10) - Math.round(weight * 10));
+      if (added10 > free10) {
+        throw new Error(`目前角色剩餘負重不足（剩餘 ${free10 / 10}，交接裝備總重 ${added10 / 10}），請先清理背包或提升負重。`);
+      }
+    }
+  }
+  const skippedWeaponRule = !snapshot?.character?.rebirth &&
+    (record.config?.equipRules ?? []).some(rule => rule.cond?.baseLvAbove === 64 && rule.weapon != null);
+  return {sameName, skippedWeaponRule};
 }
 
 export function matchMoved(before, after, expected, key) {

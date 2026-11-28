@@ -1,4 +1,4 @@
-import {destinationConfig, handoffItems, matchMoved, profileName, rebindPlan, sameBindings, sourceHandoffConfig} from "./handoff.mjs";
+import {destinationConfig, handoffItems, matchMoved, profileName, rebindPlan, sameBindings, sourceHandoffConfig, validateReceiveHandoff} from "./handoff.mjs";
 import {itemFingerprint, remapRules, ruleReferences, suitableItem} from "./rebind.mjs";
 import {diffPurchasedBatch, groupVendorOrders, isOverHalfWeight, marketPlan, planAutoDeposit, takeVendorBatch, verifyDeposited} from "./market.mjs";
 import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, planNextRefineWave, refineOutcome, restoreEquipment, skillLevel, equipmentPlan} from "./refine.mjs";
@@ -76,13 +76,13 @@ async function gameRequest(path, payload) {
           .map(caption => caption.textContent.trim().match(/^RO放置仙境 - \[(.+)\] .+ Lv\.\d+ \/ Job \d+$/)?.[1])
           .find(Boolean);
         const nameNode = document.querySelector(
-          '.ui2-avatar + div > b:first-child, .ui2-mstatus button[aria-label="打開完整狀態"] > b:first-child',
+          '.ui2-avatar + div > b:first-child, .ui2-mstatus button[aria-label="打開完整狀態"] > b:first-child, b[class*="text-[var(--ink-name"]',
         );
         const modernName = nameNode && [...nameNode.childNodes]
           .filter(node => node.nodeType === Node.TEXT_NODE)
           .map(node => node.textContent).join("").trim();
         const name = classicName || modernName;
-        if (body && (!expectedName || name !== expectedName)) return {error: "遊戲分頁已切換角色。"};
+        if (body && (!expectedName || name !== expectedName)) return {error: "遊戲分頁已切換角色。", status: 409};
         const response = await fetch(requestPath, {
           method: body ? "POST" : "GET",
           credentials: "same-origin",
@@ -92,15 +92,24 @@ async function gameRequest(path, payload) {
             body: JSON.stringify(body),
           } : {}),
         });
-        const data = await response.json();
-        if (!response.ok) return {error: data.error?.message ?? data.message ?? (typeof data.error === "string" ? data.error : `HTTP ${response.status}`)};
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          return {
+            error: data?.error?.message ?? data?.message ?? (typeof data?.error === "string" ? data.error : `HTTP ${response.status}`),
+            status: response.status,
+          };
+        }
         return {data, name};
       },
     });
     const [reply] = await Promise.race([request, new Promise((_, reject) => {
       timeout = setTimeout(() => reject(new Error("讀取遊戲逾時，請確認網路後重試。")), 20000);
     })]);
-    if (!reply?.result?.data) throw new Error(reply?.result?.error ?? "遊戲未傳回完整結果。");
+    if (!reply?.result?.data) {
+      throw Object.assign(new Error(reply?.result?.error ?? "遊戲未傳回完整結果。"), {
+        status: reply?.result?.status ?? null,
+      });
+    }
     if (path === "/api/characters") return {...reply.result.data, activeName: reply.result.name};
     return reply.result.data;
   } finally {
@@ -1057,6 +1066,7 @@ async function handoffCommand(current, command) {
 }
 
 async function sendHandoff(current, account, record) {
+  if (current.snapshot.activity === "dead") throw new Error("角色目前處於死亡狀態，無法使用倉庫。");
   const box = await getStorage();
   const fee = handoffFee(current, box);
   if (record && (record.account !== account || record.source !== current.characterId || record.stage !== "preparing")) {
@@ -1064,7 +1074,7 @@ async function sendHandoff(current, account, record) {
   }
   if (!record) {
     const config = sourceHandoffConfig(current.snapshot);
-    const items = handoffItems(current.snapshot, config, rebindItems);
+    const items = handoffItems(current.snapshot, config, rebindItems, [...(current.heldItems ?? []), ...(box.heldItems ?? [])]);
     if (!items.length || items.length > 100) throw new Error("請確認交接裝備清單介於 1 到 100 件。");
     if (box.items.length + items.length > box.capacity) throw new Error("倉庫空間不足。");
     const ammo = Object.fromEntries(current.snapshot.inventory.map(({uid, itemId}) => [uid, itemId]));
@@ -1085,7 +1095,13 @@ async function sendHandoff(current, account, record) {
   }
   const before = await getStorage();
   saveHandoff(record, "depositPending");
-  const reply = await handoffCommand(current, {type:"storageDeposit", items:record.items.map(({uid}) => ({uid,qty:1}))});
+  let reply;
+  try {
+    reply = await handoffCommand(current, {type:"storageDeposit", items:record.items.map(({uid}) => ({uid,qty:1}))});
+  } catch (error) {
+    if (error.status >= 400 && error.status < 500) saveHandoff(record, "preparing");
+    throw error;
+  }
   const deposited = matchMoved(before.items, (reply.storage ?? await getStorage()).items, record.items, "sid");
   record.sids = deposited.map(item => item.sid);
   saveHandoff(record, "stored");
@@ -1112,11 +1128,14 @@ async function receiveHandoff(current, account, record) {
   if (!record.config.equipRules?.length) {
     throw new Error("這筆舊交接缺少原角色的換裝規則，請用「跨角色換裝重綁」補套用。");
   }
-  const sameName = current.snapshot.profiles?.some(profile => profile.name === profileName);
   const box = record.stage === "stored" ? await getStorage() : null;
   const fee = box ? handoffFee(current, box) : 0;
-  const note = sameName ? "會覆蓋目前角色的同名配置。" : "";
-  if (!window.confirm(`領取交接裝備並套用「${profileName}」？倉庫費 ${fee} Zeny。${note}`)) return;
+  const {sameName, skippedWeaponRule} = validateReceiveHandoff(current.snapshot, box, record, marketWeights);
+  const notes = [
+    sameName ? "會覆蓋目前角色的同名配置。" : "",
+    skippedWeaponRule ? "未轉生角色將略過「Base Lv 至少 64」主手規則（轉生後須重新補上）。" : "",
+  ].filter(Boolean).join("\n");
+  if (!window.confirm(`領取交接裝備並套用「${profileName}」？倉庫費 ${fee} Zeny。${notes ? `\n${notes}` : ""}`)) return;
   if (box) {
     const items = record.sids.map((sid, index) => {
       const stored = box.items.find(item => item.sid === sid);
@@ -1128,7 +1147,16 @@ async function receiveHandoff(current, account, record) {
     record.target = current.characterId;
     saveHandoff(record, "withdrawPending");
     const before = current.snapshot.inventory;
-    const reply = await handoffCommand(current, {type:"storageWithdraw", items});
+    let reply;
+    try {
+      reply = await handoffCommand(current, {type:"storageWithdraw", items});
+    } catch (error) {
+      if (error.status >= 400 && error.status < 500) {
+        delete record.target;
+        saveHandoff(record, "stored");
+      }
+      throw error;
+    }
     current = reply.view;
     record.newUids = matchMoved(before, current.snapshot.inventory, record.items, "uid").map(item => item.uid);
     saveHandoff(record, "received");
