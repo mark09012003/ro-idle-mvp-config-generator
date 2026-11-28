@@ -1,5 +1,6 @@
 export const storageKeys = {
   theme: "ui-theme-v1",
+  keepAwake: "ui-keep-awake-v1",
   activeTab: "active-tool-tab-v1",
   refineUi: "refine-ui-prefs-v1",
   refineSupply: "refine-supply-options-v1",
@@ -99,12 +100,14 @@ function readJson(store, key) {
 
 export function exportAllSettings(store) {
   const theme = store.getItem(storageKeys.theme) ?? "";
+  const keepAwakeRaw = store.getItem(storageKeys.keepAwake);
   const activeTab = store.getItem(storageKeys.activeTab);
   const autoStoreRaw = store.getItem(storageKeys.marketAutoStore);
   const presetsRaw = readJson(store, storageKeys.marketPresets);
   return {
     schema: "ro-idle-whitesmith-settings-v1",
     theme: validThemes.has(theme) ? theme : "",
+    keepAwake: keepAwakeRaw === null ? true : keepAwakeRaw === "true",
     activeTab: validTabs.has(activeTab) ? activeTab : "tab-refine",
     refineUi: sanitizeRefineUi(readJson(store, storageKeys.refineUi)),
     refineSupply: readJson(store, storageKeys.refineSupply) ?? {shopMetals: true, buyVending: false, caps: {}},
@@ -128,6 +131,9 @@ export function importAllSettings(jsonText, store) {
   if (typeof parsed.theme === "string" && validThemes.has(parsed.theme)) {
     if (parsed.theme) store.setItem(storageKeys.theme, parsed.theme);
     else store.removeItem?.(storageKeys.theme);
+  }
+  if (typeof parsed.keepAwake === "boolean") {
+    store.setItem(storageKeys.keepAwake, String(parsed.keepAwake));
   }
   if (validTabs.has(parsed.activeTab)) store.setItem(storageKeys.activeTab, parsed.activeTab);
   store.setItem(storageKeys.refineUi, JSON.stringify(sanitizeRefineUi(parsed.refineUi)));

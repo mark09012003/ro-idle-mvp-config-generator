@@ -15,36 +15,50 @@
       if (previous && !previous.end) {
         if (confirmedRebirth && cycle === previous.cycle + 1) {
           previous.end = at;
-          previous.events.push({label: "下一次轉生", at});
+          previous.events.push({key: "rebirth", kind: "rebirth", label: "下一次轉生", at, baseLv: character.baseLv, jobLv: character.jobLv, job: character.job});
         } else {
           previous.partial = true;
-          previous.events.push({label: "恢復觀測時已進入下一輪", at});
+          previous.events.push({key: "gap", kind: "start", label: "恢復觀測時已進入下一輪", at});
         }
       }
       rounds.push({cycle, start: at, partial: !confirmedRebirth, events: [
-        {key: "start", label: confirmedRebirth ? "轉生完成" : "開始觀測", at},
+        {key: "start", kind: "start", label: confirmedRebirth ? "轉生完成" : "開始觀測", at, baseLv: character.baseLv, jobLv: character.jobLv, job: character.job},
       ]});
       changed = true;
     }
 
     const round = rounds.at(-1);
-    const add = (key, label) => {
+    const add = (key, label, kind = "level") => {
       if (round.events.some(event => event.key === key)) return;
-      round.events.push({key, label, at});
+      round.events.push({key, kind, label, at, baseLv: character.baseLv, jobLv: character.jobLv, job: character.job});
       changed = true;
     };
     if (!round.end) {
-      add(`job:${character.job}`, `${jobs[character.job]} · Base ${character.baseLv}／Job ${character.jobLv}`);
+      add(`job:${character.job}`, `${jobs[character.job]} · Base ${character.baseLv}／Job ${character.jobLv}`, "job");
+      if ((character.skills?.AC_CONCENTRATION ?? 0) >= 10) {
+        add("skill:conc10", "心神凝聚 Lv.10", "skill");
+      }
+      if (character.job === "sniper" && (character.skills?.SN_SHARPSHOOTING ?? 0) >= 5) {
+        add("skill:sharp5", "銳利射擊 Lv.5", "skill");
+      }
+      if (character.job === "sniper" && (character.skills?.SN_SIGHT ?? 0) >= 10) {
+        add("skill:sight10", "狙殺瞄準 Lv.10", "skill");
+      }
+      const isSecondJob = character.job === "hunter" || character.job === "sniper";
+      if (isSecondJob && character.baseLv >= 70) add("base:70", "達 Base 70", "level");
       if (character.job === "sniper" && !round.events.some(event => event.key === "base75")) {
         const threshold = globalThis.roArcherWindwalkBase(character.rebirth);
-        if (character.baseLv >= threshold) add("windwalkBase", `神射手達風之步門檻 Base ${threshold}`);
+        if (character.baseLv >= threshold) add("windwalkBase", `達風之步門檻 Base ${threshold}`, "skill");
       }
-      if (character.job === "sniper" && (character.skills?.SN_WINDWALK ?? 0) >= 10) add("windwalk", "風之步 10");
+      if (character.job === "sniper" && (character.skills?.SN_WINDWALK ?? 0) >= 10) add("windwalk", "風之步 Lv.10", "skill");
+      if (isSecondJob && character.baseLv >= 80) add("base:80", "達 Base 80", "level");
+      if (isSecondJob && character.baseLv >= 90) add("base:90", "達 Base 90", "level");
+      if (isSecondJob && character.baseLv >= 95) add("base:95", "達 Base 95", "level");
       const target = {hunter: 50, sniper: 70}[character.job];
-      if (target && character.jobLv >= target) add("jobCap", `達 Job ${target}`);
-      if (character.baseLv >= 99) add("baseCap", "達 Base 99");
+      if (target && character.jobLv >= target) add("jobCap", `達 Job ${target}`, "cap");
+      if (character.baseLv >= 99) add("baseCap", "達 Base 99", "cap");
       if (target && character.baseLv >= 99 && character.jobLv >= target) {
-        add("max", "達到 Base／Job 目標");
+        add("max", `達滿等目標 Base 99／Job ${target}`, "cap");
         if (cycle >= 10 && character.job === "sniper") round.end = at;
       }
     }

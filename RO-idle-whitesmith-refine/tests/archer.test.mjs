@@ -8,7 +8,7 @@ import {fileURLToPath} from "node:url";
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function loadArcherGlobals() {
-  const ctx = {globalThis: {}};
+  const ctx = {globalThis: {}, structuredClone};
   ctx.globalThis = ctx;
   for (const file of ["archer-tree.js", "archer-plan.js", "archer-timing.js"]) {
     vm.runInNewContext(fs.readFileSync(path.join(dir, file), "utf8"), ctx, {filename: file});
@@ -78,4 +78,34 @@ test("archer windwalk threshold decreases by 1 per subsequent rebirth", () => {
     },
   });
   assert.match(waiting.message, /等待 Base 74/);
+});
+
+test("archer-timing records detailed skill and base level milestones across a rebirth cycle", () => {
+  const {roArcherTiming} = loadArcherGlobals();
+  let rounds = [];
+  const t0 = 1_700_000_000_000;
+  rounds = roArcherTiming.recordProgress(rounds, {
+    job: "archer_high", baseLv: 30, jobLv: 35, rebirth: {from: "hunter"},
+    skills: {AC_CONCENTRATION: 10},
+  }, t0, true);
+  assert.equal(rounds.length, 1);
+  assert.ok(rounds[0].events.some(e => e.key === "skill:conc10" && e.kind === "skill"));
+
+  rounds = roArcherTiming.recordProgress(rounds, {
+    job: "sniper", baseLv: 75, jobLv: 45, rebirth: {from: "hunter"},
+    skills: {AC_CONCENTRATION: 10, SN_SHARPSHOOTING: 5, SN_SIGHT: 10, SN_WINDWALK: 10},
+  }, t0 + 600_000, false);
+  const keys = new Set(rounds[0].events.map(e => e.key));
+  for (const expected of ["job:sniper", "skill:sharp5", "skill:sight10", "base:70", "windwalkBase", "windwalk"]) {
+    assert.ok(keys.has(expected), `missing milestone ${expected}`);
+  }
+
+  rounds = roArcherTiming.recordProgress(rounds, {
+    job: "sniper", baseLv: 99, jobLv: 70, rebirth: {from: "hunter"},
+    skills: {AC_CONCENTRATION: 10, SN_SHARPSHOOTING: 5, SN_SIGHT: 10, SN_WINDWALK: 10},
+  }, t0 + 3_600_000, false);
+  const keys2 = new Set(rounds[0].events.map(e => e.key));
+  for (const expected of ["base:80", "base:90", "base:95", "jobCap", "baseCap", "max"]) {
+    assert.ok(keys2.has(expected), `missing milestone ${expected}`);
+  }
 });

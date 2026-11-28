@@ -466,6 +466,32 @@ button:disabled {
   background: var(--surface-2);
 }
 
+.btn-pill {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.btn-pill:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.btn-pill.is-active {
+  background: var(--green-soft);
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -737,35 +763,243 @@ button:disabled {
   color: var(--muted);
 }
 
-/* Growth Timing */
+/* Growth Timing & Milestones */
 .timing-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   font-size: 12.5px;
   color: var(--muted);
 }
 
-#archer-timing details {
-  margin-bottom: 6px;
-  padding: 7px 9px;
+.timing-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.timing-kpi {
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timing-kpi-label {
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.timing-kpi-value {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.timing-kpi-sub {
+  font-size: 10.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timing-stepper {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  padding: 7px 8px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   border: 1px solid var(--border);
 }
 
-#archer-timing summary {
+.timing-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--muted);
+  text-align: center;
+}
+
+.timing-step-bar {
+  width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.timing-step.is-done {
+  color: var(--green);
+}
+
+.timing-step.is-done .timing-step-bar {
+  background: var(--green);
+}
+
+.timing-step.is-current {
+  color: var(--accent);
+}
+
+.timing-step.is-current .timing-step-bar {
+  background: var(--accent);
+}
+
+#archer-timing details.timing-round {
+  margin: 0;
+  padding: 8px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+#archer-timing details.timing-round summary {
   cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.timing-round-left {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.timing-round-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.timing-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.timing-tag-live {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+}
+
+.timing-tag-done {
+  background: var(--green-soft);
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
+}
+
+.timing-tag-partial {
+  background: var(--gold-soft);
+  color: var(--gold);
+  border: 1px solid var(--gold-border);
+}
+
+.timing-round-duration {
+  font-size: 12px;
+  font-weight: 750;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.timing-timeline {
+  margin: 8px 0 0;
+  padding: 4px 0 0 14px;
+  list-style: none;
+  border-top: 1px solid var(--border);
+  position: relative;
+}
+
+.timing-timeline::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 12px;
+  bottom: 10px;
+  width: 2px;
+  background: var(--border-strong);
+  border-radius: 2px;
+}
+
+.timing-node {
+  position: relative;
+  padding: 4px 0 6px 8px;
+}
+
+.timing-node:last-child {
+  padding-bottom: 0;
+}
+
+.timing-node::before {
+  content: "";
+  position: absolute;
+  left: -13px;
+  top: 9px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  border: 2px solid var(--surface-2);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.timing-node.kind-job::before { background: var(--accent); }
+.timing-node.kind-skill::before { background: var(--gold); }
+.timing-node.kind-cap::before,
+.timing-node.kind-rebirth::before { background: var(--green); }
+.timing-node.kind-live::before { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+.timing-node-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.timing-node-label {
+  font-size: 12px;
   font-weight: 700;
   color: var(--text);
 }
 
-#archer-timing ol {
-  margin: 6px 0 0;
-  padding-left: 18px;
-  font-size: 12px;
-  color: var(--text);
+.timing-node-delta {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
 }
 
-#archer-timing li {
-  margin-bottom: 3px;
+.timing-node-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.timing-node-lv {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 10.5px;
+  color: var(--text);
 }
 
 /* Handoff & Rebind */

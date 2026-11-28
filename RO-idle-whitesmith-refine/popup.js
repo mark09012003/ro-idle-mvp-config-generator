@@ -9,6 +9,7 @@ const host = "https://ro-idle.app";
 const floatingTab = new URL(location.href).searchParams.get("gameTab");
 const floating = floatingTab !== null;
 const character = $("character");
+const keepAwakeBtn = $("keep-awake");
 const themeToggle = $("theme-toggle");
 const roleMeta = $("role-meta");
 const roleTown = $("role-town");
@@ -88,6 +89,103 @@ themeToggle.onclick = () => {
   const next = isDarkThemeActive(current) ? "light" : "dark";
   try { localStorage.setItem(storageKeys.theme, next); } catch {}
   applyTheme(next);
+};
+
+let keepAwakeEnabled = true;
+let keepAwakeTimer = null;
+let keepAwakeInitTimer = null;
+let keepAwakeStep = 0;
+let lastKeepAwakeAt = 0;
+const keepAwakeIntervalMs = 45_000;
+const keepAwakeClock = new Intl.DateTimeFormat("zh-TW", {timeStyle: "medium"});
+
+function renderKeepAwakeButton() {
+  keepAwakeBtn.hidden = !floating;
+  keepAwakeBtn.classList.toggle("is-active", keepAwakeEnabled);
+  keepAwakeBtn.textContent = keepAwakeEnabled ? "● 防休息" : "○ 防休息";
+  const lastText = lastKeepAwakeAt ? `（上次滑動 ${keepAwakeClock.format(lastKeepAwakeAt)}）` : "";
+  keepAwakeBtn.title = keepAwakeEnabled
+    ? `開啟懸浮視窗時每 45 秒於遊戲分頁模擬滑鼠滑動，避免放置太久進入休息${lastText} · 點擊暫停`
+    : "已暫停自動模擬滑鼠滑動 · 點擊重新啟用";
+}
+
+async function simulateMouseSlide() {
+  if (!floating || !keepAwakeEnabled || !tabId) return;
+  try {
+    const [reply] = await chrome.scripting.executeScript({
+      target: {tabId},
+      args: [host, ++keepAwakeStep],
+      func: (origin, step) => {
+        if (location.origin !== origin || location.pathname.startsWith("/info")) return {skipped: true};
+        const width = Math.max(320, window.innerWidth || 1024);
+        const height = Math.max(240, window.innerHeight || 768);
+        const cx = Math.round(width * 0.5) + ((step * 17) % 61) - 30;
+        const cy = Math.round(height * 0.5) + ((step * 13) % 49) - 24;
+        const sx = (window.screenX || 0) + cx;
+        const sy = (window.screenY || 0) + cy;
+        const angle = (step * 1.15) % (Math.PI * 2);
+        const frames = [0, 1, 2, 3];
+        let prevX = cx;
+        let prevY = cy;
+        for (const index of frames) {
+          setTimeout(() => {
+            const dist = 6 + index * 6;
+            const x = Math.round(cx + Math.cos(angle + index * 0.35) * dist);
+            const y = Math.round(cy + Math.sin(angle + index * 0.35) * dist);
+            const screenX = Math.round(sx + (x - cx));
+            const screenY = Math.round(sy + (y - cy));
+            const movementX = x - prevX;
+            const movementY = y - prevY;
+            prevX = x;
+            prevY = y;
+            if (typeof PointerEvent === "function") {
+              window.dispatchEvent(new PointerEvent("pointermove", {
+                bubbles: true, cancelable: false, composed: true,
+                pointerId: 1, pointerType: "mouse", isPrimary: true,
+                clientX: x, clientY: y, screenX, screenY, movementX, movementY,
+              }));
+            }
+            window.dispatchEvent(new MouseEvent("mousemove", {
+              bubbles: true, cancelable: false,
+              clientX: x, clientY: y, screenX, screenY, movementX, movementY,
+            }));
+          }, index * 85);
+        }
+        return {ok: true, visible: document.visibilityState === "visible"};
+      },
+    });
+    if (reply?.result?.ok) {
+      lastKeepAwakeAt = Date.now();
+      renderKeepAwakeButton();
+    }
+  } catch {}
+}
+
+function syncKeepAwakeTimer(immediate = false) {
+  clearInterval(keepAwakeTimer);
+  clearTimeout(keepAwakeInitTimer);
+  keepAwakeTimer = keepAwakeInitTimer = null;
+  if (!floating || !keepAwakeEnabled || !tabId) return;
+  keepAwakeTimer = setInterval(() => void simulateMouseSlide(), keepAwakeIntervalMs);
+  if (immediate) keepAwakeInitTimer = setTimeout(() => void simulateMouseSlide(), 2500);
+}
+
+function loadKeepAwake() {
+  try {
+    keepAwakeEnabled = localStorage.getItem(storageKeys.keepAwake) !== "false";
+  } catch {
+    keepAwakeEnabled = true;
+  }
+  renderKeepAwakeButton();
+  syncKeepAwakeTimer(false);
+}
+
+loadKeepAwake();
+keepAwakeBtn.onclick = () => {
+  keepAwakeEnabled = !keepAwakeEnabled;
+  try { localStorage.setItem(storageKeys.keepAwake, String(keepAwakeEnabled)); } catch {}
+  renderKeepAwakeButton();
+  syncKeepAwakeTimer(keepAwakeEnabled);
 };
 
 function renderRoleMeta(currentView = view) {
@@ -1591,11 +1689,20 @@ $("archer-start").onclick = () => archerMonitor("start");
 $("archer-stop").onclick = () => archerMonitor("stop");
 
 setInterval(() => {
-  if (!$("panel-growth").hidden) void archerMonitor("status");
+  if (!$("panel-growth").hidden) {
+    void archerMonitor("status");
+    updateLiveTimingClock();
+  }
 }, 1500);
 
-const timingDate = new Intl.DateTimeFormat("zh-TW", {dateStyle:"short", timeStyle:"medium"});
+const timingDate = new Intl.DateTimeFormat("zh-TW", {month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false});
+const archerTimingClear = $("archer-timing-clear");
+const archerJobNames = {
+  novice: "初學者", novice_high: "進階初學者", archer: "弓箭手",
+  archer_high: "進階弓箭手", hunter: "獵人", sniper: "神射手",
+};
 let timingRenderKey = "";
+let activeRoundTiming = null;
 
 function timingDuration(ms) {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -1604,11 +1711,109 @@ function timingDuration(ms) {
   return `${hours} 小時 ${minutes} 分 ${seconds % 60} 秒`;
 }
 
+function timingDurationShort(ms) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  const secs = seconds % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  if (minutes > 0) return `${minutes}m ${String(secs).padStart(2, "0")}s`;
+  return `${secs}s`;
+}
+
+function inferEventKind(event) {
+  if (event.kind) return event.kind;
+  const key = event.key ?? "";
+  if (key === "start") return "start";
+  if (key.startsWith("job:")) return "job";
+  if (key.startsWith("skill:") || key === "windwalkBase" || key === "base75" || key === "windwalk") return "skill";
+  if (key === "jobCap" || key === "baseCap" || key === "max") return "cap";
+  if (key === "rebirth" || event.label?.includes("轉生")) return "rebirth";
+  return "level";
+}
+
+function buildTimingStepper(round, liveChar) {
+  const keys = new Set((round.events ?? []).map(event => event.key).filter(Boolean));
+  const isSniperCycle = round.cycle > 0;
+  const liveJob = liveChar?.job ?? "";
+  const liveBase = liveChar?.baseLv ?? 0;
+  const liveJobLv = liveChar?.jobLv ?? 0;
+  const jobRank = {novice: 1, novice_high: 1, archer: 2, archer_high: 2, hunter: 3, sniper: 3}[liveJob] ?? 0;
+  const hasSecond = keys.has("job:hunter") || keys.has("job:sniper") || jobRank >= 3;
+  const hasFirst = hasSecond || keys.has("job:archer") || keys.has("job:archer_high") || jobRank >= 2;
+  const hasNovice = hasFirst || keys.has("job:novice") || keys.has("job:novice_high") || jobRank >= 1;
+  const hasMid = isSniperCycle
+    ? (keys.has("windwalk") || (liveJob === "sniper" && (liveChar?.skills?.SN_WINDWALK ?? 0) >= 10))
+    : (keys.has("base:70") || (hasSecond && liveBase >= 70));
+  const targetJobCap = isSniperCycle ? 70 : 50;
+  const hasJobCap = keys.has("jobCap") || keys.has("max") || (hasSecond && liveJobLv >= targetJobCap);
+  const hasBaseCap = keys.has("baseCap") || keys.has("max") || liveBase >= 99;
+  const stages = [
+    {label: "初學", done: hasFirst},
+    {label: "一轉", done: hasSecond},
+    {label: "二轉", done: hasSecond},
+    {label: isSniperCycle ? "風步10" : "Lv70", done: hasMid},
+    {label: `Job${targetJobCap}`, done: hasJobCap},
+    {label: "Lv99", done: hasBaseCap},
+  ];
+  let currentIdx = stages.findIndex(stage => !stage.done);
+  if (currentIdx === -1 && round.end) currentIdx = stages.length;
+  else if (currentIdx === 0 && !hasNovice) currentIdx = 0;
+
+  const stepper = document.createElement("div");
+  stepper.className = "timing-stepper";
+  stages.forEach((stage, index) => {
+    const item = document.createElement("div");
+    item.className = "timing-step";
+    if (stage.done) item.classList.add("is-done");
+    else if (index === currentIdx && !round.end) item.classList.add("is-current");
+    const bar = document.createElement("span");
+    bar.className = "timing-step-bar";
+    const text = document.createElement("span");
+    text.textContent = stage.label;
+    item.append(bar, text);
+    stepper.append(item);
+  });
+  return stepper;
+}
+
+function buildKpiCard(label, value, sub = "") {
+  const card = document.createElement("div");
+  card.className = "timing-kpi";
+  const l = document.createElement("span");
+  l.className = "timing-kpi-label";
+  l.textContent = label;
+  const v = document.createElement("span");
+  v.className = "timing-kpi-value";
+  v.textContent = value;
+  card.append(l, v);
+  if (sub) {
+    const s = document.createElement("span");
+    s.className = "timing-kpi-sub";
+    s.textContent = sub;
+    s.title = sub;
+    card.append(s);
+  }
+  return card;
+}
+
+function updateLiveTimingClock() {
+  if (!activeRoundTiming) return;
+  const now = Date.now();
+  const {start, lastAt, durationEl, liveMetaEl} = activeRoundTiming;
+  if (durationEl) durationEl.textContent = `已耗 ${timingDurationShort(now - start)}`;
+  if (liveMetaEl) {
+    liveMetaEl.textContent = `距上一里程碑 ${timingDurationShort(now - lastAt)} · 累計 ${timingDuration(now - start)}`;
+  }
+}
+
 async function renderArcherTiming() {
   const id = activeRole?.id;
   const target = $("archer-timing");
   if (!id) {
     timingRenderKey = "";
+    activeRoundTiming = null;
+    archerTimingClear.hidden = true;
     target.textContent = "請先進入遊戲角色。";
     return;
   }
@@ -1617,34 +1822,166 @@ async function renderArcherTiming() {
     const data = await chrome.storage.local.get(key);
     if (activeRole?.id !== id) return;
     const rounds = data[key] ?? [];
-    const signature = JSON.stringify([id, rounds]);
-    if (signature === timingRenderKey) return;
-    timingRenderKey = signature;
-    if (!rounds.length) {
-      target.textContent = "尚無紀錄。啟用自動加點後開始計時。";
+    archerTimingClear.hidden = !rounds.length;
+    const liveChar = view?.characterId === id ? view.snapshot?.character : null;
+    const liveKey = liveChar ? [liveChar.job, liveChar.baseLv, liveChar.jobLv, liveChar.rebirth?.count ?? -1] : null;
+    const signature = JSON.stringify([id, rounds, liveKey]);
+    if (signature === timingRenderKey) {
+      updateLiveTimingClock();
       return;
     }
-    target.replaceChildren(...[...rounds].reverse().map((round, index) => {
+    timingRenderKey = signature;
+    activeRoundTiming = null;
+    if (!rounds.length) {
+      target.textContent = "尚無紀錄。啟用自動加點後開始計時，會記錄轉職、核心技能與等級里程碑。";
+      return;
+    }
+
+    const latest = rounds.at(-1);
+    const fullDone = rounds.filter(r => r.end && !r.partial);
+    const anyDone = fullDone.length ? fullDone : rounds.filter(r => r.end);
+    const avgMs = anyDone.length ? anyDone.reduce((sum, r) => sum + (r.end - r.start), 0) / anyDone.length : null;
+    const fastest = anyDone.length
+      ? anyDone.reduce((best, r) => (r.end - r.start) < (best.end - best.start) ? r : best)
+      : null;
+
+    const kpiGrid = document.createElement("div");
+    kpiGrid.className = "timing-kpi-grid";
+    const cycleLabel = latest.cycle ? `第 ${latest.cycle}／10 轉` : "轉生前";
+    const liveSub = liveChar && Object.hasOwn(archerJobNames, liveChar.job)
+      ? `${archerJobNames[liveChar.job]} ${liveChar.baseLv}/${liveChar.jobLv}`
+      : `已記 ${latest.events?.length ?? 0} 里程碑`;
+    kpiGrid.append(
+      buildKpiCard("目前進度", cycleLabel, liveSub),
+      buildKpiCard(
+        "平均單轉",
+        avgMs !== null ? timingDurationShort(avgMs) : "—",
+        anyDone.length ? `${fullDone.length ? "完整" : "含部分"} ${anyDone.length} 輪` : "尚未完成單輪",
+      ),
+      buildKpiCard(
+        "最快紀錄",
+        fastest ? timingDurationShort(fastest.end - fastest.start) : "—",
+        fastest ? (fastest.cycle ? `第 ${fastest.cycle} 轉` : "轉生前") : `累計觀測 ${rounds.length} 輪`,
+      ),
+    );
+
+    const nodes = [kpiGrid, buildTimingStepper(latest, liveChar)];
+    const now = Date.now();
+    for (const [index, round] of [...rounds].reverse().entries()) {
       const block = document.createElement("details");
+      block.className = "timing-round";
       block.open = index === 0;
+
       const summary = document.createElement("summary");
-      const title = round.cycle ? `第 ${round.cycle} 轉` : "轉生前";
-      const duration = round.end ? timingDuration(round.end - round.start) : index === 0 ? "計時未結算" : "結束時間未記錄";
-      summary.textContent = `${title} · ${round.partial ? "部分紀錄 · " : ""}${duration}`;
-      const events = document.createElement("ol");
-      for (const event of round.events) {
-        const row = document.createElement("li");
-        row.textContent = `${timingDate.format(event.at)} · ${event.label}（+${timingDuration(event.at - round.start)}）`;
-        events.append(row);
+      const left = document.createElement("div");
+      left.className = "timing-round-left";
+      const title = document.createElement("span");
+      title.className = "timing-round-title";
+      title.textContent = round.cycle ? `第 ${round.cycle} 轉` : "轉生前";
+      const tag = document.createElement("span");
+      tag.className = "timing-tag";
+      if (round.end) {
+        tag.classList.add(round.partial ? "timing-tag-partial" : "timing-tag-done");
+        tag.textContent = round.partial ? "部分完成" : "已完成";
+      } else if (index === 0) {
+        tag.classList.add("timing-tag-live");
+        tag.textContent = round.partial ? "進行中·續記" : "進行中";
+      } else {
+        tag.classList.add("timing-tag-partial");
+        tag.textContent = "未結算";
       }
-      block.append(summary, events);
-      return block;
-    }));
+      left.append(title, tag);
+
+      const dur = document.createElement("span");
+      dur.className = "timing-round-duration";
+      if (round.end) {
+        dur.textContent = timingDurationShort(round.end - round.start);
+        dur.title = timingDuration(round.end - round.start);
+      } else if (index === 0) {
+        dur.textContent = `已耗 ${timingDurationShort(now - round.start)}`;
+      } else {
+        dur.textContent = "—";
+      }
+      summary.append(left, dur);
+
+      const timeline = document.createElement("ol");
+      timeline.className = "timing-timeline";
+      const events = round.events ?? [];
+      events.forEach((event, eventIdx) => {
+        const li = document.createElement("li");
+        li.className = `timing-node kind-${inferEventKind(event)}`;
+        const head = document.createElement("div");
+        head.className = "timing-node-head";
+        const label = document.createElement("span");
+        label.className = "timing-node-label";
+        label.textContent = event.label;
+        const delta = document.createElement("span");
+        delta.className = "timing-node-delta";
+        if (eventIdx === 0) {
+          delta.textContent = "起點";
+        } else {
+          const stepMs = Math.max(0, event.at - events[eventIdx - 1].at);
+          delta.textContent = `+${timingDurationShort(stepMs)}`;
+          delta.title = `本段耗時 ${timingDuration(stepMs)}`;
+        }
+        head.append(label, delta);
+
+        const meta = document.createElement("div");
+        meta.className = "timing-node-meta";
+        const timeSpan = document.createElement("span");
+        timeSpan.textContent = timingDate.format(event.at);
+        const totalSpan = document.createElement("span");
+        totalSpan.textContent = `累計 ${timingDurationShort(event.at - round.start)}`;
+        totalSpan.title = timingDuration(event.at - round.start);
+        meta.append(timeSpan, totalSpan);
+        if (Number.isInteger(event.baseLv) && Number.isInteger(event.jobLv) && !event.label.includes("Base")) {
+          const lv = document.createElement("span");
+          lv.className = "timing-node-lv";
+          lv.textContent = `B${event.baseLv}/J${event.jobLv}`;
+          meta.append(lv);
+        }
+        li.append(head, meta);
+        timeline.append(li);
+      });
+
+      if (!round.end && index === 0 && events.length) {
+        const lastAt = events.at(-1).at;
+        const liveNode = document.createElement("li");
+        liveNode.className = "timing-node kind-live";
+        const head = document.createElement("div");
+        head.className = "timing-node-head";
+        const label = document.createElement("span");
+        label.className = "timing-node-label";
+        label.textContent = "持續練級中…";
+        head.append(label);
+        const meta = document.createElement("div");
+        meta.className = "timing-node-meta";
+        meta.textContent = `距上一里程碑 ${timingDurationShort(now - lastAt)} · 累計 ${timingDuration(now - round.start)}`;
+        liveNode.append(head, meta);
+        timeline.append(liveNode);
+        activeRoundTiming = {start: round.start, lastAt, durationEl: dur, liveMetaEl: meta};
+      }
+
+      block.append(summary, timeline);
+      nodes.push(block);
+    }
+    target.replaceChildren(...nodes);
   } catch {
     timingRenderKey = "";
+    archerTimingClear.hidden = true;
     target.textContent = "無法讀取本機計時紀錄。";
   }
 }
+
+archerTimingClear.onclick = async () => {
+  const id = activeRole?.id;
+  if (!id || !window.confirm(`確定清除 ${activeRole.name} 的全部轉生計時與里程碑紀錄？`)) return;
+  try {
+    await chrome.storage.local.remove(`archer-timing-v1:${id}`);
+    timingRenderKey = "";
+    await renderArcherTiming();
+  } catch {}
+};
 
 globalThis.chrome?.storage?.onChanged?.addListener((changes, area) => {
   if (area === "local" && changes[`archer-timing-v1:${activeRole?.id}`]) void renderArcherTiming();
@@ -1737,6 +2074,7 @@ $("settings-import").onclick = async () => {
   try {
     const imported = importAllSettings(text, localStorage);
     loadTheme();
+    loadKeepAwake();
     loadRefineUiPrefs();
     loadRefineSupplyOptions();
     updateRefineSupplyVisibility();
@@ -1778,6 +2116,8 @@ async function initialize() {
       throw new Error("請先在 ro-idle.app 進入角色，再從 Chrome 工具列開啟擴充。");
     }
     tabId = tab.id;
+    renderKeepAwakeButton();
+    syncKeepAwakeTimer(true);
     [catalog, marketSlots, marketTowns, marketWeights, rebindItems] = await Promise.all(
       ["catalog.json", "market-slots.json", "market-towns.json", "market-weights.json", "rebind-items.json"].map(async path => {
         const response = await fetch(path, {signal: AbortSignal.timeout(10000)});

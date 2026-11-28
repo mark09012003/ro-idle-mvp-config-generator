@@ -12,9 +12,10 @@
     <header class="tool-header">
       <div class="brand">
         <h1>RO 放置仙境工具</h1>
-        <span class="version-pill">v1.11.1</span>
+        <span class="version-pill">v1.11.2</span>
       </div>
       <div class="header-actions">
+        <button id="keep-awake" class="btn-pill" type="button" hidden title="懸浮視窗開啟時定時模擬滑鼠滑動，避免頁面進入休息">● 防休息</button>
         <button id="theme-toggle" class="btn-icon" type="button" title="切換淺色／深色主題" aria-label="切換淺色／深色主題">◐</button>
         <button id="open-floating" class="btn-ghost" type="button" hidden>浮動視窗</button>
       </div>
@@ -175,7 +176,8 @@
 
         <div class="card">
           <div class="card-head">
-            <h2>轉生計時紀錄</h2>
+            <h2>轉生計時與里程碑</h2>
+            <button id="archer-timing-clear" class="btn-ghost btn-sm btn-danger-text" type="button" hidden>清除紀錄</button>
           </div>
           <div id="archer-timing" class="timing-list">尚無紀錄。</div>
         </div>
