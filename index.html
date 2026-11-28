@@ -1009,6 +1009,16 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 #route-io-status { margin: 4px 0 0; font-size: 12px; color: var(--dim); }
 #route-io-status[data-error="true"] { color: #b91c1c; font-weight: 600; }
 :root[data-theme="dark"] #route-io-status[data-error="true"] { color: #fca5a5; }
+.share-panel { padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; background: var(--paper); box-shadow: 0 2px 8px #1e283312; }
+.share-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.share-panel-head h2 { margin: 0; font-size: 15px; color: var(--title); }
+.share-panel textarea { width: 100%; min-height: 84px; margin: 6px 0; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; }
+#config-share-status { margin: 4px 0 0; font-size: 12px; color: var(--dim); }
+#config-share-status[data-error="true"] { color: #b91c1c; font-weight: 600; }
+:root[data-theme="dark"] #config-share-status[data-error="true"] { color: #fca5a5; }
+.share-toast { padding: 8px 11px; border-radius: 8px; border: 1px solid var(--accent); background: var(--using); color: var(--title); font-size: 12.5px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.share-toast[data-error="true"] { border-color: #b91c1c; background: #fef2f2; color: #991b1b; }
+:root[data-theme="dark"] .share-toast[data-error="true"] { border-color: #f87171; background: #3b1c1c; color: #fecaca; }
 .preview-checklist { margin: 0 0 10px; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--line); border-left: 3px solid var(--gold); background: var(--using); font-size: 12.5px; line-height: 1.55; }
 .preview-checklist[data-warn="true"] { border-left-color: #b91c1c; background: #fef2f2; color: #991b1b; }
 :root[data-theme="dark"] .preview-checklist[data-warn="true"] { border-left-color: #f87171; background: #3b1c1c; color: #fecaca; }
@@ -1177,11 +1187,36 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
   <h1>巡迴配置產生器</h1>
   <div class="header-actions">
     <a class="btn tiny primary" href="RO-idle-dps/">單怪 DPS 試算</a>
+    <button class="btn tiny" id="toggle-share-config" type="button" aria-expanded="false">分享／匯入配置</button>
     <button class="btn tiny" id="reset-route" type="button" disabled>回到預設</button>
     <button class="btn tiny" id="theme-toggle" type="button" aria-pressed="false">深色模式</button>
     <button class="btn tiny" id="start-guide" type="button">開始引導</button>
   </div>
 </header>
+<div id="share-toast" class="share-toast" role="status" hidden>
+  <span id="share-toast-text"></span>
+  <button class="btn tiny" id="share-toast-close" type="button">知道了</button>
+</div>
+<section id="config-share-panel" class="share-panel" hidden>
+  <div class="share-panel-head">
+    <h2>分享／匯入完整配置（含路線、隊伍、角色、掉落物與自訂巨集）</h2>
+    <button class="btn tiny" id="config-share-close" type="button">收合</button>
+  </div>
+  <p class="section-help">「分享配置」會打包整頁所有設定（隊伍人數、帶隊職業、Buff、三種角色規則、巡迴路線、掉落物篩選與自訂巨集）。若只想單純分享地圖順序，可使用下方「分享路線」功能。</p>
+  <div class="route-io-actions">
+    <button class="btn tiny primary" id="config-share-link" type="button">複製分享配置連結</button>
+    <button class="btn tiny primary" id="config-share-download" type="button">匯出配置檔案 (.json)</button>
+    <button class="btn tiny" id="config-share-copy" type="button">複製配置 JSON</button>
+    <button class="btn tiny" id="config-share-upload-btn" type="button">匯入配置檔案</button>
+    <input id="config-share-file" type="file" accept=".json,.txt,application/json,text/plain" hidden>
+  </div>
+  <textarea id="config-share-text" rows="4" spellcheck="false" placeholder="貼上別人分享的配置 JSON、路線 JSON，或整段分享連結（#config=...／#route=...），按「套用匯入」。"></textarea>
+  <div class="route-io-actions">
+    <button class="btn tiny primary" id="config-share-import" type="button">套用匯入</button>
+    <button class="btn tiny" id="config-share-clear" type="button">清空</button>
+  </div>
+  <p id="config-share-status" role="status"></p>
+</section>
 <div class="workspace">
 <form id="generator">
 <div id="guide-controls" hidden>
@@ -1360,17 +1395,18 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
   </ul>
 </details>
 <details id="route-io-details" class="route-multi-notice">
-  <summary>匯出／匯入巡迴路線（可交給 AI 編排再貼回）</summary>
-  <p class="section-help">按「複製 AI 填寫模板」可直接貼給 ChatGPT／Gemini／Claude 幫你排順序（含重複巡迴與目標怪物），再把 AI 回覆的 JSON 貼到下方按「套用匯入」即可。</p>
+  <summary>分享／匯入巡迴路線（匯出路線檔案、分享連結、AI 編排）</summary>
+  <p class="section-help">可將巡迴路線（地圖順序、目標怪物與個別規則）匯出成檔案或分享連結給朋友；也可複製 AI 填寫模板貼給 ChatGPT／Gemini／Claude 幫你排順序後貼回。</p>
   <div class="route-io-actions">
-    <button class="btn tiny primary" id="route-io-copy-ai" type="button">複製 AI 填寫模板（含地圖對照）</button>
-    <button class="btn tiny" id="route-io-copy-json" type="button">複製目前路線 JSON</button>
-    <button class="btn tiny" id="route-io-download" type="button">下載 JSON</button>
-    <button class="btn tiny" id="route-io-upload-btn" type="button">從檔案載入</button>
+    <button class="btn tiny primary" id="route-io-share-link" type="button">複製分享路線連結</button>
+    <button class="btn tiny primary" id="route-io-download" type="button">匯出路線檔案 (.json)</button>
+    <button class="btn tiny" id="route-io-upload-btn" type="button">匯入路線檔案</button>
     <input id="route-io-file" type="file" accept=".json,.txt,application/json,text/plain" hidden>
+    <button class="btn tiny" id="route-io-copy-ai" type="button">複製 AI 填寫模板（含地圖對照）</button>
+    <button class="btn tiny" id="route-io-copy-json" type="button">複製路線 JSON</button>
     <label class="check"><input id="route-io-include-all" type="checkbox"> AI 模板附全部 254 張地圖</label>
   </div>
-  <textarea id="route-io-text" rows="6" spellcheck="false" placeholder="貼上巡迴路線 JSON，或直接貼上 AI 回覆的 ```json ... ``` 區塊，再按「套用匯入」。"></textarea>
+  <textarea id="route-io-text" rows="6" spellcheck="false" placeholder="貼上巡迴路線 JSON、分享路線連結（#route=...），或直接貼上 AI 回覆的 ```json ... ``` 區塊，再按「套用匯入路線」。"></textarea>
   <div class="route-io-actions">
     <button class="btn tiny primary" id="route-io-import" type="button">套用匯入路線</button>
     <button class="btn tiny" id="route-io-fill-current" type="button">將目前路線填入文字框</button>
@@ -1445,7 +1481,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 </select></label>
 </div>
 <p id="preview-note" class="section-help">展開每份配置，核對等待、離圖和配置切換順序。下載後按配置名稱在遊戲中儲存，從 01 開始。</p>
-<div class="actions"><button class="btn primary" type="submit">產生預覽</button><button class="btn" id="download" type="button" disabled>下載 ZIP</button><button class="btn" id="download-all-modes" type="submit">匯出三種模式 ZIP</button></div>
+<div class="actions"><button class="btn primary" type="submit">產生預覽</button><button class="btn" id="download" type="button" disabled>下載 ZIP</button><button class="btn" id="download-all-modes" type="submit">匯出三種模式 ZIP</button><button class="btn" id="preview-share-config" type="button">分享整套配置</button></div>
 <p class="section-help">三種角色共用路線與隊伍人數，並各自套用自己的進階設定。</p>
 <p id="status" role="status"></p>
 <div id="preview"></div>
@@ -1899,7 +1935,40 @@ SOFTWARE.
     return {rows, warnings, hasCustomRules};
   }
 
-  globalThis.RoConfigBuilder = {validateBase, generate, planSegments, parseRoutePlan};
+  function bytesToBase64Url(bytes) {
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 32768) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + 32768));
+    }
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function base64UrlToBytes(token) {
+    const clean = String(token ?? "").trim().replace(/-/g, "+").replace(/_/g, "/");
+    if (!clean || /[^A-Za-z0-9+/=]/.test(clean)) throw new Error("分享連結代碼格式不正確。");
+    const padded = clean + "=".repeat((4 - clean.length % 4) % 4);
+    const bin = atob(padded);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function encodeShareToken(payload, codec = globalThis.fflate) {
+    const bytes = codec.deflateSync(codec.strToU8(JSON.stringify(payload)), {level: 9});
+    return bytesToBase64Url(bytes);
+  }
+
+  function decodeShareToken(token, codec = globalThis.fflate) {
+    try {
+      const bytes = base64UrlToBytes(token);
+      const text = codec.strFromU8(codec.inflateSync(bytes));
+      return JSON.parse(text);
+    } catch {
+      throw new Error("分享連結資料損壞或格式不正確，請確認已完整複製。");
+    }
+  }
+
+  globalThis.RoConfigBuilder = {validateBase, generate, planSegments, parseRoutePlan, encodeShareToken, decodeShareToken};
 })();
 
 </script>
@@ -2863,9 +2932,48 @@ byId("route-io-clear").onclick = () => {
 };
 
 byId("route-io-download").onclick = () => {
+  if (!route.length) return setRouteIoStatus("目前巡迴路線是空的，請先加入至少一張地圖。", true);
   const json = JSON.stringify(buildRoutePlanObject(), null, 2) + "\n";
   download(json, "ro-idle-route-plan.json", "application/json");
-  setRouteIoStatus(`已下載 ro-idle-route-plan.json（共 ${route.length} 站）。`, false);
+  setRouteIoStatus(`已匯出路線檔案 ro-idle-route-plan.json（共 ${route.length} 站），可直接傳給朋友匯入。`, false);
+};
+
+function buildShareUrl(kind, payload) {
+  const token = RoConfigBuilder.encodeShareToken(payload);
+  const base = location.protocol === "file:" ? "https://mark09012003.github.io/ro-idle-mvp-config-generator/" : `${location.origin}${location.pathname}`;
+  return `${base}#${kind}=${token}`;
+}
+
+function buildCompactRouteSharePayload() {
+  return {
+    format: "ro-idle-route-plan",
+    version: 1,
+    route: route.map(({map, targets, smallRules}) => {
+      const cleanRules = Object.fromEntries(
+        Object.entries(smallRules ?? {}).filter(([, r]) => r && (r.action || r.escape !== undefined)),
+      );
+      return {
+        mapId: map.id,
+        targets: [...targets],
+        ...(Object.keys(cleanRules).length ? {smallRules: cleanRules} : {}),
+      };
+    }),
+  };
+}
+
+byId("route-io-share-link").onclick = () => {
+  if (!route.length) return setRouteIoStatus("目前巡迴路線是空的，請先加入至少一張地圖。", true);
+  try {
+    const url = buildShareUrl("route", buildCompactRouteSharePayload());
+    const lengthNote = url.length > 8000 ? "（路線較長，若聊天軟體截斷網址請改用「匯出路線檔案」）" : "";
+    void copyTextWithFallback(
+      url,
+      `已複製分享路線連結（共 ${route.length} 站，長度 ${url.length} 字元）${lengthNote}，朋友點開即可自動載入路線。`,
+      byId("route-io-text"),
+    );
+  } catch (error) {
+    setRouteIoStatus(`產生分享連結失敗：${error.message}`, true);
+  }
 };
 
 byId("route-io-upload-btn").onclick = () => byId("route-io-file").click();
@@ -2881,11 +2989,26 @@ byId("route-io-file").onchange = async event => {
   }
 };
 
+function resolveShareInputText(rawText) {
+  const trimmed = String(rawText ?? "").trim();
+  const hashMatch = trimmed.match(/#(route|config)=([A-Za-z0-9_-]+)/);
+  if (hashMatch) {
+    return {
+      kind: hashMatch[1],
+      data: RoConfigBuilder.decodeShareToken(hashMatch[2]),
+    };
+  }
+  return null;
+}
+
 byId("route-io-import").onclick = () => {
   if (!maps.length) return setRouteIoStatus("地圖資料尚未載入完成。", true);
   try {
+    const rawInput = value("route-io-text");
+    const linkPayload = resolveShareInputText(rawInput);
+    const jsonSource = linkPayload ? JSON.stringify(linkPayload.data) : rawInput;
     const {rows, warnings, hasCustomRules} = RoConfigBuilder.parseRoutePlan(
-      value("route-io-text"), maps, isMvpTarget,
+      jsonSource, maps, isMvpTarget,
     );
     route.splice(0, route.length, ...rows);
     renderRoute();
@@ -4025,18 +4148,126 @@ function draftFields() {
     .filter(field => field.type !== "file" && field.id !== "route-sequence-input" && !field.id.startsWith("guide-") && !field.closest("#loot-section, #route-io-details"));
 }
 
+function buildFullConfigObject(includeSelected = false) {
+  return {
+    format: "ro-idle-generator-config",
+    version: 1,
+    exportedAt: Date.now(),
+    route: route.map(({map, targets, smallRules}) => {
+      const cleanRules = Object.fromEntries(
+        Object.entries(smallRules ?? {}).filter(([, r]) => r && (r.action || r.escape !== undefined)),
+      );
+      return {
+        mapId: map.id,
+        targets: [...targets],
+        ...(Object.keys(cleanRules).length ? {smallRules: cleanRules} : {}),
+      };
+    }),
+    ...(includeSelected ? {selectedMaps: [...selectedMaps]} : {}),
+    fields: Object.fromEntries(draftFields().map(field =>
+      [field.id, field.type === "checkbox" ? field.checked : field.value])),
+    customMacros: structuredClone(customMacros),
+    itemSettings: itemSettings ? structuredClone(itemSettings) : null,
+    roleRouteConditions: Object.fromEntries(combatRoles.map(({id}) => [id, structuredClone(roleRouteConditions[id].cond)])),
+  };
+}
+
+let defaultFieldValues = new Map();
+
+function resetAllFieldsToDefaults() {
+  route.length = 0;
+  selectedMaps.clear();
+  customMacros = [];
+  setItemSettings(null);
+  lootDetails.open = false;
+  for (const field of draftFields()) {
+    if (!defaultFieldValues.has(field.id)) continue;
+    if (field.type === "checkbox") field.checked = defaultFieldValues.get(field.id);
+    else field.value = defaultFieldValues.get(field.id);
+  }
+  populateLeaderBuffs();
+  byId("buff-search").setCustomValidity("");
+  for (const {id} of combatRoles) {
+    roleRouteConditions[id].cond = {};
+    byId(`role-${id}-action`).onchange();
+    renderRouteOr(id);
+  }
+}
+
+function applyFullConfigObject(draft, {resetFirst = false} = {}) {
+  if (!draft || typeof draft !== "object" || Array.isArray(draft)) {
+    throw new Error("配置格式不正確。");
+  }
+  if (resetFirst) resetAllFieldsToDefaults();
+  const fields = draft.fields ? structuredClone(draft.fields) : null;
+  if (fields && fields.partySize === undefined) {
+    const useWait = fields.mode !== "follower" || fields.waitForParty !== false;
+    const total = useWait ? fields.waitPartySize : fields.movePartySize;
+    const legacy = Number(useWait ? fields.waitBelow : fields.partyBelow);
+    if (typeof total === "string") fields.partySize = total;
+    else if (Number.isInteger(legacy) && legacy >= 1 && legacy <= 11) fields.partySize = String(legacy + 1);
+    else if (!useWait) fields.partySize = "";
+  }
+  const mapsById = new Map(maps.map(map => [map.id, map]));
+  for (const row of draft.route ?? []) {
+    const map = mapsById.get(row.mapId);
+    if (map) route.push({map, targets: [...(row.targets ?? [])], smallRules: structuredClone(row.smallRules ?? {})});
+  }
+  for (const id of draft.selectedMaps ?? []) if (mapsById.has(id)) selectedMaps.add(id);
+  if (fields) {
+    for (const field of draftFields()) {
+      const saved = fields[field.id];
+      if (field.type === "checkbox" && typeof saved === "boolean") field.checked = saved;
+      else if (field.type !== "checkbox" && typeof saved === "string" && field.id !== "buff") {
+        const isMonsterAction = /(?:^|-)(?:targetAction|otherAction)$/.test(field.id);
+        if (!isMonsterAction || Array.from(field.options).some(option => option.value === saved)) field.value = saved;
+      }
+    }
+  }
+  const savedBuffLevel = fields?.routeBuffLevel;
+  populateLeaderBuffs(fields?.buff);
+  if (typeof savedBuffLevel === "string") byId("routeBuffLevel").value = savedBuffLevel;
+  if (Array.isArray(draft.customMacros)) {
+    customMacros = structuredClone(draft.customMacros).map(normalizeMacroActions);
+    byId("macros").value = JSON.stringify(customMacros, null, 2);
+  }
+  if (draft.itemSettings) setItemSettings(readItemSettings(draft.itemSettings));
+  else if (resetFirst) setItemSettings(null);
+  if (draft.routeCondition) routeConditionEditor.cond = structuredClone(draft.routeCondition);
+  for (const {id} of combatRoles) {
+    if (draft.roleRouteConditions?.[id]) roleRouteConditions[id].cond = structuredClone(draft.roleRouteConditions[id]);
+    if (id !== "output" && fields) {
+      for (const name of ["departure", "routeWait"]) {
+        const field = byId(`role-${id}-${name}`);
+        if (fields[field.id] === undefined && typeof fields[name] === "string") field.value = fields[name];
+      }
+    }
+  }
+  if (!fields?.combatMode) {
+    byId("combatMode").value = draft.preset === "support" ? "support"
+      : fields?.mode === "follower" ? "assist" : "output";
+  }
+  for (const {id} of combatRoles) {
+    const field = byId(`role-${id}-skill`);
+    const savedCode = field.value.trim().toUpperCase();
+    const known = [...routeSkillChoices].find(([, code]) => code === savedCode);
+    if (known) field.value = known[0];
+    const itemField = byId(`role-${id}-item`);
+    const knownItem = [...routeItemChoices].find(([, code]) => code === itemField.value.trim());
+    if (knownItem) itemField.value = knownItem[0];
+    byId(`role-${id}-action`).onchange();
+    renderRouteOr(id);
+  }
+  updateOptions();
+  renderMacroEditor();
+  renderRoute();
+  renderMapChoices();
+}
+
 function saveRouteDraft() {
   if (!routeDraftReady) return;
   try {
-    localStorage.setItem(routeDraftKey, JSON.stringify({
-      route: route.map(({map, targets, smallRules}) => ({mapId: map.id, targets, smallRules})),
-      selectedMaps: [...selectedMaps],
-      fields: Object.fromEntries(draftFields().map(field =>
-        [field.id, field.type === "checkbox" ? field.checked : field.value])),
-      customMacros,
-      itemSettings,
-      roleRouteConditions: Object.fromEntries(combatRoles.map(({id}) => [id, roleRouteConditions[id].cond])),
-    }));
+    localStorage.setItem(routeDraftKey, JSON.stringify(buildFullConfigObject(true)));
   } catch {
     // Storage may be disabled in private browsing or for local files.
   }
@@ -4046,50 +4277,148 @@ function restoreRouteDraft() {
   try {
     const draft = JSON.parse(localStorage.getItem(routeDraftKey));
     if (!draft) return;
-    const fields = draft.fields;
-    if (fields && fields.partySize === undefined) {
-      const useWait = fields.mode !== "follower" || fields.waitForParty !== false;
-      const total = useWait ? fields.waitPartySize : fields.movePartySize;
-      const legacy = Number(useWait ? fields.waitBelow : fields.partyBelow);
-      if (typeof total === "string") fields.partySize = total;
-      else if (Number.isInteger(legacy) && legacy >= 1 && legacy <= 11) fields.partySize = String(legacy + 1);
-      else if (!useWait) fields.partySize = "";
-    }
-    const mapsById = new Map(maps.map(map => [map.id, map]));
-    for (const row of draft.route ?? []) {
-      const map = mapsById.get(row.mapId);
-      if (map) route.push({map, targets: row.targets ?? [], smallRules: row.smallRules ?? {}});
-    }
-    for (const id of draft.selectedMaps ?? []) if (mapsById.has(id)) selectedMaps.add(id);
-    for (const field of draftFields()) {
-      const saved = draft.fields?.[field.id];
-      if (field.type === "checkbox" && typeof saved === "boolean") field.checked = saved;
-      else if (field.type !== "checkbox" && typeof saved === "string" && field.id !== "buff") {
-        const isMonsterAction = /(?:^|-)(?:targetAction|otherAction)$/.test(field.id);
-        if (!isMonsterAction || Array.from(field.options).some(option => option.value === saved)) field.value = saved;
-      }
-    }
-    const savedBuffLevel = draft.fields?.routeBuffLevel;
-    populateLeaderBuffs(draft.fields?.buff);
-    if (typeof savedBuffLevel === "string") byId("routeBuffLevel").value = savedBuffLevel;
-    if (Array.isArray(draft.customMacros)) customMacros = draft.customMacros;
-    if (draft.itemSettings) setItemSettings(readItemSettings(draft.itemSettings));
-    if (draft.routeCondition) routeConditionEditor.cond = draft.routeCondition;
-    for (const {id} of combatRoles) {
-      if (draft.roleRouteConditions?.[id]) roleRouteConditions[id].cond = draft.roleRouteConditions[id];
-      if (id !== "output" && fields) {
-        for (const name of ["departure", "routeWait"]) {
-          const field = byId(`role-${id}-${name}`);
-          if (fields[field.id] === undefined && typeof fields[name] === "string") field.value = fields[name];
-        }
-      }
-    }
-    if (!draft.fields?.combatMode) {
-      byId("combatMode").value = draft.preset === "support" ? "support"
-        : draft.fields?.mode === "follower" ? "assist" : "output";
-    }
+    applyFullConfigObject(draft, {resetFirst: false});
   } catch {
     // A missing or unreadable draft should not prevent opening the generator.
+  }
+}
+
+function showShareToast(text, error = false) {
+  const toast = byId("share-toast");
+  byId("share-toast-text").textContent = text;
+  toast.dataset.error = String(error);
+  toast.hidden = false;
+}
+
+byId("share-toast-close").onclick = () => { byId("share-toast").hidden = true; };
+
+function setConfigSharePanelOpen(open) {
+  const panel = byId("config-share-panel");
+  panel.hidden = !open;
+  byId("toggle-share-config").setAttribute("aria-expanded", String(open));
+  if (open) panel.scrollIntoView?.({behavior: "smooth", block: "nearest"});
+}
+
+function setConfigShareStatus(text, error = false) {
+  const el = byId("config-share-status");
+  el.textContent = text;
+  el.dataset.error = String(error);
+}
+
+byId("toggle-share-config").onclick = () => setConfigSharePanelOpen(byId("config-share-panel").hidden);
+byId("config-share-close").onclick = () => setConfigSharePanelOpen(false);
+byId("preview-share-config").onclick = () => setConfigSharePanelOpen(true);
+
+byId("config-share-download").onclick = () => {
+  const payload = buildFullConfigObject(false);
+  download(JSON.stringify(payload, null, 2) + "\n", "ro-idle-generator-config.json", "application/json");
+  setConfigShareStatus(`已匯出完整配置檔案 ro-idle-generator-config.json（含 ${route.length} 站路線與全部產生器設定）。`, false);
+};
+
+byId("config-share-copy").onclick = () => {
+  const text = JSON.stringify(buildFullConfigObject(false), null, 2);
+  navigator.clipboard.writeText(text).then(
+    () => setConfigShareStatus(`已複製完整配置 JSON（含 ${route.length} 站路線與全部產生器設定）。`, false),
+    () => {
+      byId("config-share-text").value = text;
+      byId("config-share-text").select();
+      setConfigShareStatus("已將完整配置 JSON 填入文字框供手動複製。", false);
+    },
+  );
+};
+
+byId("config-share-link").onclick = () => {
+  try {
+    const url = buildShareUrl("config", buildFullConfigObject(false));
+    const longWarn = url.length > 16000
+      ? "（含大量掉落物或巨集，網址較長，若聊天軟體截斷請改用「匯出配置檔案」）"
+      : "";
+    navigator.clipboard.writeText(url).then(
+      () => setConfigShareStatus(`已複製分享配置連結（長度 ${url.length} 字元）${longWarn}，朋友點開連結即可載入整套設定。`, false),
+      () => {
+        byId("config-share-text").value = url;
+        byId("config-share-text").select();
+        setConfigShareStatus(`已產生分享配置連結（長度 ${url.length} 字元）並填入文字框供複製${longWarn}。`, false);
+      },
+    );
+  } catch (error) {
+    setConfigShareStatus(`產生分享連結失敗：${error.message}`, true);
+  }
+};
+
+byId("config-share-clear").onclick = () => {
+  byId("config-share-text").value = "";
+  setConfigShareStatus("", false);
+};
+
+byId("config-share-upload-btn").onclick = () => byId("config-share-file").click();
+byId("config-share-file").onchange = async event => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  try {
+    byId("config-share-text").value = await file.text();
+    byId("config-share-import").click();
+  } catch {
+    setConfigShareStatus("無法讀取選擇的檔案。", true);
+  }
+};
+
+function importAnySharedPayload(rawInput) {
+  const link = resolveShareInputText(rawInput);
+  let data;
+  if (link) {
+    data = link.data;
+  } else {
+    const trimmed = String(rawInput ?? "").trim();
+    if (!trimmed) throw new Error("請先貼上配置 JSON、路線 JSON 或分享連結。");
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    data = JSON.parse(fenced ? fenced[1].trim() : trimmed);
+  }
+  const isFullConfig = data && typeof data === "object" && !Array.isArray(data) &&
+    (data.format === "ro-idle-generator-config" || (data.fields && typeof data.fields === "object"));
+  if (isFullConfig) {
+    applyFullConfigObject(data, {resetFirst: true});
+    clearPreview();
+    saveRouteDraft();
+    return `已匯入完整配置（含 ${route.length} 站路線、隊伍與角色設定${itemSettings ? "、掉落物篩選" : ""}${customMacros.length ? `、${customMacros.length} 條自訂巨集` : ""}）。`;
+  }
+  const {rows, warnings} = RoConfigBuilder.parseRoutePlan(JSON.stringify(data), maps, isMvpTarget);
+  route.splice(0, route.length, ...rows);
+  renderRoute();
+  renderMapChoices();
+  clearPreview();
+  saveRouteDraft();
+  return `已匯入巡迴路線（共 ${rows.length} 站，保留你原本的隊伍與角色設定）。${warnings.length ? ` ${warnings[0]}` : ""}`;
+}
+
+byId("config-share-import").onclick = () => {
+  if (!maps.length) return setConfigShareStatus("地圖資料尚未載入完成。", true);
+  try {
+    const msg = importAnySharedPayload(value("config-share-text"));
+    setConfigShareStatus(msg, false);
+  } catch (error) {
+    setConfigShareStatus(`匯入失敗：${error.message}`, true);
+  }
+};
+
+function applySharedHashOnLoad() {
+  const hash = location.hash;
+  const match = hash.match(/^#(route|config)=([A-Za-z0-9_-]+)$/);
+  if (!match) return;
+  try {
+    const kind = match[1];
+    const data = RoConfigBuilder.decodeShareToken(match[2]);
+    const incomingCount = Array.isArray(data?.route) ? data.route.length : Array.isArray(data) ? data.length : 0;
+    const label = kind === "config" ? "完整配置" : "巡迴路線";
+    const hasLocal = route.length > 0;
+    if (!hasLocal || window.confirm(`偵測到分享的「${label}」（含 ${incomingCount} 站路線），是否套用並取代目前的本機草稿？`)) {
+      const msg = importAnySharedPayload(hash);
+      showShareToast(`已透過分享連結載入：${msg}`, false);
+    }
+    history.replaceState(null, "", location.pathname + location.search);
+  } catch (error) {
+    showShareToast(`無法載入分享連結：${error.message}`, true);
   }
 }
 
@@ -4100,30 +4429,14 @@ Promise.all([loadCatalog(), loadBuffJobs()]).then(() => {
       return new Option(`${total} 人`, String(total));
     }));
   }
-  const defaults = new Map(draftFields().map(field =>
+  defaultFieldValues = new Map(draftFields().map(field =>
     [field.id, field.type === "checkbox" ? field.checked : field.value]));
   const reset = byId("reset-route");
   reset.disabled = false;
   reset.onclick = () => {
     if (!window.confirm("回到預設會清除目前的巡迴路線、配置設定和自訂巨集。確定重設？")) return;
     setGuide(false);
-    route.length = 0;
-    selectedMaps.clear();
-    customMacros = [];
-    setItemSettings(null);
-    lootDetails.open = false;
-    for (const field of draftFields()) {
-      if (!defaults.has(field.id)) continue;
-      if (field.type === "checkbox") field.checked = defaults.get(field.id);
-      else field.value = defaults.get(field.id);
-    }
-    populateLeaderBuffs();
-    byId("buff-search").setCustomValidity("");
-    for (const {id} of combatRoles) {
-      roleRouteConditions[id].cond = {};
-      byId(`role-${id}-action`).onchange();
-      renderRouteOr(id);
-    }
+    resetAllFieldsToDefaults();
     for (const details of byId("generator").querySelectorAll("details[open]")) details.open = false;
     updateOptions();
     renderMacroEditor();
@@ -4149,6 +4462,7 @@ Promise.all([loadCatalog(), loadBuffJobs()]).then(() => {
   renderRoute();
   renderMapChoices();
   routeDraftReady = maps.length > 0;
+  applySharedHashOnLoad();
   byId("generator").addEventListener("change", saveRouteDraft);
   window.addEventListener("pagehide", saveRouteDraft);
 });
