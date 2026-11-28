@@ -1125,6 +1125,8 @@ stop.onclick = () => { cancelled = true; stop.disabled = true; };
 
 async function initialize() {
   refresh.disabled = true;
+  document.body.classList.toggle("floating", floating);
+  $("open-floating").hidden = floating;
   character.textContent = "讀取目前角色中…";
   try {
     if (!chrome.tabs?.query || !chrome.scripting?.executeScript) {
@@ -1137,8 +1139,6 @@ async function initialize() {
       throw new Error("請先在 ro-idle.app 進入角色，再從 Chrome 工具列開啟擴充。");
     }
     tabId = tab.id;
-    document.body.classList.toggle("floating", floating);
-    $("open-floating").hidden = floating;
     [catalog, marketSlots, marketTowns, rebindItems] = await Promise.all(
       ["catalog.json", "market-slots.json", "market-towns.json", "rebind-items.json"].map(async path => {
         const response = await fetch(path, {signal: AbortSignal.timeout(10000)});

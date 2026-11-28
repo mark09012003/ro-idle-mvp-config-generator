@@ -1,15 +1,17 @@
 {
   "manifest_version": 3,
   "name": "RO 放置仙境 · 批次裝備精練",
-  "version": "1.10.10",
+  "version": "1.10.11",
   "description": "自動辨識目前角色，支援神工匠武器精練、城鎮武器與防具精練、裝備篩選及倉庫補貨。",
   "permissions": [
     "activeTab",
     "scripting",
     "storage"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
-    "default_title": "批次裝備精練",
-    "default_popup": "popup.html"
+    "default_title": "批次裝備精練"
   }
 }
