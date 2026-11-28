@@ -20,6 +20,9 @@ button, select { font: inherit; padding: 5px 8px; }
 #equipment label[hidden] { display: none; }
 
 #auto-equip-option[hidden] { display: none; }
+.compact-details { margin: 8px 0 10px; padding: 7px 8px; border: 1px solid GrayText; border-radius: 8px; }
+.compact-details summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.compact-details-body { margin-top: 8px; }
 .refine-buy-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: -2px 0 10px; padding: 8px; border: 1px solid GrayText; border-radius: 6px; }
 .refine-buy-options[hidden], .refine-buy-options label[hidden] { display: none; }
 .refine-buy-options label { font-size: 12px; }
@@ -30,7 +33,19 @@ button, select { font: inherit; padding: 5px 8px; }
 #market-fields input:not([type="checkbox"]), #market-fields select { box-sizing: border-box; width: 100%; margin: 4px 0 8px; }
 #market-fields input:not([type="checkbox"]) { font: inherit; padding: 5px 8px; }
 #market-fields input[type="checkbox"] { width: auto; margin: 0 6px 0 0; padding: 0; vertical-align: middle; }
+.market-presets { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; margin-bottom: 8px; }
+#market-fields .market-presets select { margin: 0; }
 .market-limits { display: grid; grid-template-columns: 118px minmax(0, 1fr) 82px; gap: 8px; }
+.handoff-options { margin: 8px 0 10px; padding: 8px; border: 1px solid color-mix(in srgb, GrayText 45%, Canvas); border-radius: 6px; font-size: 13px; }
+.handoff-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 8px; }
+.handoff-inline:last-child { margin-bottom: 0; }
+.handoff-inline input[type="number"] { font: inherit; padding: 3px 6px; width: 96px; box-sizing: border-box; }
+#handoff-arrow-qty { width: 68px; }
+#handoff-zeny-target { width: 112px; }
+.settings-sync { margin-top: 8px; font-size: 12px; }
+.settings-sync summary { cursor: pointer; color: GrayText; }
+.settings-sync .actions { margin-top: 6px; }
+#settings-status { margin: 6px 0 0; font-size: 12px; }
 #market-preview, #market-remote-list { max-height: 160px; overflow: auto; padding-left: 20px; }
 
 #rebind-rows { max-height: 220px; overflow: auto; margin-top: 8px; }

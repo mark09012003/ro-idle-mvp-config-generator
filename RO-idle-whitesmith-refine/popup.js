@@ -1,7 +1,8 @@
-import {destinationConfig, handoffItems, matchMoved, profileName, rebindPlan, sameBindings, sourceHandoffConfig, validateReceiveHandoff} from "./handoff.mjs";
+import {destinationConfig, handoffItems, matchMoved, planClearNewCharacter, planHandoffArrows, planHandoffZeny, profileName, rebindPlan, sameBindings, sourceHandoffConfig, validateReceiveHandoff} from "./handoff.mjs";
 import {itemFingerprint, remapRules, ruleReferences, suitableItem} from "./rebind.mjs";
 import {diffPurchasedBatch, groupVendorOrders, isOverHalfWeight, marketPlan, planAutoDeposit, takeVendorBatch, verifyDeposited} from "./market.mjs";
 import {associateWithdrawnEquipment, batchPlan, equipmentLocation, guardedCommand, matchesEquipment, nextRefineCommand, planNextRefineWave, refineOutcome, restoreEquipment, skillLevel, equipmentPlan} from "./refine.mjs";
+import {exportAllSettings, importAllSettings, removeMarketPreset, sanitizeHandoffOptions, sanitizeMarketPreset, sanitizeMarketQuery, sanitizeRefineUi, storageKeys, upsertMarketPreset} from "./settings.mjs";
 
 const $ = id => document.getElementById(id);
 const host = "https://ro-idle.app";
@@ -19,6 +20,8 @@ const stop = $("stop");
 const refresh = $("refresh");
 const all = $("select-all");
 const target = $("target");
+const refineOptions = $("refine-options");
+const refineOptionsSummary = $("refine-options-summary");
 const storageMaterials = $("storage-materials");
 const storageWeapons = $("storage-weapons");
 const refineShopMetals = $("refine-shop-metals");
@@ -26,13 +29,22 @@ const refineBuyMaterials = $("refine-buy-materials");
 const refineBuyOptions = $("refine-buy-options");
 const refineMaxInputs = [984, 985, 1010, 1011].map(id => [id, $(`refine-max-${id}`)]);
 const marketAutoStore = $("market-auto-store");
+const marketPresetSelect = $("market-preset-select");
+const marketPresetSave = $("market-preset-save");
+const marketPresetDelete = $("market-preset-delete");
+const handoffClearNew = $("handoff-clear-new");
+const handoffAutoArrows = $("handoff-auto-arrows");
+const handoffArrowQty = $("handoff-arrow-qty");
+const handoffAutoZeny = $("handoff-auto-zeny");
+const handoffZenyTarget = $("handoff-zeny-target");
 const results = $("results");
 const status = message => { $("status").textContent = message; };
 let catalog, marketSlots, marketTowns, marketWeights, rebindItems, tabId, view, storage, activeRole;
 let marketPreview;
+let marketPresets = [];
 let rebindPreview;
-const marketAutoStoreKey = "market-auto-store-v1";
-const refineSupplyKey = "refine-supply-options-v1";
+const marketAutoStoreKey = storageKeys.marketAutoStore;
+const refineSupplyKey = storageKeys.refineSupply;
 const rebindKey = "equipment-rebind-reference";
 const handoffKey = "archer-equipment-handoff-v1";
 let loadVersion = 0;
@@ -40,6 +52,7 @@ let plans = [];
 let busy = false;
 let cancelled = false;
 let needsRefresh = false;
+let focusCheckInFlight = false;
 
 $("open-floating").onclick = async () => {
   if (!tabId || busy) return;
@@ -160,6 +173,52 @@ function loadRefineSupplyOptions() {
   }
 }
 
+function saveRefineUiPrefs() {
+  try {
+    localStorage.setItem(storageKeys.refineUi, JSON.stringify({
+      storageMaterials: storageMaterials.checked,
+      storageWeapons: storageWeapons.checked,
+      autoEquip: autoEquip.checked,
+      location: locationFilter.value,
+      optionsOpen: refineOptions.open,
+    }));
+  } catch {}
+}
+
+function loadRefineUiPrefs() {
+  try {
+    const saved = sanitizeRefineUi(JSON.parse(localStorage.getItem(storageKeys.refineUi)));
+    storageMaterials.checked = saved.storageMaterials;
+    storageWeapons.checked = saved.storageWeapons;
+    autoEquip.checked = saved.autoEquip;
+    locationFilter.value = saved.location;
+    refineOptions.open = saved.optionsOpen;
+  } catch {
+    refineOptions.open = false;
+  }
+}
+
+function updateRefineOptionsSummary() {
+  const parts = [];
+  if (storageWeapons.checked) parts.push("倉庫裝備");
+  if (storageMaterials.checked) parts.push("倉庫材料");
+  if (refineShopMetals.checked) parts.push("商店金屬");
+  if (refineBuyMaterials.checked) {
+    const armor = mode.value === "armor";
+    const labels = {984: "神金", 985: "鋁", 1010: "1級", 1011: "2級"};
+    const activeCaps = refineMaxInputs
+      .filter(([id]) => armor ? id === 985 : id !== 985)
+      .map(([id, input]) => {
+        const val = Number(input.value);
+        return Number.isSafeInteger(val) && val > 0 ? `${labels[id]}≤${val.toLocaleString()}` : "";
+      })
+      .filter(Boolean);
+    parts.push(activeCaps.length ? `攤位（${activeCaps.join("、")}）` : "攤位（未設上限）");
+  }
+  if (mode.value === "armor" && autoEquip.checked) parts.push("自動穿戴");
+  refineOptionsSummary.textContent = `補給與進階設定：${parts.length ? parts.join("＋") : "無"}`;
+}
+
 function updateRefineSupplyVisibility() {
   refineBuyOptions.hidden = !refineBuyMaterials.checked;
   const armor = mode.value === "armor";
@@ -167,6 +226,7 @@ function updateRefineSupplyVisibility() {
     const relevant = armor ? id === 985 : id !== 985;
     input.closest("label").hidden = !relevant;
   }
+  updateRefineOptionsSummary();
 }
 
 function setRefineSupplyDisabled(disabled) {
@@ -866,16 +926,98 @@ async function buyMarket() {
   }
 }
 
-try {
-  const savedAutoStore = localStorage.getItem(marketAutoStoreKey);
-  marketAutoStore.checked = savedAutoStore === null ? true : savedAutoStore === "true";
-} catch {
-  marketAutoStore.checked = true;
+function renderMarketPresets(selectedId = "") {
+  marketPresetSelect.replaceChildren(new Option("— 常用掃貨預設 —", ""));
+  for (const preset of marketPresets) {
+    marketPresetSelect.add(new Option(preset.name, preset.id));
+  }
+  marketPresetSelect.value = marketPresets.some(item => item.id === selectedId) ? selectedId : "";
+  marketPresetDelete.disabled = !marketPresetSelect.value;
 }
+
+function saveMarketLastQuery() {
+  try {
+    localStorage.setItem(storageKeys.marketLastQuery, JSON.stringify({
+      keyword: $("market-name").value,
+      holes: $("market-holes").value,
+      ceiling: $("market-price").value,
+      quantity: $("market-qty").value,
+    }));
+  } catch {}
+}
+
+function saveMarketPresets() {
+  try {
+    localStorage.setItem(storageKeys.marketPresets, JSON.stringify(marketPresets));
+  } catch {}
+}
+
+function loadMarketPrefs() {
+  try {
+    const savedAutoStore = localStorage.getItem(marketAutoStoreKey);
+    marketAutoStore.checked = savedAutoStore === null ? true : savedAutoStore === "true";
+  } catch {
+    marketAutoStore.checked = true;
+  }
+  try {
+    const last = sanitizeMarketQuery(JSON.parse(localStorage.getItem(storageKeys.marketLastQuery)));
+    $("market-name").value = last.keyword;
+    $("market-holes").value = last.holes;
+    $("market-price").value = last.ceiling;
+    $("market-qty").value = last.quantity || "1";
+  } catch {}
+  try {
+    const raw = JSON.parse(localStorage.getItem(storageKeys.marketPresets));
+    marketPresets = (Array.isArray(raw) ? raw : []).map(sanitizeMarketPreset).filter(Boolean);
+  } catch {
+    marketPresets = [];
+  }
+  renderMarketPresets();
+}
+
+loadMarketPrefs();
 marketAutoStore.onchange = () => {
   try { localStorage.setItem(marketAutoStoreKey, String(marketAutoStore.checked)); } catch {}
 };
-$("market-fields").oninput = () => {
+marketPresetSelect.onchange = () => {
+  const id = marketPresetSelect.value;
+  marketPresetDelete.disabled = !id;
+  const preset = marketPresets.find(item => item.id === id);
+  if (!preset) return;
+  $("market-name").value = preset.keyword;
+  $("market-holes").value = preset.holes;
+  $("market-price").value = preset.ceiling;
+  $("market-qty").value = preset.quantity;
+  saveMarketLastQuery();
+  clearMarketPreview();
+  $("market-status").textContent = `已套用常用預設「${preset.name}」，按「搜尋並預覽」即可查詢。`;
+};
+marketPresetSave.onclick = () => {
+  try {
+    marketPresets = upsertMarketPreset(marketPresets, {
+      keyword: $("market-name").value,
+      holes: $("market-holes").value,
+      ceiling: $("market-price").value,
+      quantity: $("market-qty").value,
+    });
+    saveMarketPresets();
+    renderMarketPresets(marketPresets[0].id);
+    $("market-status").textContent = `已儲存常用預設「${marketPresets[0].name}」。`;
+  } catch (error) {
+    $("market-status").textContent = error.message;
+  }
+};
+marketPresetDelete.onclick = () => {
+  const id = marketPresetSelect.value;
+  if (!id) return;
+  marketPresets = removeMarketPreset(marketPresets, id);
+  saveMarketPresets();
+  renderMarketPresets();
+  $("market-status").textContent = "已刪除選取的常用預設。";
+};
+$("market-fields").oninput = event => {
+  if (event.target === marketPresetSelect) return;
+  saveMarketLastQuery();
   clearMarketPreview();
   $("market-status").textContent = "條件已變更，請重新搜尋。";
 };
@@ -1124,6 +1266,44 @@ async function saveAndApplyHandoff(current, config) {
   }
 }
 
+function currentHandoffOptions() {
+  return sanitizeHandoffOptions({
+    clearNew: handoffClearNew.checked,
+    autoArrows: handoffAutoArrows.checked,
+    arrowQty: Number(handoffArrowQty.value),
+    autoZeny: handoffAutoZeny.checked,
+    targetZeny: Number(handoffZenyTarget.value),
+  });
+}
+
+function saveHandoffOptions() {
+  try {
+    localStorage.setItem(storageKeys.handoffOptions, JSON.stringify(currentHandoffOptions()));
+  } catch {}
+}
+
+function loadHandoffOptions() {
+  try {
+    const opts = sanitizeHandoffOptions(JSON.parse(localStorage.getItem(storageKeys.handoffOptions)));
+    handoffClearNew.checked = opts.clearNew;
+    handoffAutoArrows.checked = opts.autoArrows;
+    handoffArrowQty.value = String(opts.arrowQty);
+    handoffAutoZeny.checked = opts.autoZeny;
+    handoffZenyTarget.value = String(opts.targetZeny);
+  } catch {
+    handoffClearNew.checked = true;
+    handoffAutoArrows.checked = true;
+    handoffArrowQty.value = "100";
+    handoffAutoZeny.checked = true;
+    handoffZenyTarget.value = "15000000";
+  }
+}
+
+loadHandoffOptions();
+for (const el of [handoffClearNew, handoffAutoArrows, handoffArrowQty, handoffAutoZeny, handoffZenyTarget]) {
+  el.onchange = el.oninput = saveHandoffOptions;
+}
+
 async function receiveHandoff(current, account, record) {
   if (!record || record.account !== account || record.source === current.characterId ||
       !(record.stage === "stored" || (record.stage === "received" && record.target === current.characterId))) {
@@ -1132,15 +1312,82 @@ async function receiveHandoff(current, account, record) {
   if (!record.config.equipRules?.length) {
     throw new Error("這筆舊交接缺少原角色的換裝規則，請用「跨角色換裝重綁」補套用。");
   }
-  const box = record.stage === "stored" ? await getStorage() : null;
-  const fee = box ? handoffFee(current, box) : 0;
-  const {sameName, skippedWeaponRule} = validateReceiveHandoff(current.snapshot, box, record, marketWeights);
-  const notes = [
-    sameName ? "會覆蓋目前角色的同名配置。" : "",
-    skippedWeaponRule ? "未轉生角色將略過「Base Lv 至少 64」主手規則（轉生後須重新補上）。" : "",
-  ].filter(Boolean).join("\n");
-  if (!window.confirm(`領取交接裝備並套用「${profileName}」？倉庫費 ${fee} Zeny。${notes ? `\n${notes}` : ""}`)) return;
-  if (box) {
+  const options = currentHandoffOptions();
+  const needsStorage = record.stage === "stored" || (options.autoZeny && options.targetZeny > 0);
+  let box = needsStorage ? await getStorage() : null;
+  const gearBox = record.stage === "stored" ? box : null;
+  const withdrawFee = gearBox ? box.fees?.[current.snapshot.mapId] : 0;
+  if (gearBox && !Number.isFinite(withdrawFee)) throw new Error("請到有卡普拉服務的城鎮。");
+
+  const clearPlan = record.stage === "stored" && options.clearNew
+    ? planClearNewCharacter(current.snapshot, catalog, marketWeights, [...(current.heldItems ?? []), ...(box?.heldItems ?? [])])
+    : {unequipSlots: [], clearItems: [], sellUids: [], discardItems: [], freedWeight10: 0, freedSlots: 0};
+  const arrowPlan = planHandoffArrows(record, current.snapshot, {
+    autoArrows: options.autoArrows,
+    arrowQty: options.arrowQty,
+    clearedInventory: clearPlan.clearItems.length > 0,
+  }, catalog, marketWeights);
+  const zenyPlan = planHandoffZeny(current.snapshot, box, options);
+  const projectedZeny = current.snapshot.character.zeny + zenyPlan.netGain;
+  const requiredZeny = withdrawFee + arrowPlan.totalCost;
+
+  const {sameName, skippedWeaponRule} = validateReceiveHandoff(current.snapshot, gearBox, record, marketWeights, {
+    freedSlots: clearPlan.freedSlots,
+    freedWeight10: clearPlan.freedWeight10,
+    extraArrowSlots: arrowPlan.extraSlots,
+    extraArrowWeight10: arrowPlan.extraWeight10,
+    projectedZeny,
+    requiredZeny,
+  });
+
+  const summaryLines = [];
+  if (clearPlan.clearItems.length) {
+    const preview = clearPlan.clearItems.slice(0, 8).map(item => `${equipmentName(item)} ×${item.qty}`).join("、");
+    const more = clearPlan.clearItems.length > 8 ? `…等共 ${clearPlan.clearItems.length} 項` : "";
+    summaryLines.push(`• 清空新角色原有 ${clearPlan.clearItems.length} 項物品（略過已上鎖）：${preview}${more}`);
+  }
+  if (zenyPlan.amount > 0) {
+    summaryLines.push(`• 從倉庫提領 ${zenyPlan.amount.toLocaleString()} Zeny（含倉庫費 ${zenyPlan.fee}，補足至 ${(current.snapshot.character.zeny + zenyPlan.netGain).toLocaleString()} Zeny）`);
+  }
+  if (gearBox) {
+    summaryLines.push(`• 領取 ${record.items.length} 件交接裝備（倉庫費 ${withdrawFee} Zeny）`);
+  }
+  if (arrowPlan.buy.length) {
+    const arrowsText = arrowPlan.buy.map(a => `${a.name} ×${a.qty}`).join("、");
+    summaryLines.push(`• 自動向商店購買 ${arrowsText}（共 ${arrowPlan.totalCost.toLocaleString()} Zeny）`);
+  }
+  summaryLines.push(`• 重綁並套用「${profileName}」`);
+  if (sameName) summaryLines.push("※ 會覆蓋目前角色的同名配置。");
+  if (skippedWeaponRule) summaryLines.push("※ 未轉生角色將略過「Base Lv 至少 64」主手規則（轉生後須重新補上）。");
+
+  if (!window.confirm(`確定執行以下交接步驟？\n${summaryLines.join("\n")}`)) return;
+
+  if (clearPlan.clearItems.length) {
+    handoffStatus("正在清空新角色原有穿戴與背包…");
+    for (const {slot} of clearPlan.unequipSlots) {
+      const reply = await handoffCommand(current, {type: "unequip", slot});
+      current = reply.view;
+      if (current.snapshot.equipment[slot] != null) throw new Error("伺服器未確認新角色原裝備已卸下。");
+    }
+    if (clearPlan.sellUids.length) {
+      const reply = await handoffCommand(current, {type: "sellBatch", uids: clearPlan.sellUids});
+      current = reply.view;
+    }
+    for (const {uid, qty} of clearPlan.discardItems) {
+      const reply = await handoffCommand(current, {type: "discard", uid, qty});
+      current = reply.view;
+    }
+  }
+
+  if (zenyPlan.amount > 0) {
+    handoffStatus(`正在從倉庫提領 ${zenyPlan.amount.toLocaleString()} Zeny…`);
+    const reply = await handoffCommand(current, {type: "storageZeny", action: "withdraw", amount: zenyPlan.amount});
+    current = reply.view;
+    box = Array.isArray(reply.storage?.items) ? reply.storage : await getStorage();
+  }
+
+  if (gearBox) {
+    handoffStatus(`正在領取 ${record.items.length} 件交接裝備…`);
     const items = record.sids.map((sid, index) => {
       const stored = box.items.find(item => item.sid === sid);
       if (!stored || stored.qty !== 1 || itemFingerprint(stored) !== itemFingerprint(record.items[index])) {
@@ -1165,6 +1412,20 @@ async function receiveHandoff(current, account, record) {
     record.newUids = matchMoved(before, current.snapshot.inventory, record.items, "uid").map(item => item.uid);
     saveHandoff(record, "received");
   }
+
+  if (arrowPlan.buy.length) {
+    for (const arrow of arrowPlan.buy) {
+      handoffStatus(`正在向商店購買 ${arrow.name} ×${arrow.qty}…`);
+      const reply = await handoffCommand(current, {
+        type: "buy",
+        itemId: arrow.itemId,
+        qty: arrow.qty,
+        ...(arrow.shop ? {shop: arrow.shop} : {}),
+      });
+      current = reply.view;
+    }
+  }
+
   if (record.items.some((item, index) => !current.snapshot.inventory.some(candidate =>
       candidate.uid === record.newUids[index] && itemFingerprint(candidate) === itemFingerprint(item)))) {
     throw new Error("領出的裝備已變更，請檢查背包。");
@@ -1172,7 +1433,12 @@ async function receiveHandoff(current, account, record) {
   const config = destinationConfig(record, current.snapshot);
   await saveAndApplyHandoff(current, config);
   localStorage.removeItem(handoffKey);
-  handoffStatus(`已領裝、重綁並套用「${profileName}」。`);
+  const doneParts = [
+    clearPlan.clearItems.length ? `清空 ${clearPlan.clearItems.length} 項` : "",
+    zenyPlan.amount > 0 ? `提領 ${zenyPlan.amount.toLocaleString()} Zeny` : "",
+    arrowPlan.buy.length ? `買 ${arrowPlan.buy.map(a => `${a.name}×${a.qty}`).join("、")}` : "",
+  ].filter(Boolean);
+  handoffStatus(`已領裝、重綁並套用「${profileName}」${doneParts.length ? `（${doneParts.join("、")}）` : ""}。`);
 }
 
 async function runHandoff(direction) {
@@ -1301,12 +1567,19 @@ function activateToolTab(active, focus = false) {
     tab.tabIndex = selected ? 0 : -1;
     $(tab.getAttribute("aria-controls")).hidden = !selected;
   }
+  try { localStorage.setItem(storageKeys.activeTab, active.id); } catch {}
   if (focus) active.focus();
   if (active.id === "tab-growth") {
     void archerMonitor("status");
     void renderArcherTiming();
   }
 }
+
+try {
+  const savedTabId = localStorage.getItem(storageKeys.activeTab);
+  const savedTab = tabs.find(tab => tab.id === savedTabId);
+  if (savedTab) activateToolTab(savedTab);
+} catch {}
 
 for (const tab of tabs) {
   tab.onclick = () => activateToolTab(tab);
@@ -1331,20 +1604,70 @@ all.onchange = () => {
   updatePlan();
 };
 selection.onchange = updatePlan;
-query.oninput = locationFilter.onchange = applyEquipmentFilters;
+query.oninput = applyEquipmentFilters;
+locationFilter.onchange = () => { saveRefineUiPrefs(); applyEquipmentFilters(); };
+refineOptions.ontoggle = saveRefineUiPrefs;
 mode.onchange = () => updateMode(false);
 refresh.onclick = () => catalog ? loadGear(true) : initialize();
-storageMaterials.onchange = storageWeapons.onchange = () => loadGear(true);
-refineShopMetals.onchange = () => { saveRefineSupplyOptions(); updatePlan(); };
+storageMaterials.onchange = storageWeapons.onchange = () => {
+  saveRefineUiPrefs();
+  updateRefineOptionsSummary();
+  loadGear(true);
+};
+refineShopMetals.onchange = () => { saveRefineSupplyOptions(); updateRefineOptionsSummary(); updatePlan(); };
 refineBuyMaterials.onchange = () => { saveRefineSupplyOptions(); updateRefineSupplyVisibility(); updatePlan(); };
 for (const [, input] of refineMaxInputs) {
-  input.oninput = () => { saveRefineSupplyOptions(); updatePlan(); };
+  input.oninput = () => { saveRefineSupplyOptions(); updateRefineOptionsSummary(); updatePlan(); };
 }
+loadRefineUiPrefs();
 loadRefineSupplyOptions();
 updateRefineSupplyVisibility();
-target.onchange = autoEquip.onchange = () => renderEquipment(true);
+target.onchange = () => renderEquipment(true);
+autoEquip.onchange = () => { saveRefineUiPrefs(); updateRefineOptionsSummary(); renderEquipment(true); };
 start.onclick = runBatch;
 stop.onclick = () => { cancelled = true; stop.disabled = true; };
+
+$("settings-export").onclick = async () => {
+  const text = JSON.stringify(exportAllSettings(localStorage), null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    $("settings-status").textContent = "已複製設定 JSON 到剪貼簿，可貼到其他電腦匯入。";
+  } catch {
+    window.prompt("請複製以下設定 JSON：", text);
+    $("settings-status").textContent = "已顯示設定 JSON 供複製。";
+  }
+};
+
+$("settings-import").onclick = async () => {
+  if (busy) return;
+  const text = window.prompt("貼上從其他電腦複製的設定 JSON：");
+  if (!text) return;
+  try {
+    const imported = importAllSettings(text, localStorage);
+    loadRefineUiPrefs();
+    loadRefineSupplyOptions();
+    updateRefineSupplyVisibility();
+    loadMarketPrefs();
+    loadHandoffOptions();
+    const savedTab = tabs.find(tab => tab.id === imported.activeTab);
+    if (savedTab) activateToolTab(savedTab);
+    $("settings-status").textContent = "已匯入並套用所有設定。";
+    if (catalog) await loadGear(true);
+  } catch (error) {
+    $("settings-status").textContent = error.message;
+  }
+};
+
+window.addEventListener("focus", async () => {
+  if (busy || !tabId || !catalog || focusCheckInFlight) return;
+  focusCheckInFlight = true;
+  try {
+    const {activeName} = await gameRequest("/api/characters");
+    if (activeName && activeName !== activeRole?.name) await loadGear();
+  } catch {} finally {
+    focusCheckInFlight = false;
+  }
+});
 
 async function initialize() {
   refresh.disabled = true;

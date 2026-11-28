@@ -2,6 +2,10 @@ import {itemFingerprint, remapRules, ruleReferences} from "./rebind.mjs";
 
 export const profileName = "神射11轉";
 
+function toWeight10(weight) {
+  return Math.round(weight * 10);
+}
+
 export function sourceHandoffConfig(snapshot) {
   const saved = snapshot.profiles?.find(profile => profile.name === profileName)?.config;
   if (!saved) throw new Error(`原角色找不到已儲存的「${profileName}」配置。`);
@@ -64,7 +68,112 @@ export function handoffItems(snapshot, config, definitions, heldItems = null) {
   });
 }
 
-export function validateReceiveHandoff(snapshot, box, record, weights = null) {
+export function planClearNewCharacter(snapshot, catalog, weights = null, heldItems = null) {
+  const inventory = snapshot?.inventory ?? [];
+  const byUid = new Map(inventory.map(item => [item.uid, item]));
+  const unsellable = new Set(catalog?.unsellableIds ?? []);
+  const heldById = new Map((heldItems ?? snapshot?.heldItems ?? []).map(def => [def.id, def]));
+
+  const unequipSlots = [];
+  for (const [slot, uid] of Object.entries(snapshot?.equipment ?? {})) {
+    if (uid == null) continue;
+    const item = byUid.get(uid);
+    if (item && !item.locked) unequipSlots.push({slot, uid});
+  }
+
+  const clearItems = [];
+  const sellUids = [];
+  const discardItems = [];
+  let freedWeight10 = 0;
+
+  for (const item of inventory) {
+    if (item.locked) continue;
+    clearItems.push(item);
+    const held = heldById.get(item.itemId);
+    const w = weights?.[item.itemId] ?? held?.weight;
+    if (Number.isFinite(w) && w > 0) freedWeight10 += toWeight10(w) * (item.qty ?? 1);
+    const cannotSell = unsellable.has(item.itemId) || item.unidentified ||
+      held?.noSell === true || (held && !(held.sell > 0));
+    if (cannotSell) discardItems.push({uid: item.uid, qty: item.qty});
+    else sellUids.push(item.uid);
+  }
+
+  return {unequipSlots, clearItems, sellUids, discardItems, freedWeight10, freedSlots: clearItems.length};
+}
+
+export function planHandoffArrows(record, snapshot, options, catalog, weights = null) {
+  const arrowQty = Number.isInteger(options?.arrowQty) && options.arrowQty >= 1 ? Math.min(30000, options.arrowQty) : 100;
+  const rules = handoffRules(record.config, snapshot.character.rebirth);
+  const keptInventory = options?.clearedInventory
+    ? (snapshot.inventory ?? []).filter(item => item.locked)
+    : (snapshot.inventory ?? []);
+
+  const neededIds = new Set();
+  for (const rule of rules) {
+    if (rule.ammo == null) continue;
+    const ammoId = rule.ammoId || record.ammo?.[rule.ammo];
+    if (Number.isInteger(ammoId) && ammoId > 0) neededIds.add(ammoId);
+  }
+
+  const buy = [];
+  const unbuyable = [];
+  let totalCost = 0;
+  let extraWeight10 = 0;
+  let extraSlots = 0;
+
+  for (const ammoId of neededIds) {
+    if (keptInventory.some(item => item.itemId === ammoId && item.qty > 0)) continue;
+    if (!options?.autoArrows) {
+      unbuyable.push(ammoId);
+      continue;
+    }
+    const general = catalog?.arrowShops?.general?.[ammoId] ?? catalog?.arrowShops?.general?.[String(ammoId)];
+    const townEntry = catalog?.arrowShops?.towns?.[snapshot.mapId]?.[ammoId] ??
+      catalog?.arrowShops?.towns?.[snapshot.mapId]?.[String(ammoId)];
+    const source = general ? {shop: null, name: general.name, price: general.price}
+      : townEntry ? {shop: townEntry.shop, name: townEntry.name, price: townEntry.price}
+      : null;
+    if (!source) {
+      unbuyable.push(ammoId);
+      continue;
+    }
+    const cost = source.price * arrowQty;
+    buy.push({itemId: ammoId, name: source.name, qty: arrowQty, shop: source.shop, unitPrice: source.price, cost});
+    totalCost += cost;
+    const w = weights?.[ammoId];
+    if (Number.isFinite(w) && w > 0) extraWeight10 += toWeight10(w) * arrowQty;
+    extraSlots += 1;
+  }
+
+  return {buy, totalCost, extraWeight10, extraSlots, unbuyable};
+}
+
+export function planHandoffZeny(snapshot, box, options) {
+  const targetZeny = Number(options?.targetZeny);
+  if (!options?.autoZeny || !Number.isSafeInteger(targetZeny) || targetZeny < 1) {
+    return {amount: 0, netGain: 0, fee: 0};
+  }
+  const currentZeny = snapshot?.character?.zeny ?? 0;
+  if (currentZeny >= targetZeny) {
+    return {amount: 0, netGain: 0, fee: 0};
+  }
+  const fee = box?.fees?.[snapshot?.mapId];
+  if (!Number.isFinite(fee)) {
+    throw new Error("請到有卡普拉服務的城鎮再從倉庫提領 Zeny。");
+  }
+  const shortfall = targetZeny - currentZeny;
+  const available = box?.zeny ?? 0;
+  if (available < shortfall) {
+    throw new Error(`帳號倉庫 Zeny 不足（倉庫僅有 ${available.toLocaleString()} Zeny，不足以補足至 ${targetZeny.toLocaleString()} Zeny）。`);
+  }
+  const amount = Math.min(available, shortfall + fee);
+  if (amount <= fee) {
+    throw new Error(`倉庫提領金額須大於倉庫費 ${fee} Zeny。`);
+  }
+  return {amount, netGain: amount - fee, fee};
+}
+
+export function validateReceiveHandoff(snapshot, box, record, weights = null, extras = null) {
   if (snapshot?.activity === "dead") {
     throw new Error("角色目前處於死亡狀態，無法使用倉庫。");
   }
@@ -72,25 +181,39 @@ export function validateReceiveHandoff(snapshot, box, record, weights = null) {
   if (!sameName && (snapshot?.profiles?.length ?? 0) >= 10) {
     throw new Error(`目前角色已存滿 10 個配置檔，請先刪除一個配置再建立「${profileName}」。`);
   }
-  if (box) {
-    const freeSlots = Math.max(0, 100 - (snapshot?.inventory?.length ?? 0));
-    if (record.items.length > freeSlots) {
-      throw new Error(`目前角色背包空間不足（剩餘 ${freeSlots} 格，需要 ${record.items.length} 格），請先清理背包。`);
+  const freedSlots = extras?.freedSlots ?? 0;
+  const freedWeight10 = extras?.freedWeight10 ?? 0;
+  const extraArrowSlots = extras?.extraArrowSlots ?? 0;
+  const extraArrowWeight10 = extras?.extraArrowWeight10 ?? 0;
+
+  if (box || extraArrowSlots > 0) {
+    const usedSlots = Math.max(0, (snapshot?.inventory?.length ?? 0) - freedSlots);
+    const freeSlots = Math.max(0, 100 - usedSlots);
+    const neededSlots = (box ? record.items.length : 0) + extraArrowSlots;
+    if (neededSlots > freeSlots) {
+      throw new Error(`目前角色背包空間不足（剩餘 ${freeSlots} 格，需要 ${neededSlots} 格），請先清理背包。`);
     }
     const weight = snapshot?.weight;
     const weightMax = snapshot?.derived?.weightMax;
     if (Number.isFinite(weight) && Number.isFinite(weightMax) && weightMax > 0) {
-      const heldWeights = new Map((box.heldItems ?? []).map(def => [def.id, def.weight]));
-      let added10 = 0;
-      for (const item of record.items) {
-        const w = weights?.[item.itemId] ?? heldWeights.get(item.itemId);
-        if (Number.isFinite(w) && w > 0) added10 += Math.round(w * 10);
+      const heldWeights = new Map((box?.heldItems ?? []).map(def => [def.id, def.weight]));
+      let added10 = extraArrowWeight10;
+      if (box) {
+        for (const item of record.items) {
+          const w = weights?.[item.itemId] ?? heldWeights.get(item.itemId);
+          if (Number.isFinite(w) && w > 0) added10 += toWeight10(w);
+        }
       }
-      const free10 = Math.max(0, Math.round(weightMax * 10) - Math.round(weight * 10));
+      const current10 = Math.max(0, toWeight10(weight) - freedWeight10);
+      const free10 = Math.max(0, toWeight10(weightMax) - current10);
       if (added10 > free10) {
-        throw new Error(`目前角色剩餘負重不足（剩餘 ${free10 / 10}，交接裝備總重 ${added10 / 10}），請先清理背包或提升負重。`);
+        throw new Error(`目前角色剩餘負重不足（剩餘 ${free10 / 10}，需要 ${added10 / 10}），請先清理背包或提升負重。`);
       }
     }
+  }
+  if (Number.isFinite(extras?.projectedZeny) && Number.isFinite(extras?.requiredZeny) &&
+      extras.projectedZeny < extras.requiredZeny) {
+    throw new Error(`Zeny 不足（預計可用 ${extras.projectedZeny.toLocaleString()} Zeny，倉庫費與買箭需要 ${extras.requiredZeny.toLocaleString()} Zeny）。`);
   }
   const skippedWeaponRule = !snapshot?.character?.rebirth &&
     (record.config?.equipRules ?? []).some(rule => rule.cond?.baseLvAbove === 64 && rule.weapon != null);
