@@ -906,6 +906,7 @@ input[type="checkbox"] { accent-color: var(--gold); }
 #custom-macro-details > summary, #loot-details > summary, #config-share-details > summary { margin: -2px 0; color: var(--title); font-size: 16px; font-weight: 700; cursor: pointer; }
 #custom-macro-details[open] > summary, #loot-details[open] > summary, #config-share-details[open] > summary { margin-bottom: 10px; }
 #loot-applied { margin-inline-start: 8px; padding: 2px 6px; border-radius: 4px; background: var(--using); color: var(--accent); font-size: 12px; }
+#loot-dirty { margin-inline-start: 6px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--gold); background: var(--using); color: var(--title); font-size: 12px; font-weight: 600; }
 @media (max-width: 720px) {
   .macro-head { grid-template-columns: 1fr 1fr; align-items: end; }
   .macro-condition-row { grid-template-columns: 1fr auto; }
@@ -1020,12 +1021,30 @@ main { padding: 2px clamp(0px, 1.5vw, 17px) 18px; gap: 8px; }
 .health-pill.is-warn { border-color: var(--gold); color: var(--title); background: var(--using); }
 .health-pill.is-ok { border-color: var(--accent); color: var(--accent); background: var(--using); }
 .health-list { margin: 0; padding: 6px 10px 8px; list-style: none; display: grid; gap: 5px; font-size: 12px; line-height: 1.5; }
-.health-item { padding: 5px 8px; border-radius: 4px; border-left: 3px solid var(--line); background: var(--paper); color: var(--ink); }
+.health-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 5px 8px; border-radius: 4px; border-left: 3px solid var(--line); background: var(--paper); color: var(--ink); }
+.health-item-text { flex: 1 1 220px; min-width: 0; }
+.health-action { flex: 0 0 auto; }
 .health-item.is-error { border-left-color: var(--danger); color: var(--danger); }
 .health-item.is-warn { border-left-color: var(--gold); }
 .health-item.is-info { border-left-color: var(--accent); color: var(--dim); }
 .health-item.is-ok { border-left-color: var(--accent); background: var(--using); color: var(--title); font-weight: 600; }
 .health-tag { display: inline-block; margin-inline-end: 6px; font-weight: 700; }
+.buff-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 2px 0 6px; }
+.buff-quick-label { font-size: 12px; color: var(--dim); }
+.buff-quick .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--using); color: var(--title); font-weight: 700; }
+.role-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.role-tabs .role-tab { height: 28px; padding: 0 12px; font-size: 13px; background: var(--head); }
+.role-tabs .role-tab[aria-selected="true"] { border-color: var(--accent); background: var(--using); color: var(--title); font-weight: 700; }
+#route > li[draggable="true"] .route-index { cursor: grab; }
+#route > li.is-dragging { opacity: .55; }
+#route > li.is-drag-over { border-color: var(--accent); background: var(--using); }
+.route-overview { margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--head); }
+.route-overview > strong { display: block; margin-bottom: 6px; font-size: 13px; color: var(--title); }
+.route-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 6px; font-size: 12px; line-height: 1.55; }
+.route-flow-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
+.route-flow-profile { padding: 0 5px; border-radius: 4px; background: var(--using); color: var(--accent); font-weight: 700; font-size: 11px; }
+.route-flow-map { color: var(--ink); }
+.route-flow-arrow { color: var(--dim); font-weight: 700; }
 .route-next.route-next-warn { color: var(--danger); font-weight: 600; }
 .map-in-route-badge { display: inline-block; margin-inline-start: 6px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 600; background: var(--using); border: 1px solid var(--line); color: var(--accent); }
 #route > li { margin-bottom: 6px; }
@@ -1294,6 +1313,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
         <label>判斷帶隊角色身上的 Buff（必填）<input id="buff-search" type="text" list="buff-options" autocomplete="off" placeholder="輸入 Buff 或職業名稱搜尋" required></label>
         <datalist id="buff-options"></datalist>
         <input id="buff" type="hidden">
+        <div id="leader-buff-quick" class="buff-quick" hidden></div>
         <p class="section-help">帶隊角色身上缺少所選 Buff 時換圖。</p>
         <div id="route-buff-options">
           <label class="check"><input id="buffBeforeMove" type="checkbox" disabled>換圖前自己補 Buff</label>
@@ -1364,6 +1384,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 <div id="route-sequence-bar" class="route-sequence-bar" hidden>
   <label>依目前編號自訂順序<input id="route-sequence-input" type="text" placeholder="例：1 2 3 4 3 2 1 5" autocomplete="off"></label>
   <button class="btn primary" id="route-sequence-apply" type="button">套用順序</button>
+  <button class="btn" id="route-sequence-pingpong" type="button" title="將目前路線自動接上回程（例：1 2 3 4 → 1 2 3 4 3 2）">一鍵往返</button>
   <p id="route-sequence-status" role="status"></p>
 </div>
 <div id="route-split-banner" class="route-split-banner" role="status" hidden></div>
@@ -1406,7 +1427,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 </section>
 <section id="loot-section">
 <details id="loot-details">
-  <summary>掉落物篩選（選填）<span id="loot-applied" role="status" hidden></span></summary>
+  <summary>掉落物篩選（選填）<span id="loot-applied" role="status" hidden></span><span id="loot-dirty" role="status" hidden>有未套用修改</span></summary>
   <p class="section-help">直接選擇每種道具回城時要不處理、出售或存倉。套用後會一起匯出到巡迴配置。</p>
   <details>
     <summary>匯入原有道具設定（選填）</summary>
@@ -1693,7 +1714,7 @@ SOFTWARE.
     if (options.mode === "follower" && wait && !/^[a-z_]{1,32}$/.test(leaderJob)) {
       throw new Error("請選擇帶隊角色職業，供輔助與協助判斷是否等待。");
     }
-    if (!["top", "bottom"].includes(options.waitPosition)) throw new Error("請選擇死亡後的行為。");
+    if (wait && !["top", "bottom"].includes(options.waitPosition)) throw new Error("請選擇死亡後的行為。");
     const buffBeforeMove = options.mode === "leader" && options.buffBeforeMove;
     const routeBuffLevel = Number(options.routeBuffLevel);
     if (buffBeforeMove && (!Number.isInteger(routeBuffLevel) || routeBuffLevel < 1 || routeBuffLevel > 10)) {
@@ -1793,13 +1814,14 @@ SOFTWARE.
         name: `隊友少於${waitBelow}人_${buffBeforeMove ? "補 Buff 並等待" : "等待"}`,
         cooldownSec: waitCooldown,
         cond: {
-          ...(buffBeforeMove ? {} : {maps: mapIds, inParty: true}),
+          inParty: true,
+          ...(buffBeforeMove ? {} : {maps: mapIds}),
           partyBelow: waitBelow,
           ...(options.mode === "follower" ? {allyJobs: [leaderJob]} : {}),
         },
         steps: [...(buffBeforeMove ? [{do: "skill", skill: buff, lv: routeBuffLevel}] : []), {do: "wait", sec: waitSeconds}],
       }] : [];
-      const waitLast = options.waitPosition === "bottom";
+      const waitLast = options.waitPosition !== "top";
       const followerWait = options.mode === "follower";
       config.macros = [
         ...(followerWait ? waiting : []),
@@ -2016,7 +2038,7 @@ SOFTWARE.
 
   function runHealthCheck(state) {
     const items = [];
-    const add = (level, text) => items.push({level, text});
+    const add = (level, text, action = null) => items.push(action ? {level, text, action} : {level, text});
     const {
       route = [], partySize, targetJob, buff, buffBeforeMove, waitPosition,
       combatMode, groupSize, macros = [], roleActions = {}, customCombat = false,
@@ -2024,23 +2046,24 @@ SOFTWARE.
     } = state;
 
     const pSize = Number(partySize);
+    const isSolo = Number.isInteger(pSize) && pSize === 1;
     if (!Number.isInteger(pSize) || pSize < 1 || pSize > 12) {
-      add("error", "尚未選擇「隊伍總人數」（1～12 人）。");
+      add("error", "尚未選擇「隊伍總人數」（1～12 人）。", {type: "focus", target: "partySize", label: "前往選擇"});
     }
-    if (!targetJob) {
-      add("error", "尚未選擇「帶隊角色職業」。");
+    if (!isSolo && !targetJob) {
+      add("error", "尚未選擇「帶隊角色職業」。", {type: "focus", target: "targetJob", label: "前往選擇"});
     }
     if (!buff) {
-      add("error", "尚未選擇帶隊換圖判斷用的「Buff」（必填）。");
+      add("error", "尚未選擇帶隊換圖判斷用的「Buff」（必填）。", {type: "focus", target: "buff-search", label: "前往選擇"});
     }
-    if (!["top", "bottom"].includes(waitPosition)) {
-      add("error", "尚未選擇「死亡後的行為」。");
+    if (!isSolo && !["top", "bottom"].includes(waitPosition)) {
+      add("error", "尚未選擇「死亡後的行為」。", {type: "focus", target: "waitPosition", label: "前往選擇"});
     }
     if (!route.length) {
-      add("error", "尚未加入任何巡迴地圖。");
+      add("error", "尚未加入任何巡迴地圖。", {type: "focus", target: "map-search", label: "前往選圖"});
     }
-    if (Number.isInteger(pSize) && pSize === 1 && combatMode !== "output") {
-      add("error", "隊伍總人數為 1 人時，不可使用「輔助／協助角色」模式（單人請改選「帶隊角色」）。");
+    if (isSolo && combatMode !== "output") {
+      add("error", "隊伍總人數為 1 人時，不可使用「輔助／協助角色」模式（單人請改選「帶隊角色」）。", {type: "fix-solo-output", label: "切換為帶隊角色"});
     }
 
     // Adjacent duplicate check
@@ -2052,7 +2075,7 @@ SOFTWARE.
           const where = i === route.length - 1
             ? `末站（${String(i + 1).padStart(2, "0")}）回到起點（01）`
             : `第 ${String(i + 1).padStart(2, "0")} 與第 ${String(i + 2).padStart(2, "0")} 站`;
-          add("error", `${where}為同一張地圖「${cur.map.name}」，相鄰不可重複，請穿插其他地圖或調整順序。`);
+          add("error", `${where}為同一張地圖「${cur.map.name}」，相鄰不可重複，請穿插其他地圖或調整順序。`, {type: "focus", target: "route-section", label: "前往巡迴清單"});
           break;
         }
       }
@@ -2073,13 +2096,13 @@ SOFTWARE.
         });
         groups = planned.groups;
         if (groups.length > 10) {
-          add("error", `目前將切分為 ${groups.length} 份配置檔，超過遊戲單角色 10 份上限，請減少重複切段或縮短路線。`);
+          add("error", `目前將切分為 ${groups.length} 份配置檔，超過遊戲單角色 10 份上限，請減少重複切段或縮短路線。`, {type: "focus", target: "route-section", label: "前往巡迴清單"});
         } else if (groups.length > 1) {
           const names = groups.map(g => g.name).join("、");
           add("info", `路線將自動切分為 ${groups.length} 份配置（${names}），遊戲內請嚴格依編號儲存，全員從 01 啟動。`);
         }
       } catch (error) {
-        add("error", error.message);
+        add("error", error.message, {type: "focus", target: "route-section", label: "前往調整"});
       }
     }
 
@@ -2091,7 +2114,7 @@ SOFTWARE.
       );
       if (allowedGroups.size && !allowedBuffs.has(buff)) {
         const buffLabel = buffJobs.flatMap(j => j.buffs).find(([id]) => id === buff)?.[1] ?? buff;
-        add("warn", `已勾選「換圖前自己補 Buff」，但「${buffLabel}」不屬於所選帶隊職業的技能；若角色無法施放會卡在原圖，請取消自補或改選本職 Buff。`);
+        add("warn", `已勾選「換圖前自己補 Buff」，但「${buffLabel}」不屬於所選帶隊職業的技能；若角色無法施放會卡在原圖，請取消自補或改選本職 Buff。`, {type: "fix-disable-precast", label: "取消自補 Buff"});
       }
     }
 
@@ -2100,13 +2123,28 @@ SOFTWARE.
       ...(itemSettings?.config?.restock ?? []).map(r => r.itemId),
       ...(itemSettings?.config?.townBuy ?? []).map(r => r.itemId),
     ]);
+    const roleActionList = Array.isArray(roleActions)
+      ? roleActions
+      : Object.entries(roleActions).map(([label, action]) => ({id: null, label, action}));
     const wingRoles = [];
-    for (const [label, action] of Object.entries(roleActions)) {
-      if (action === "fly" && !suppliedIds.has(601)) wingRoles.push(`${label}（蒼蠅翅膀）`);
-      if (action === "butterfly" && !suppliedIds.has(602)) wingRoles.push(`${label}（蝴蝶翅膀）`);
+    const wingRoleIds = [];
+    for (const {id, label, action} of roleActionList) {
+      if (isSolo && id && id !== "output") continue;
+      if (action === "fly" && !suppliedIds.has(601)) {
+        wingRoles.push(`${label}（蒼蠅翅膀）`);
+        if (id) wingRoleIds.push(id);
+      }
+      if (action === "butterfly" && !suppliedIds.has(602)) {
+        wingRoles.push(`${label}（蝴蝶翅膀）`);
+        if (id) wingRoleIds.push(id);
+      }
     }
     if (wingRoles.length) {
-      add("warn", `${wingRoles.join("、")} 換圖前會消耗翅膀，且未在「掉落物篩選」設定補貨；若背包用完翅膀會導致換圖巨集中斷卡圖，請確認遊戲內已開啟自動補貨或改為「直接換圖」。`);
+      add(
+        "warn",
+        `${wingRoles.join("、")} 換圖前會消耗翅膀，且未在「掉落物篩選」設定補貨；若背包用完翅膀會導致換圖巨集中斷卡圖，請確認遊戲內已開啟自動補貨或改為「直接換圖」。`,
+        {type: "fix-wings-none", roles: wingRoleIds, label: "改為直接換圖"},
+      );
     }
 
     // Maps with 0 targets selected while onlyMvp is enabled
@@ -2114,19 +2152,19 @@ SOFTWARE.
       const emptyTargetMaps = [...new Set(route.filter(r => !r.targets?.length).map(r => r.map.name))];
       if (emptyTargetMaps.length) {
         const sample = emptyTargetMaps.slice(0, 3).join("、") + (emptyTargetMaps.length > 3 ? ` 等 ${emptyTargetMaps.length} 張` : "");
-        add("warn", `已開啟「只找勾選的怪物」，但 ${sample} 目前未勾選任何怪物（走到該圖不會主動打怪，只會待到換圖）。`);
+        add("warn", `已開啟「只找勾選的怪物」，但 ${sample} 目前未勾選任何怪物（走到該圖不會主動打怪，只會待到換圖）。`, {type: "focus", target: "route-section", label: "前往勾選怪物"});
       }
     }
 
     // Per-monster smallRules present while customCombat is off
     const hasPerMapRules = route.some(r => Object.values(r.smallRules ?? {}).some(rule => rule?.action || rule?.escape !== undefined));
     if (hasPerMapRules && !customCombat) {
-      add("warn", "部分地圖已填寫個別怪物規則，但尚未勾選「啟用自訂攻擊、逃生與選怪規則」，匯出時這些個別規則不會生效。");
+      add("warn", "部分地圖已填寫個別怪物規則，但尚未勾選「啟用自訂攻擊、逃生與選怪規則」，匯出時這些個別規則不會生效。", {type: "fix-enable-custom-combat", label: "立即啟用自訂規則"});
     }
 
     // Unapplied loot edits
     if (hasUnsavedLootEdits) {
-      add("warn", "「掉落物篩選」中有尚未按「套用到巡迴」的修改，目前匯出不會包含這些道具設定。");
+      add("warn", "「掉落物篩選」中有尚未按「套用到巡迴」的修改，目前匯出不會包含這些道具設定。", {type: "fix-apply-loot", label: "立即套用到巡迴"});
     }
 
     // Single map note
@@ -2142,7 +2180,7 @@ SOFTWARE.
     return items;
   }
 
-  globalThis.RoConfigBuilder = {validateBase, generate, planSegments, parseRoutePlan, encodeShareToken, decodeShareToken, runHealthCheck};
+  globalThis.RoConfigBuilder = {validateBase, generate, planSegments, parseRoutePlan, encodeShareToken, decodeShareToken, runHealthCheck, jobFamilyBuffGroups};
 })();
 
 </script>
@@ -2192,6 +2230,7 @@ const lootCategories = {
 };
 const lootChoices = [["none", "不處理"], ["sell", "回城賣"], ["store", "存倉"]];
 let itemSettings = null;
+let lootAppliedSnap = null;
 let lootDraft;
 let lootEdit;
 let lootCategory = "";
@@ -2216,12 +2255,13 @@ function readItemSettings(file) {
   return {format: file.format, version: file.version, name: file.name, job: file.job, sections, config};
 }
 
-function editLoot(file) {
+function editLoot(file, {isApplied = false} = {}) {
   lootDraft = structuredClone(file ?? {format:"ro-idle-autoconfig", version:1, name:"道具設定", job:"", sections:["items"], config:{}});
   const {autoStorage, autoSell, restock, townBuy} = lootDraft.config;
   lootEdit = {sell: new Set(autoSell), store: new Set(autoStorage?.items), enableStorage: false,
     warehouse: new Map((restock ?? []).map(rule => [rule.itemId, rule])),
     shop: new Map((townBuy ?? []).map(rule => [rule.itemId, rule]))};
+  if (isApplied) lootAppliedSnap = JSON.stringify(buildItemSettings().config);
   lootUndo = null;
   lootSupplyId = undefined;
   byId("loot-supply-editor").hidden = true;
@@ -2229,6 +2269,20 @@ function editLoot(file) {
   selectLootCategory("");
   byId("loot-search").value = "";
   resetLootResults();
+}
+
+function hasUnsavedLootEdits() {
+  if (!lootEdit) return false;
+  const editedCount = lootEdit.sell.size + lootEdit.store.size + lootEdit.warehouse.size + lootEdit.shop.size;
+  if (!itemSettings && editedCount === 0 && !lootDraft?.config?.lootFilter && !lootDraft?.config?.autoLoot) return false;
+  return JSON.stringify(buildItemSettings().config) !== lootAppliedSnap;
+}
+
+function updateLootDirtyBadge() {
+  const dirty = hasUnsavedLootEdits();
+  const badge = byId("loot-dirty");
+  if (badge) badge.hidden = !dirty;
+  return dirty;
 }
 
 function buildItemSettings() {
@@ -2385,6 +2439,8 @@ function renderLootItems() {
   byId("loot-items").replaceChildren(...rows);
   lootSummary(matches.length);
   if (routeDrops && !route.length) byId("loot-status").textContent = "請先將地圖加入巡迴。";
+  updateLootDirtyBadge();
+  renderHealthCheck();
 }
 
 function setLootHandling(items, mode) {
@@ -2480,10 +2536,12 @@ function closeLootSupply() {
 const lootDetails = byId("loot-details");
 function setItemSettings(settings) {
   itemSettings = settings;
+  lootAppliedSnap = settings ? JSON.stringify(settings.config) : null;
   const applied = byId("loot-applied");
   applied.hidden = !settings;
   applied.textContent = settings ? "已套用到巡迴" : "";
   byId("loot-remove").hidden = !settings;
+  updateLootDirtyBadge();
 }
 const lootCategoryButtons = new Map([["", "全部種類"], ...Object.entries(lootCategories)].map(([key, label]) => {
   const button = element("button", label);
@@ -2502,7 +2560,7 @@ function selectLootCategory(category) {
   for (const [key, button] of lootCategoryButtons) button.setAttribute("aria-pressed", String(key === category));
 }
 lootDetails.ontoggle = () => {
-  if (lootDetails.open) editLoot(itemSettings);
+  if (lootDetails.open && !lootEdit) editLoot(itemSettings, {isApplied: true});
 };
 byId("loot-search").oninput = resetLootResults;
 byId("loot-search").onkeydown = event => {
@@ -2537,10 +2595,13 @@ byId("loot-apply").onclick = () => {
   clearPreview();
   lootDetails.open = false;
 };
-byId("loot-cancel").onclick = () => { lootDetails.open = false; };
+byId("loot-cancel").onclick = () => {
+  editLoot(itemSettings, {isApplied: true});
+  lootDetails.open = false;
+};
 byId("loot-remove").onclick = () => {
   setItemSettings(null);
-  editLoot(null);
+  editLoot(null, {isApplied: true});
   clearPreview();
   byId("loot-status").textContent = "已從巡迴移除道具設定。";
 };
@@ -2822,6 +2883,7 @@ function renderRoute() {
       ? `${route.length} 張地圖（切分 ${groups.length} 份配置）`
       : `${route.length} 張地圖`;
   byId("route-sequence-bar").hidden = route.length < 2;
+  byId("route-sequence-pingpong").disabled = route.length < 3;
   byId("empty-route").hidden = Boolean(route.length);
 
   const banner = byId("route-split-banner");
@@ -2872,11 +2934,45 @@ function renderRoute() {
   const totalByMap = new Map();
   for (const row of route) totalByMap.set(row.map.id, (totalByMap.get(row.map.id) ?? 0) + 1);
   const seenByMap = new Map();
+  let dragRouteIndex = null;
   byId("route").replaceChildren(...route.map((row, index) => {
     const visit = (seenByMap.get(row.map.id) ?? 0) + 1;
     seenByMap.set(row.map.id, visit);
     const meta = stationMeta.get(index);
     const item = element("li", "");
+    item.draggable = route.length > 1;
+    item.addEventListener("dragstart", event => {
+      if (event.target.closest("input, select, button, summary, details, a, textarea")) {
+        event.preventDefault();
+        return;
+      }
+      dragRouteIndex = index;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+      item.classList.add("is-dragging");
+    });
+    item.addEventListener("dragover", event => {
+      if (dragRouteIndex === null || dragRouteIndex === index) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      item.classList.add("is-drag-over");
+    });
+    item.addEventListener("dragleave", () => item.classList.remove("is-drag-over"));
+    item.addEventListener("drop", event => {
+      event.preventDefault();
+      item.classList.remove("is-drag-over");
+      if (dragRouteIndex === null || dragRouteIndex === index) return;
+      const [moved] = route.splice(dragRouteIndex, 1);
+      route.splice(index, 0, moved);
+      dragRouteIndex = null;
+      renderRoute();
+      renderMapChoices();
+      clearPreview();
+    });
+    item.addEventListener("dragend", () => {
+      dragRouteIndex = null;
+      item.classList.remove("is-dragging", "is-drag-over");
+    });
     if (multiProfile && meta?.isGroupStart && index > 0) {
       const splitHead = element("div", "");
       splitHead.className = "route-split-header";
@@ -2888,6 +2984,7 @@ function renderRoute() {
     }
     const order = element("span", String(index + 1).padStart(2, "0"));
     order.className = "route-index";
+    if (route.length > 1) order.title = "可拖曳此卡片調整順序";
     item.append(order);
     const content = element("div", "");
     content.className = "route-content";
@@ -2993,7 +3090,33 @@ function applyRouteSequence() {
   clearPreview();
 }
 
+function applyPingPongRoute() {
+  const statusEl = byId("route-sequence-status");
+  if (route.length < 3) {
+    statusEl.dataset.error = "true";
+    statusEl.textContent = "至少需要 3 站地圖才能產生往返路線（例：1 2 3 → 1 2 3 2）。";
+    return;
+  }
+  const returnLeg = route.slice(1, -1).reverse().map(cloneRouteRow);
+  const combined = [...route, ...returnLeg];
+  for (let i = 0; i < combined.length; i++) {
+    if (combined[i].map.id === combined[(i + 1) % combined.length].map.id) {
+      statusEl.dataset.error = "true";
+      const where = i === combined.length - 1 ? "末站回到起點" : `第 ${i + 1} 與第 ${i + 2} 站`;
+      statusEl.textContent = `無法直接往返：${where}為同一張地圖「${combined[i].map.name}」，請先調整目前順序。`;
+      return;
+    }
+  }
+  route.splice(0, route.length, ...combined);
+  statusEl.dataset.error = "false";
+  statusEl.textContent = `已產生往返路線（共 ${route.length} 站），系統已自動切分配置檔。`;
+  renderRoute();
+  renderMapChoices();
+  clearPreview();
+}
+
 byId("route-sequence-apply").onclick = applyRouteSequence;
+byId("route-sequence-pingpong").onclick = applyPingPongRoute;
 byId("route-sequence-input").addEventListener("keydown", event => {
   if (event.key !== "Enter" || event.isComposing) return;
   event.preventDefault();
@@ -3249,6 +3372,56 @@ function populateLeaderBuffs(selected = "") {
   const current = choices.find(option => option.dataset.buff === selected);
   byId("buff-search").value = current?.value ?? "";
   byId("buff").value = current?.dataset.buff ?? "";
+  renderLeaderBuffQuick();
+}
+
+function renderLeaderBuffQuick() {
+  const container = byId("leader-buff-quick");
+  if (!container) return;
+  const job = value("targetJob");
+  const currentBuff = value("buff");
+  const allowedGroups = new Set(RoConfigBuilder.jobFamilyBuffGroups?.[job] ?? []);
+  if (!job || !buffJobs.length || !allowedGroups.size) {
+    container.hidden = true;
+    container.replaceChildren();
+    return;
+  }
+  const seen = new Set();
+  const selfBuffs = [];
+  for (const group of buffJobs) {
+    if (!allowedGroups.has(group.id)) continue;
+    for (const [id, name, meta] of group.buffs) {
+      if (meta?.scope === "others" || seen.has(id)) continue;
+      seen.add(id);
+      selfBuffs.push({id, name, jobName: group.name});
+    }
+  }
+  if (!selfBuffs.length) {
+    container.hidden = true;
+    container.replaceChildren();
+    return;
+  }
+  const label = element("span", "本職常用自補 Buff：");
+  label.className = "buff-quick-label";
+  const buttons = selfBuffs.map(({id, name, jobName}) => {
+    const btn = element("button", name);
+    btn.type = "button";
+    btn.className = "btn tiny";
+    btn.setAttribute("aria-pressed", String(id === currentBuff));
+    btn.title = `${name} · ${jobName}`;
+    btn.onclick = () => {
+      const option = [...byId("buff-options").options].find(o => o.dataset.buff === id);
+      const search = byId("buff-search");
+      search.value = option?.value ?? `${name} · ${jobName}`;
+      search.setCustomValidity("");
+      byId("buff").value = id;
+      applyRouteBuffDefaults();
+      renderLeaderBuffQuick();
+    };
+    return btn;
+  });
+  container.hidden = false;
+  container.replaceChildren(label, ...buttons);
 }
 
 byId("buff-search").oninput = () => {
@@ -3258,6 +3431,7 @@ byId("buff-search").oninput = () => {
   input.setCustomValidity(query && !match ? "請從搜尋結果選擇一個 Buff。" : "");
   byId("buff").value = match?.dataset.buff ?? "";
   applyRouteBuffDefaults();
+  renderLeaderBuffQuick();
 };
 
 function applyRouteBuffDefaults() {
@@ -3270,6 +3444,7 @@ function applyRouteBuffDefaults() {
 }
 
 byId("buff").addEventListener("change", applyRouteBuffDefaults);
+byId("targetJob").addEventListener("change", renderLeaderBuffQuick);
 
 let customMacros = [];
 const macroStepLabels = {skill: "放技能", item: "用道具", equip: "換上裝備", unequip: "卸下裝備", wait: "等待", fly: "用蒼蠅翅膀", butterfly: "用蝴蝶翅膀", town: "回城補給後回來", macro: "接著執行巨集", homunFeed: "餵生命體", arrow: "製作箭矢", produce: "製作物品", quiver: "做成箭矢筒", log: "在紀錄顯示", stop: "停止掛機"};
@@ -3729,6 +3904,20 @@ function routeMode() {
 }
 
 function updateOptions() {
+  const isSolo = Number(value("partySize")) === 1;
+  byId("leader-death-settings").hidden = isSolo;
+  byId("waitPosition").required = !isSolo;
+  byId("targetJob").required = !isSolo;
+  const downloadAll = byId("download-all-modes");
+  if (downloadAll) {
+    downloadAll.disabled = isSolo;
+    downloadAll.title = isSolo ? "單人模式僅需帶隊角色，請直接點「產生預覽」並「下載 ZIP」" : "";
+  }
+  if (isSolo && byId("combatMode").value !== "output") {
+    byId("combatMode").value = "output";
+  }
+  if (typeof syncRoleTabsForSolo === "function") syncRoleTabsForSolo(isSolo);
+  renderLeaderBuffQuick();
   byId("custom-combat-fields").disabled = !checked("customCombat");
   for (const id of ["support", "assist"]) {
     byId(`role-${id}-custom-combat-fields`).disabled = !checked(`role-${id}-customCombat`);
@@ -3822,6 +4011,73 @@ function renderOperations() {
   return fragment;
 }
 
+function handleHealthAction(action) {
+  if (!action) return;
+  if (action.type === "focus") {
+    if (byId("generator").hasAttribute("data-guided")) setGuide(false);
+    const el = byId(action.target);
+    if (!el) return;
+    const rolePanel = el.closest("[data-role-panel]");
+    if (rolePanel && typeof setActiveRoleTab === "function") {
+      setActiveRoleTab(rolePanel.dataset.rolePanel);
+    }
+    el.scrollIntoView?.({behavior: "smooth", block: "center"});
+    if (typeof el.focus === "function" && el.matches("input, select, textarea, button")) {
+      el.focus({preventScroll: true});
+    }
+    return;
+  }
+  if (action.type === "fix-solo-output") {
+    byId("combatMode").value = "output";
+    updateOptions();
+    renderRoute();
+    clearPreview();
+    return;
+  }
+  if (action.type === "fix-disable-precast") {
+    byId("buffBeforeMove").checked = false;
+    updateOptions();
+    clearPreview();
+    return;
+  }
+  if (action.type === "fix-wings-none") {
+    const targets = action.roles?.length ? action.roles : combatRoles.map(r => r.id);
+    for (const id of targets) {
+      const sel = byId(`role-${id}-action`);
+      if (sel && (sel.value === "fly" || sel.value === "butterfly")) {
+        sel.value = "none";
+        sel.onchange();
+      }
+    }
+    clearPreview();
+    return;
+  }
+  if (action.type === "fix-enable-custom-combat") {
+    const roleId = byId("combatMode")?.value || "output";
+    const checkbox = byId(roleId === "output" ? "customCombat" : `role-${roleId}-customCombat`);
+    if (checkbox) {
+      checkbox.checked = true;
+      const details = checkbox.closest("details");
+      if (details) details.open = true;
+    }
+    updateOptions();
+    renderRoute();
+    clearPreview();
+    return;
+  }
+  if (action.type === "fix-apply-loot") {
+    if (lootSupplyId !== undefined) {
+      lootDetails.open = true;
+      byId("loot-supply-status").textContent = "請先儲存或取消正在編輯的補貨設定。";
+      byId("loot-supply-source").focus();
+      return;
+    }
+    setItemSettings(buildItemSettings());
+    lootDetails.open = false;
+    clearPreview();
+  }
+}
+
 function renderHealthCheck() {
   const host = byId("health-check");
   if (!host || !byId("role-output-action")) return;
@@ -3835,16 +4091,11 @@ function renderHealthCheck() {
     const parsed = JSON.parse(value("macros"));
     if (Array.isArray(parsed)) macros = parsed;
   } catch {}
-  const roleActions = Object.fromEntries(combatRoles.map(({id, label}) => [label, byId(`role-${id}-action`)?.value ?? ""]));
-  let hasUnsavedLootEdits = false;
-  if (lootEdit) {
-    const editedCount = lootEdit.sell.size + lootEdit.store.size + lootEdit.warehouse.size + lootEdit.shop.size;
-    if (editedCount > 0) {
-      const currentSnap = JSON.stringify(buildItemSettings().config);
-      const appliedSnap = itemSettings ? JSON.stringify(itemSettings.config) : "";
-      hasUnsavedLootEdits = currentSnap !== appliedSnap;
-    }
-  }
+  const roleActions = combatRoles.map(({id, label}) => ({
+    id,
+    label,
+    action: byId(`role-${id}-action`)?.value ?? "",
+  }));
   const findings = RoConfigBuilder.runHealthCheck({
     route,
     partySize: value("partySize"),
@@ -3859,7 +4110,7 @@ function renderHealthCheck() {
     customCombat: customCombatChecked,
     onlyMvp: onlyMvpChecked,
     itemSettings,
-    hasUnsavedLootEdits,
+    hasUnsavedLootEdits: hasUnsavedLootEdits(),
     buffJobs,
   });
 
@@ -3899,16 +4150,64 @@ function renderHealthCheck() {
   for (const item of findings) {
     const li = element("li", "");
     li.className = `health-item is-${item.level}`;
+    const body = element("span", "");
+    body.className = "health-item-text";
     const tag = element("span", `[${labels[item.level]}]`);
     tag.className = "health-tag";
-    li.append(tag, item.text);
+    body.append(tag, item.text);
+    li.append(body);
+    if (item.action) {
+      const btn = element("button", item.action.label);
+      btn.type = "button";
+      btn.className = "btn tiny health-action";
+      btn.onclick = () => handleHealthAction(item.action);
+      li.append(btn);
+    }
     list.append(li);
   }
   host.replaceChildren(head, list);
 }
 
+function renderRouteOverview() {
+  const box = element("div", "");
+  box.className = "route-overview";
+  const totalStops = results.reduce((sum, r) => sum + r.segment.length, 0);
+  box.append(element("strong", `路線循環總覽（共 ${totalStops} 站 · ${results.length} 份配置）`));
+  const flow = element("div", "");
+  flow.className = "route-flow";
+  results.forEach(({profile, segment}, groupIndex) => {
+    if (groupIndex > 0) {
+      const sep = element("span", "⇄");
+      sep.className = "route-flow-arrow";
+      flow.append(sep);
+    }
+    const group = element("span", "");
+    group.className = "route-flow-group";
+    const badge = element("span", `配置 ${profile.name}`);
+    badge.className = "route-flow-profile";
+    group.append(badge);
+    segment.forEach((row, pos) => {
+      if (pos > 0) {
+        const arrow = element("span", "→");
+        arrow.className = "route-flow-arrow";
+        group.append(arrow);
+      }
+      const chip = element("span", row.map.name);
+      chip.className = "route-flow-map";
+      group.append(chip);
+    });
+    flow.append(group);
+  });
+  const loopNote = element("span", totalStops > 1 ? `↻ 配置 ${results[0].profile.name}` : "· 定點掛機");
+  loopNote.className = "route-flow-arrow";
+  flow.append(loopNote);
+  box.append(flow);
+  return box;
+}
+
 function renderPreview() {
   const nodes = [];
+  if (results.length) nodes.push(renderRouteOverview());
   if (results.length > 1) {
     const names = results.map(r => r.profile.name).join("、");
     const checklist = element("aside", "");
@@ -4064,6 +4363,28 @@ function makeNamedChoices(labels) {
 const routeSkillChoices = makeNamedChoices(routeSkillNames);
 const routeItemChoices = makeNamedChoices(routeItemNames);
 
+let activeRoleTab = "output";
+const roleTabButtons = new Map();
+const roleTabPanels = new Map();
+
+function setActiveRoleTab(id) {
+  if (!roleTabPanels.has(id)) id = "output";
+  activeRoleTab = id;
+  for (const [roleId, tab] of roleTabButtons) {
+    tab.setAttribute("aria-selected", String(roleId === activeRoleTab));
+  }
+  for (const [roleId, panel] of roleTabPanels) {
+    panel.hidden = roleId !== activeRoleTab;
+  }
+}
+
+function syncRoleTabsForSolo(isSolo) {
+  const tabsBar = byId("role-tabs");
+  if (!tabsBar) return;
+  tabsBar.hidden = isSolo;
+  if (isSolo) setActiveRoleTab("output");
+}
+
 function renderRoleSettings() {
   for (const [type, choices] of [["skill", routeSkillChoices], ["item", routeItemChoices]]) {
     const list = element("datalist", "");
@@ -4071,11 +4392,31 @@ function renderRoleSettings() {
     for (const name of choices.keys()) list.append(new Option(name, name));
     byId("role-settings").append(list);
   }
+  const tabsBar = element("div", "");
+  tabsBar.id = "role-tabs";
+  tabsBar.className = "role-tabs";
+  tabsBar.setAttribute("role", "tablist");
+  tabsBar.setAttribute("aria-label", "角色設定分頁");
+  for (const {id, label} of combatRoles) {
+    const tab = element("button", label);
+    tab.type = "button";
+    tab.className = "btn role-tab";
+    tab.setAttribute("role", "tab");
+    tab.dataset.roleTab = id;
+    tab.onclick = () => setActiveRoleTab(id);
+    roleTabButtons.set(id, tab);
+    tabsBar.append(tab);
+  }
+  byId("role-settings").append(tabsBar);
   const combatTemplate = byId("role-combat-template");
   const routeAdvanced = byId("advanced-route");
   const combatSource = combatTemplate.cloneNode(true);
   for (const {id, label, help} of combatRoles) {
     const panel = element("fieldset", "");
+    panel.id = `role-panel-${id}`;
+    panel.dataset.rolePanel = id;
+    panel.setAttribute("role", "tabpanel");
+    roleTabPanels.set(id, panel);
     panel.append(element("legend", label), Object.assign(element("p", help), {className: "section-help role-description"}));
     const fields = element("div", "");
     fields.className = "fields";
@@ -4196,6 +4537,7 @@ function roleDepartureAction(id) {
 }
 
 renderRoleSettings();
+setActiveRoleTab("output");
 
 function combatOptionsForRole(id) {
   const field = name => id === "output" ? name : `role-${id}-${name}`;
@@ -4369,7 +4711,15 @@ byId("guide-next").onclick = () => {
   } else if (id === "route-section" && !route.length) {
     return fail("請先將至少一張地圖加入巡迴。");
   } else if (id === "monster-section") {
+    const isSolo = Number(value("partySize")) === 1;
     for (const field of byId(id).querySelectorAll("input, select")) {
+      if (field.disabled) continue;
+      const rolePanel = field.closest("[data-role-panel]");
+      if (isSolo && rolePanel && rolePanel.dataset.rolePanel !== "output") continue;
+      if (isSolo && field.closest("#leader-death-settings")) continue;
+      if (rolePanel && rolePanel.hidden && !field.checkValidity()) {
+        setActiveRoleTab(rolePanel.dataset.rolePanel);
+      }
       if (!field.reportValidity()) return;
     }
   }
@@ -4385,6 +4735,10 @@ byId("generator").addEventListener("keydown", event => {
 });
 
 byId("generator").addEventListener("invalid", event => {
+  const rolePanel = event.target.closest?.("[data-role-panel]");
+  if (rolePanel && rolePanel.hidden) {
+    setActiveRoleTab(rolePanel.dataset.rolePanel);
+  }
   if (!byId("generator").hasAttribute("data-guided")) return;
   const section = event.target.closest("section");
   const step = guideSteps.findIndex(([id]) => id === section?.id);
@@ -4437,10 +4791,48 @@ function buildFullConfigObject(includeSelected = false) {
 
 let defaultFieldValues = new Map();
 
+function sanitizeRouteCondition(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const clean = {};
+  if (Array.isArray(raw.or)) {
+    const cleanGroups = [];
+    for (const group of raw.or.slice(0, 5)) {
+      if (!group || typeof group !== "object" || Array.isArray(group)) continue;
+      const g = {};
+      for (const [k, v] of Object.entries(group)) {
+        if (k === "__proto__" || k === "constructor" || k === "prototype" || k === "or") continue;
+        const def = macroConditionByKey.get(k);
+        if (!def) continue;
+        const type = def[3];
+        if (type === "boolean") {
+          if (typeof v === "boolean") g[k] = v;
+        } else if (type === "number" || type === "percent") {
+          if (typeof v === "number" && Number.isFinite(v)) g[k] = v;
+        } else if (type === "list" || type === "doing") {
+          if (Array.isArray(v)) {
+            const list = v.filter(x => typeof x === "string" || (typeof x === "number" && Number.isFinite(x))).slice(0, 100);
+            if (list.length) g[k] = list;
+          }
+        } else if (type === "item") {
+          if (v && typeof v === "object" && !Array.isArray(v) &&
+              Number.isSafeInteger(v.itemId) && v.itemId > 0 &&
+              Number.isSafeInteger(v.qty) && v.qty > 0) {
+            g[k] = {itemId: v.itemId, qty: v.qty};
+          }
+        }
+      }
+      if (Object.keys(g).length) cleanGroups.push(g);
+    }
+    if (cleanGroups.length) clean.or = cleanGroups;
+  }
+  return clean;
+}
+
 function resetAllFieldsToDefaults() {
   route.length = 0;
   selectedMaps.clear();
   customMacros = [];
+  lootEdit = undefined;
   setItemSettings(null);
   lootDetails.open = false;
   for (const field of draftFields()) {
@@ -4455,6 +4847,7 @@ function resetAllFieldsToDefaults() {
     byId(`role-${id}-action`).onchange();
     renderRouteOr(id);
   }
+  setActiveRoleTab("output");
 }
 
 function applyFullConfigObject(draft, {resetFirst = false} = {}) {
@@ -4514,11 +4907,17 @@ function applyFullConfigObject(draft, {resetFirst = false} = {}) {
       .map(normalizeMacroActions);
     byId("macros").value = JSON.stringify(customMacros, null, 2);
   }
-  if (draft.itemSettings) setItemSettings(readItemSettings(draft.itemSettings));
-  else if (resetFirst) setItemSettings(null);
-  if (draft.routeCondition) routeConditionEditor.cond = structuredClone(draft.routeCondition);
+  if (draft.itemSettings) {
+    lootEdit = undefined;
+    setItemSettings(readItemSettings(draft.itemSettings));
+    if (lootDetails.open) editLoot(itemSettings, {isApplied: true});
+  } else if (resetFirst) {
+    lootEdit = undefined;
+    setItemSettings(null);
+  }
+  if (draft.routeCondition) routeConditionEditor.cond = sanitizeRouteCondition(draft.routeCondition);
   for (const {id} of combatRoles) {
-    if (draft.roleRouteConditions?.[id]) roleRouteConditions[id].cond = structuredClone(draft.roleRouteConditions[id]);
+    if (draft.roleRouteConditions?.[id]) roleRouteConditions[id].cond = sanitizeRouteCondition(draft.roleRouteConditions[id]);
     if (id !== "output" && fields) {
       for (const name of ["departure", "routeWait"]) {
         const field = byId(`role-${id}-${name}`);
